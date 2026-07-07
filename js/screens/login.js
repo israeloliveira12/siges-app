@@ -45,22 +45,22 @@ function renderLoginScreen() {
             </div>
             <div class="field-row">
               <div class="field"><label>CPF</label><input type="text" id="f-cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" required></div>
-              <div class="field"><label>Telefone / WhatsApp</label><input type="tel" id="f-phone" placeholder="(00) 00000-0000"></div>
+              <div class="field"><label>Telefone / WhatsApp</label><input type="tel" id="f-phone" placeholder="(00) 00000-0000" required></div>
             </div>
             <div class="field-row">
-              <div class="field"><label>Empresa</label><input type="text" id="f-company"></div>
-              <div class="field"><label>Cargo</label><input type="text" id="f-job-title"></div>
+              <div class="field"><label>Empresa</label><input type="text" id="f-company" required></div>
+              <div class="field"><label>Cargo</label><input type="text" id="f-job-title" required></div>
             </div>
-            <div class="field"><label>Salário (R$)</label><input type="text" id="f-salary" placeholder="0,00"></div>
+            <div class="field"><label>Salário (R$)</label><input type="text" id="f-salary" placeholder="0,00" required></div>
             <div class="field">
               <label>Chave Pix</label>
-              <input type="text" id="f-pix-key">
+              <input type="text" id="f-pix-key" required>
               <span class="help">Atenção: o CPF cadastrado acima deve ser o mesmo CPF do dono da chave Pix.</span>
             </div>
           ` : ''}
           <div class="field">
-            <label>E-mail</label>
-            <input type="email" id="f-email" autocomplete="email" required>
+            <label>${authMode === 'login' ? 'E-mail ou CPF' : 'E-mail'}</label>
+            <input type="${authMode === 'login' ? 'text' : 'email'}" id="f-email" autocomplete="email" required>
           </div>
           <div class="field">
             <label>Senha</label>

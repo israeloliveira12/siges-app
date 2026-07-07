@@ -65,26 +65,54 @@ function paintWizard() {
   else paintWizardStep3();
 }
 
+let wizClientSearch = '';
+let wizSelectedClientId = null;
+
 function paintWizardStep1() {
+  wizSelectedClientId = wiz.client_id || null;
   const body = document.getElementById('wizard-body');
   body.innerHTML = `
     <div class="card">
       <h3>Selecione o cliente</h3>
       <div class="field mt-14">
-        <select id="w-client">
-          <option value="">Selecione uma opção</option>
-          ${wizClientsList.map((c) => `<option value="${c.profile_id}" ${wiz.client_id === c.profile_id ? 'selected' : ''}>${escapeHtml((c.profiles || {}).full_name || (c.profiles || {}).email)} — limite ${formatMoney(c.credit_limit)}</option>`).join('')}
-        </select>
+        <input type="text" id="w-client-search" placeholder="Buscar cliente por nome ou e-mail..." value="${escapeHtml(wizClientSearch)}">
       </div>
+      <div id="w-client-list" style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius-sm)"></div>
       <div class="modal-foot" style="border:none;padding:14px 0 0">
         <button class="btn btn-primary" id="w-next">Próximo ${Icons.chevronRight}</button>
       </div>
     </div>
   `;
+
+  function paintClientList() {
+    const term = wizClientSearch.trim().toLowerCase();
+    const filtered = wizClientsList.filter((c) => {
+      if (!term) return true;
+      const p = c.profiles || {};
+      return (p.full_name || '').toLowerCase().includes(term) || (p.email || '').toLowerCase().includes(term);
+    });
+    const listEl = document.getElementById('w-client-list');
+    if (!filtered.length) {
+      listEl.innerHTML = `<div class="empty-state" style="padding:20px"><p>Nenhum cliente encontrado.</p></div>`;
+      return;
+    }
+    listEl.innerHTML = filtered.map((c) => `
+      <div class="w-client-row" data-id="${c.profile_id}" style="padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;${wizSelectedClientId === c.profile_id ? 'background:var(--brand-soft)' : ''}">
+        <strong>${escapeHtml((c.profiles || {}).full_name || (c.profiles || {}).email)}</strong>
+        <div class="text-sm text-soft">${escapeHtml((c.profiles || {}).email || '')} — limite ${formatMoney(c.credit_limit)}</div>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('.w-client-row').forEach((row) => {
+      row.onclick = () => { wizSelectedClientId = row.dataset.id; paintClientList(); };
+    });
+  }
+  paintClientList();
+
+  document.getElementById('w-client-search').oninput = debounce((e) => { wizClientSearch = e.target.value; paintClientList(); }, 200);
+
   document.getElementById('w-next').onclick = async () => {
-    const sel = document.getElementById('w-client');
-    if (!sel.value) { showToast('Selecione um cliente.'); return; }
-    const c = wizClientsList.find((x) => x.profile_id === sel.value);
+    if (!wizSelectedClientId) { showToast('Selecione um cliente.'); return; }
+    const c = wizClientsList.find((x) => x.profile_id === wizSelectedClientId);
     wiz.client_id = c.profile_id;
     wiz.client_name = (c.profiles || {}).full_name || (c.profiles || {}).email;
     wiz.client_limit = Number(c.credit_limit);
@@ -138,13 +166,19 @@ function paintWizardStep2() {
         </div>
       </div>
 
-      <div class="field">
-        <label>Tipo de vencimento *</label>
-        <select id="w-due-type">
-          <option value="mensal" ${wiz.due_type === 'mensal' ? 'selected' : ''}>Mensal</option>
-          <option value="quinzenal" ${wiz.due_type === 'quinzenal' ? 'selected' : ''}>Quinzenal</option>
-          <option value="semanal" ${wiz.due_type === 'semanal' ? 'selected' : ''}>Semanal</option>
-        </select>
+      <div class="field-row">
+        <div class="field">
+          <label>Tipo de vencimento *</label>
+          <select id="w-due-type">
+            <option value="mensal" ${wiz.due_type === 'mensal' ? 'selected' : ''}>Mensal</option>
+            <option value="quinzenal" ${wiz.due_type === 'quinzenal' ? 'selected' : ''}>Quinzenal</option>
+            <option value="personalizado" ${wiz.due_type === 'personalizado' ? 'selected' : ''}>Personalizado (dias)</option>
+          </select>
+        </div>
+        <div class="field ${wiz.due_type === 'personalizado' ? '' : 'hidden'}" id="w-custom-days-field">
+          <label>Intervalo (dias)</label>
+          <input type="number" min="1" step="1" id="w-custom-days" value="${wiz.custom_interval_days || 3}">
+        </div>
       </div>
 
       <div class="card" style="background:var(--bg);box-shadow:none;margin:16px 0">
@@ -178,7 +212,8 @@ function paintWizardStep2() {
         <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="w-late-fee" value="${wiz.late_fee_percent}"></div>
         <div class="field"><label>Juros por atraso (% a.m.)</label><input type="number" min="0" step="0.01" id="w-late-interest" value="${wiz.late_interest_percent}"></div>
       </div>
-      <div class="field"><label>Observações</label><textarea id="w-observations">${escapeHtml(wiz.observations)}</textarea></div>
+      <span class="help">Aplicados no momento do recebimento, proporcionalmente aos dias em atraso da parcela/ciclo (juros) + valor fixo (multa) — o gerente pode ajustar ou zerar em cada recebimento.</span>
+      <div class="field mt-14"><label>Observações</label><textarea id="w-observations">${escapeHtml(wiz.observations)}</textarea></div>
 
       <div class="modal-foot" style="border:none;padding:14px 0 0">
         <button class="btn btn-ghost" id="w-back">${Icons.chevronLeft} Voltar</button>
@@ -213,7 +248,10 @@ function paintWizardStep2() {
   };
   principalInput.oninput = () => { recomputeNet(); refreshRateHint(); };
   feeAmountInput.oninput = recomputeNet;
-  document.getElementById('w-due-type').onchange = refreshRateHint;
+  document.getElementById('w-due-type').onchange = (e) => {
+    document.getElementById('w-custom-days-field').classList.toggle('hidden', e.target.value !== 'personalizado');
+    refreshRateHint();
+  };
 
   function refreshRateHint() {
     wiz.principal_amount = getMoneyValue(principalInput);
@@ -231,6 +269,7 @@ function paintWizardStep2() {
     wiz.interest_rate = Number(document.getElementById('w-rate').value || 0);
     wiz.installments_count = Math.max(1, parseInt(document.getElementById('w-installments').value || '1', 10));
     wiz.due_type = document.getElementById('w-due-type').value;
+    wiz.custom_interval_days = wiz.due_type === 'personalizado' ? Math.max(1, parseInt(document.getElementById('w-custom-days').value || '3', 10)) : null;
     wiz.has_operational_fee = document.getElementById('w-fee-toggle').checked;
     wiz.operational_fee_amount = wiz.has_operational_fee ? getMoneyValue(document.getElementById('w-fee-amount')) : 0;
     wiz.allows_renewal = document.getElementById('w-renewal').checked;
@@ -250,6 +289,7 @@ function paintWizardStep2() {
       p_principal: wiz.principal_amount, p_interest_rate: wiz.interest_rate,
       p_installments_count: wiz.installments_count, p_due_type: wiz.due_type,
       p_first_installment_date: wiz.first_installment_date,
+      p_custom_interval_days: wiz.custom_interval_days,
     });
     if (error) { showToast('Erro ao calcular parcelas: ' + error.message); return; }
     wiz.installmentsPreview = data || [];
@@ -271,7 +311,7 @@ function paintWizardStep3() {
         <div class="stat-card"><div class="label">Cliente</div><div class="value" style="font-size:15px">${escapeHtml(wiz.client_name)}</div></div>
         <div class="stat-card"><div class="label">Valor liberado</div><div class="value mono">${formatMoney(wiz.principal_amount)}</div></div>
         <div class="stat-card"><div class="label">Juros</div><div class="value mono">${formatNumber(wiz.interest_rate, 2)}% (Simples)</div></div>
-        <div class="stat-card"><div class="label">Parcelas</div><div class="value mono">${wiz.installments_count}x (${dueTypeLabel(wiz.due_type)})</div></div>
+        <div class="stat-card"><div class="label">Parcelas</div><div class="value mono">${wiz.installments_count}x (${dueTypeLabel(wiz.due_type, wiz.custom_interval_days)})</div></div>
         <div class="stat-card"><div class="label">Valor total a receber</div><div class="value mono">${formatMoney(totalAmount)}</div></div>
         <div class="stat-card"><div class="label">Total a desembolsar (contrato + taxa)</div><div class="value mono">${formatMoney(Number(wiz.principal_amount) + (wiz.has_operational_fee ? Number(wiz.operational_fee_amount) : 0))}</div></div>
       </div>
@@ -280,17 +320,16 @@ function paintWizardStep3() {
         <h3 style="margin:0">Parcelas editáveis</h3>
         <button class="btn btn-outline btn-sm" id="w-reset-installments">${Icons.renew} Resetar</button>
       </div>
+      <p class="text-sm text-soft mt-8">O capital de cada parcela é fixo (parte do valor emprestado); ao editar o valor da parcela, o sistema recalcula os juros automaticamente (valor da parcela − capital).</p>
       <div class="card mt-8" style="padding:0">
         <table class="data-table table-scroll">
-          <thead><tr><th>Parcela</th><th>Vencimento</th><th>Capital</th><th>Juros</th><th>Total</th></tr></thead>
+          <thead><tr><th>Parcela</th><th>Vencimento</th><th>Valor da parcela</th></tr></thead>
           <tbody id="w-installments-body">
             ${wiz.installmentsPreview.map((inst, idx) => `
               <tr>
                 <td data-label="Parcela">${inst.sequence_number}</td>
                 <td data-label="Vencimento"><input type="date" class="inst-date" data-idx="${idx}" value="${inst.due_date}"></td>
-                <td data-label="Capital"><input type="number" step="0.01" class="inst-principal" data-idx="${idx}" value="${inst.principal_share}"></td>
-                <td data-label="Juros"><input type="number" step="0.01" class="inst-interest" data-idx="${idx}" value="${inst.interest_share}"></td>
-                <td data-label="Total" class="mono inst-total" data-idx="${idx}">${formatMoney(Number(inst.principal_share) + Number(inst.interest_share))}</td>
+                <td data-label="Valor da parcela"><input type="text" class="inst-total" data-idx="${idx}"></td>
               </tr>
             `).join('')}
           </tbody>
@@ -307,13 +346,16 @@ function paintWizardStep3() {
 
   function wireRowInputs() {
     document.querySelectorAll('.inst-date').forEach((el) => el.onchange = () => { wiz.installmentsPreview[el.dataset.idx].due_date = el.value; });
-    document.querySelectorAll('.inst-principal, .inst-interest').forEach((el) => {
+    document.querySelectorAll('.inst-total').forEach((el) => {
+      const inst = wiz.installmentsPreview[el.dataset.idx];
+      setMoneyValue(el, Number(inst.principal_share) + Number(inst.interest_share));
+      attachMoneyMask(el);
       el.oninput = () => {
         const idx = el.dataset.idx;
-        wiz.installmentsPreview[idx].principal_share = Number(document.querySelector(`.inst-principal[data-idx="${idx}"]`).value || 0);
-        wiz.installmentsPreview[idx].interest_share = Number(document.querySelector(`.inst-interest[data-idx="${idx}"]`).value || 0);
-        const total = wiz.installmentsPreview[idx].principal_share + wiz.installmentsPreview[idx].interest_share;
-        document.querySelector(`.inst-total[data-idx="${idx}"]`).textContent = formatMoney(total);
+        const newTotal = getMoneyValue(el);
+        // capital é fixo (parte do valor emprestado) — juros absorve a
+        // diferença quando o gerente edita o valor total da parcela.
+        wiz.installmentsPreview[idx].interest_share = Math.round((newTotal - Number(wiz.installmentsPreview[idx].principal_share)) * 100) / 100;
       };
     });
   }
@@ -324,6 +366,7 @@ function paintWizardStep3() {
       p_principal: wiz.principal_amount, p_interest_rate: wiz.interest_rate,
       p_installments_count: wiz.installments_count, p_due_type: wiz.due_type,
       p_first_installment_date: wiz.first_installment_date,
+      p_custom_interval_days: wiz.custom_interval_days,
     });
     if (error) { showToast('Erro: ' + error.message); return; }
     wiz.installmentsPreview = data || [];
@@ -352,6 +395,7 @@ function paintWizardStep3() {
         p_late_interest_percent: wiz.late_interest_percent,
         p_observations: wiz.observations || null,
         p_origin_request_id: wiz.origin_request_id || null,
+        p_custom_interval_days: wiz.custom_interval_days,
         p_installments_override: wiz.installmentsPreview.map((i) => ({
           sequence_number: i.sequence_number, due_date: i.due_date,
           principal_share: i.principal_share, interest_share: i.interest_share,

@@ -4,6 +4,15 @@
 
 const MESES_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
+// Remove acentos/caracteres especiais para uso em nome de arquivo
+function slugifyFilePart(text) {
+  return String(text || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
 // Desenha uma nota promissória na página ATUAL do doc (não cria/salva nada) —
 // usada para montar um único PDF com várias páginas, uma por parcela.
 function drawPromissoriaPage(doc, { contract, installment, clientProfile, companyName }) {
@@ -210,5 +219,6 @@ async function gerarExtratoPDF({ contract, installments, clientProfile, score, c
   });
 
   addExtratoFooter(doc, companyName);
-  doc.save(`extrato-contrato-${contract.contract_number}.pdf`);
+  const nomeArquivo = slugifyFilePart(clientProfile && clientProfile.full_name);
+  doc.save(`extrato_${nomeArquivo ? nomeArquivo + '_' : ''}contrato_${contract.contract_number}.pdf`);
 }

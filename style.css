@@ -341,9 +341,12 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   background: var(--bad); border: 2px solid #fff;
 }
 .notif-panel {
-  position: absolute; right: 0; top: 46px; width: 340px; max-height: 420px; overflow-y: auto;
+  position: absolute; right: 0; top: 46px; width: 340px; max-width: calc(100vw - 24px); max-height: 420px; overflow-y: auto;
   background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 16px 40px rgba(0,0,0,.18);
   z-index: 50;
+}
+@media (max-width: 480px) {
+  .notif-panel { position: fixed; left: 12px; right: 12px; top: 60px; width: auto; max-width: none; }
 }
 .notif-item { padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .notif-item:last-child { border-bottom: none; }

@@ -133,21 +133,21 @@ function paintLucroAnalitico(payments, contracts, bucket) {
 function paintFluxoCaixa(payments, contracts, bucket) {
   const body = document.getElementById('relatorios-body');
   const recebido = payments.reduce((s, p) => s + Number(p.amount_received), 0);
-  const aporte = contracts.reduce((s, c) => s + Number(c.principal_amount), 0);
+  const aporte = contracts.reduce((s, c) => s + Number(c.total_disbursed_amount), 0);
   const exitFees = contracts.reduce((s, c) => s + Number(c.operational_fee_amount), 0);
   const entryFees = payments.reduce((s, p) => s + Number(p.operational_fee_amount), 0);
   const lucroLiquido = payments.reduce((s, p) => s + Number(p.interest_component), 0) - exitFees - entryFees;
   const saldoLiquido = recebido - aporte;
 
   const byBucketIn = groupByBucket(payments, 'received_at', ['amount_received'], bucket);
-  const byBucketOut = groupByBucket(contracts, 'contract_date', ['principal_amount'], bucket);
+  const byBucketOut = groupByBucket(contracts, 'contract_date', ['total_disbursed_amount'], bucket);
   const allKeys = [...new Set([...Object.keys(byBucketIn), ...Object.keys(byBucketOut)])].sort();
   const seriesIn = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketIn[k] || { amount_received: 0 }).amount_received }));
-  const seriesOut = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketOut[k] || { principal_amount: 0 }).principal_amount }));
+  const seriesOut = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketOut[k] || { total_disbursed_amount: 0 }).total_disbursed_amount }));
 
   body.innerHTML = `
     <div class="grid grid-4">
-      <div class="card stat-card"><div class="label">Aporte no período</div><div class="value mono">${formatMoney(aporte)}</div></div>
+      <div class="card stat-card"><div class="label">Aporte no período (contrato + taxa de saída)</div><div class="value mono">${formatMoney(aporte)}</div></div>
       <div class="card stat-card"><div class="label">Recebido no período</div><div class="value mono">${formatMoney(recebido)}</div></div>
       <div class="card stat-card"><div class="label">Lucro líquido (juros − taxas)</div><div class="value mono">${formatMoney(lucroLiquido)}</div></div>
       <div class="card stat-card"><div class="label">Saldo líquido (recebido − aporte)</div><div class="value mono" style="color:${saldoLiquido >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(saldoLiquido)}</div></div>

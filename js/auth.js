@@ -115,8 +115,19 @@ function initAuth() {
 // Ações de autenticação
 // ---------------------------------------------------------------------------
 
-async function doSignIn(email, password) {
-  if (!email || !password) { setAuthError('Preencha e-mail e senha.'); return; }
+async function doSignIn(emailOrCpf, password) {
+  if (!emailOrCpf || !password) { setAuthError('Preencha e-mail/CPF e senha.'); return; }
+
+  let email = emailOrCpf.trim();
+  const digitsOnly = email.replace(/\D/g, '');
+  const looksLikeCpf = !email.includes('@') && digitsOnly.length === 11;
+
+  if (looksLikeCpf) {
+    const { data, error: cpfError } = await supa.rpc('email_for_cpf', { p_cpf: formatCpf(digitsOnly) });
+    if (cpfError || !data) { setAuthError('Nenhuma conta encontrada para esse CPF.'); return; }
+    email = data;
+  }
+
   const { error } = await supa.auth.signInWithPassword({ email, password });
   if (error) setAuthError(traduzErroAuth(error));
 }

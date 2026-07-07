@@ -28,7 +28,7 @@ async function renderGerenteSolicitacoes() {
           <strong>${escapeHtml(p.full_name || '—')}</strong>
           <div class="text-sm text-soft">${escapeHtml(p.email || '')} · ${formatDate(r.created_at)}</div>
           <div class="mono mt-8" style="font-size:17px">${formatMoney(r.requested_amount)}</div>
-          ${r.requested_installments ? `<div class="text-sm text-soft">${r.requested_installments}x sugerido pelo cliente</div>` : ''}
+          ${r.requested_due_type ? `<div class="text-sm text-soft">Prazo desejado: ${dueTypeLabel(r.requested_due_type, r.requested_custom_interval_days)}</div>` : ''}
           ${r.message ? `<div class="text-sm mt-8">"${escapeHtml(r.message)}"</div>` : ''}
           ${r.decision_reason ? `<div class="text-sm text-soft mt-8">Motivo: ${escapeHtml(r.decision_reason)}</div>` : ''}
         </div>
@@ -58,7 +58,8 @@ async function renderGerenteSolicitacoes() {
         client_id: req.clients.profile_id,
         client_name: (req.clients.profiles || {}).full_name,
         principal_amount: req.requested_amount,
-        installments_count: req.requested_installments || undefined,
+        due_type: req.requested_due_type || undefined,
+        custom_interval_days: req.requested_custom_interval_days || undefined,
       };
       router.navigate('#/gerente/contratos/novo');
     };

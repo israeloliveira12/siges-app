@@ -53,10 +53,24 @@ async function notifyClient({ clientId, event, title, body, contractId, installm
 
   const tasks = [];
   if (email) {
-    tasks.push(sendEmailViaResend({
-      to: email, subject: title + ' — SIGES',
-      html: `<div style="font-family:Arial,sans-serif"><h2 style="color:#0B416B">${title}</h2><p>${body}</p><p style="color:#5B6B74;font-size:12px">Siges Serviços Financeiros</p></div>`,
-    }));
+    tasks.push((async () => {
+      const result = await sendEmailViaResend({
+        to: email, subject: title + ' — SIGES',
+        html: `<div style="font-family:Arial,sans-serif"><h2 style="color:#0B416B">${title}</h2><p>${body}</p><p style="color:#5B6B74;font-size:12px">Siges Serviços Financeiros</p></div>`,
+      });
+      // Grava o resultado (mesmo em falha) — dá pra diagnosticar problemas de
+      // entrega (ex: domínio do Resend não verificado) direto na tabela.
+      await supabaseAdminFetch('/rest/v1/notifications_log', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          recipient_id: clientId, event, channel: 'email', title, body,
+          related_contract_id: contractId || null, related_installment_id: installmentId || null,
+          delivery_status: result.ok ? 'sent' : 'failed',
+          provider_response: result.ok ? result.data : { error: result.error, ...result.data },
+        }),
+      });
+    })());
   }
   const subsRes = await supabaseAdminFetch(`/rest/v1/push_subscriptions?profile_id=eq.${clientId}&select=*`, { method: 'GET' });
   const subs = subsRes.ok ? subsRes.data : [];

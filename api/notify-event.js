@@ -21,11 +21,25 @@ const EMAIL_SUBJECTS = {
 
 async function dispatchToRecipient({ recipientId, email, event, title, body }) {
   await Promise.allSettled([
-    sendEmailViaResend({
-      to: email,
-      subject: EMAIL_SUBJECTS[event] || 'SIGES',
-      html: `<div style="font-family:Arial,sans-serif"><h2 style="color:#0B416B">${title}</h2><p>${body}</p><p style="color:#5B6B74;font-size:12px">Siges Serviços Financeiros</p></div>`,
-    }),
+    (async () => {
+      const result = await sendEmailViaResend({
+        to: email,
+        subject: EMAIL_SUBJECTS[event] || 'SIGES',
+        html: `<div style="font-family:Arial,sans-serif"><h2 style="color:#0B416B">${title}</h2><p>${body}</p><p style="color:#5B6B74;font-size:12px">Siges Serviços Financeiros</p></div>`,
+      });
+      // Grava o resultado do envio (mesmo em caso de falha) — permite
+      // diagnosticar problemas de entrega (ex: domínio do Resend não
+      // verificado) direto na tabela, sem precisar checar logs do servidor.
+      await supabaseAdminFetch('/rest/v1/notifications_log', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          recipient_id: recipientId, event, channel: 'email', title, body,
+          delivery_status: result.ok ? 'sent' : 'failed',
+          provider_response: result.ok ? result.data : { error: result.error, ...result.data },
+        }),
+      });
+    })(),
     (async () => {
       const subsRes = await supabaseAdminFetch(`/rest/v1/push_subscriptions?profile_id=eq.${recipientId}&select=*`, { method: 'GET' });
       const subs = subsRes.ok ? subsRes.data : [];

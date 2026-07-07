@@ -44,6 +44,16 @@ async function toggleNotifPanel() {
   markAllVisibleAsRead();
 }
 
+// Fecha o quadrante ao clicar em qualquer lugar fora dele (não só no sino).
+// Registrado uma única vez — funciona mesmo depois de renderBell() recriar
+// o botão/painel, porque olha pelo id a cada clique, não por referência.
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('bell-wrap');
+  const panel = document.getElementById('notif-panel');
+  if (!wrap || !panel || panel.classList.contains('hidden')) return;
+  if (!wrap.contains(e.target)) panel.classList.add('hidden');
+});
+
 async function loadNotifications() {
   const { data, error } = await supa
     .from('notifications_log')

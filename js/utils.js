@@ -150,7 +150,8 @@ function formatCpf(value) {
     .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
 }
 
-function dueTypeLabel(t) {
+function dueTypeLabel(t, customDays) {
+  if (t === 'personalizado') return `Personalizado${customDays ? ' (' + customDays + 'd)' : ''}`;
   return { mensal: 'Mensal', quinzenal: 'Quinzenal', semanal: 'Semanal' }[t] || t;
 }
 

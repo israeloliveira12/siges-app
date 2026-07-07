@@ -278,6 +278,7 @@ function openEditContratoModal(contract, onDone) {
           <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="ec-late-fee" value="${contract.late_fee_percent}"></div>
           <div class="field"><label>Juros por atraso (% a.m.)</label><input type="number" min="0" step="0.01" id="ec-late-interest" value="${contract.late_interest_percent}"></div>
         </div>
+        <span class="help">Aplicados no momento do recebimento, proporcionalmente aos dias em atraso (juros) + valor fixo (multa) — ajustável em cada recebimento.</span>
         <div class="field"><label>Observações</label><textarea id="ec-observations">${escapeHtml(contract.observations || '')}</textarea></div>
       </div>
       <div class="modal-foot">

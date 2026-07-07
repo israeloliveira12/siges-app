@@ -34,7 +34,7 @@ async function renderClienteEmprestimos() {
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:10px">
         <div>
           <strong>Contrato #${c.contract_number}</strong>
-          <div class="text-sm text-soft">${formatDate(c.contract_date)} · ${formatMoney(c.principal_amount)} em ${c.installments_count}x ${dueTypeLabel(c.due_type)}</div>
+          <div class="text-sm text-soft">${formatDate(c.contract_date)} · ${formatMoney(c.principal_amount)} em ${c.installments_count}x ${dueTypeLabel(c.due_type, c.custom_interval_days)}</div>
         </div>
         <div class="flex items-center gap-8">
           ${statusBadge(c.status, statusLabel)}

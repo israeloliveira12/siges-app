@@ -2,6 +2,22 @@
    Cliente — Solicitar empréstimo + histórico de solicitações
    ============================================================================ */
 
+function buildFollowupWhatsappUrl(request) {
+  const companyPhone = String((App.settings && App.settings.company_whatsapp) || '').replace(/\D/g, '');
+  if (!companyPhone) return null;
+  const withCountry = companyPhone.startsWith('55') ? companyPhone : '55' + companyPhone;
+  const prazo = request.requested_due_type
+    ? dueTypeLabel(request.requested_due_type, request.requested_custom_interval_days)
+    : '—';
+  const texto = [
+    '*Acompanhamento de Solicitação de Empréstimo*',
+    '',
+    `Olá! Meu nome é ${userDisplayName()}.`,
+    `Gostaria de acompanhar minha solicitação de empréstimo no valor de ${formatMoney(request.requested_amount)}, com pagamento ${prazo}, enviada em ${formatDate(request.created_at)}.`,
+  ].join('\n');
+  return `https://wa.me/${withCountry}?text=${encodeURIComponent(texto)}`;
+}
+
 async function renderClienteSolicitar() {
   const root = document.getElementById('screen-cliente-solicitar');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
@@ -31,9 +47,19 @@ async function renderClienteSolicitar() {
             <input type="text" id="s-amount" placeholder="0,00" required>
             <span class="help">O valor será analisado por um administrador, que pode ajustar as condições finais.</span>
           </div>
-          <div class="field">
-            <label>Número de parcelas desejado (opcional)</label>
-            <input type="number" id="s-installments" min="1" step="1">
+          <div class="field-row">
+            <div class="field">
+              <label>Prazo desejado</label>
+              <select id="s-due-type" required>
+                <option value="mensal">Mensal</option>
+                <option value="quinzenal">Quinzenal</option>
+                <option value="personalizado">Personalizado (dias)</option>
+              </select>
+            </div>
+            <div class="field hidden" id="s-custom-days-field">
+              <label>A cada quantos dias?</label>
+              <input type="number" min="1" step="1" id="s-custom-days" value="3">
+            </div>
           </div>
           <div class="field">
             <label>Mensagem (opcional)</label>
@@ -47,12 +73,15 @@ async function renderClienteSolicitar() {
         <h3>Minhas solicitações</h3>
         <div class="mt-14" id="solicitacoes-list">
           ${(requests && requests.length) ? requests.map((r) => `
-            <div class="flex justify-between items-center" style="padding:10px 0;border-bottom:1px solid var(--line)">
-              <div>
-                <div class="mono" style="font-weight:700">${formatMoney(r.requested_amount)}</div>
-                <div class="text-sm text-soft">${formatDate(r.created_at)}${r.decision_reason ? ' · ' + escapeHtml(r.decision_reason) : ''}</div>
+            <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+              <div class="flex justify-between items-center">
+                <div>
+                  <div class="mono" style="font-weight:700">${formatMoney(r.requested_amount)}</div>
+                  <div class="text-sm text-soft">${formatDate(r.created_at)}${r.requested_due_type ? ' · ' + dueTypeLabel(r.requested_due_type, r.requested_custom_interval_days) : ''}${r.decision_reason ? ' · ' + escapeHtml(r.decision_reason) : ''}</div>
+                </div>
+                ${statusBadge(r.status, r.status === 'pendente' ? 'Aguardando aprovação' : r.status === 'aprovada' ? 'Aprovada' : 'Reprovada')}
               </div>
-              ${statusBadge(r.status, r.status === 'pendente' ? 'Aguardando aprovação' : r.status === 'aprovada' ? 'Aprovada' : 'Reprovada')}
+              ${r.status === 'pendente' && buildFollowupWhatsappUrl(r) ? `<a class="btn btn-outline btn-sm mt-8" href="${buildFollowupWhatsappUrl(r)}" target="_blank" rel="noopener">${Icons.alarm} Acompanhar pelo WhatsApp</a>` : ''}
             </div>
           `).join('') : `<div class="empty-state">${Icons.inbox}<p>Nenhuma solicitação ainda.</p></div>`}
         </div>
@@ -61,13 +90,17 @@ async function renderClienteSolicitar() {
   `;
 
   attachMoneyMask(document.getElementById('s-amount'));
+  document.getElementById('s-due-type').onchange = (e) => {
+    document.getElementById('s-custom-days-field').classList.toggle('hidden', e.target.value !== 'personalizado');
+  };
 
   document.getElementById('solicitar-form').onsubmit = async (e) => {
     e.preventDefault();
     const feedback = document.getElementById('solicitar-feedback');
     feedback.innerHTML = '';
     const amount = getMoneyValue(document.getElementById('s-amount'));
-    const installments = document.getElementById('s-installments').value ? Number(document.getElementById('s-installments').value) : null;
+    const dueType = document.getElementById('s-due-type').value;
+    const customDays = dueType === 'personalizado' ? Math.max(1, parseInt(document.getElementById('s-custom-days').value || '3', 10)) : null;
     const message = document.getElementById('s-message').value.trim() || null;
 
     if (!amount || amount <= 0) { feedback.innerHTML = '<div class="auth-error">Informe um valor válido.</div>'; return; }
@@ -81,7 +114,8 @@ async function renderClienteSolicitar() {
       const { error } = await supa.from('loan_requests').insert({
         client_id: App.session.user.id,
         requested_amount: amount,
-        requested_installments: installments,
+        requested_due_type: dueType,
+        requested_custom_interval_days: customDays,
         message,
       });
       if (error) throw error;

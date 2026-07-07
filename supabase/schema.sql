@@ -13,7 +13,7 @@ create type user_role as enum ('gerente', 'cliente');
 create type request_status as enum ('pendente', 'aprovada', 'reprovada');
 create type contract_status as enum ('em_aberto', 'atrasado', 'quitado', 'perda');
 create type installment_status as enum ('pendente', 'paga', 'atrasada', 'renovada', 'cancelada');
-create type due_type as enum ('mensal', 'quinzenal', 'semanal');
+create type due_type as enum ('mensal', 'quinzenal', 'semanal', 'personalizado');
 create type notification_channel as enum ('email', 'push', 'whatsapp', 'in_app');
 create type notification_event as enum (
   'vence_amanha', 'vence_hoje', 'atrasada',
@@ -72,7 +72,9 @@ create table loan_requests (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references clients(profile_id),
   requested_amount numeric(12,2) not null check (requested_amount > 0),
-  requested_installments integer,
+  requested_installments integer, -- obsoleto: cliente não escolhe mais parcelas, só prazo
+  requested_due_type due_type,
+  requested_custom_interval_days integer, -- só usado quando requested_due_type = 'personalizado'
   message text,
   status request_status not null default 'pendente',
   decided_by uuid references profiles(id),
@@ -94,6 +96,7 @@ create table loan_contracts (
   interest_rate numeric(6,3) not null check (interest_rate >= 0),
   installments_count integer not null check (installments_count > 0),
   due_type due_type not null,
+  custom_interval_days integer, -- só usado quando due_type = 'personalizado'
 
   has_operational_fee boolean not null default false,
   operational_fee_amount numeric(12,2) not null default 0 check (operational_fee_amount >= 0),
@@ -117,7 +120,7 @@ create table loan_contracts (
 
 alter table loan_requests
   add constraint fk_resulting_contract
-  foreign key (resulting_contract_id) references loan_contracts(id);
+  foreign key (resulting_contract_id) references loan_contracts(id) on delete set null;
 
 -- 2.5 installments — parcelas de cada contrato
 create table installments (
@@ -142,7 +145,9 @@ create table renewal_cycles (
   id uuid primary key default gen_random_uuid(),
   contract_id uuid not null references loan_contracts(id) on delete cascade,
   cycle_number integer not null,
-  origin_installment_id uuid references installments(id),
+  -- referência cruzada com installments (ver fk_renewed_into_cycle abaixo) —
+  -- ambas usam "on delete set null" pra evitar bloqueio mútuo ao excluir.
+  origin_installment_id uuid references installments(id) on delete set null,
   previous_cycle_id uuid references renewal_cycles(id),
   interest_only_amount numeric(12,2) not null check (interest_only_amount >= 0),
   full_debt_amount numeric(12,2) not null check (full_debt_amount > 0),
@@ -156,19 +161,21 @@ create table renewal_cycles (
 
 alter table installments
   add constraint fk_renewed_into_cycle
-  foreign key (renewed_into_cycle_id) references renewal_cycles(id);
+  foreign key (renewed_into_cycle_id) references renewal_cycles(id) on delete set null;
 
--- 2.7 payments — todo recebimento de dinheiro (parcela normal ou renovação)
+-- 2.7 payments — todo recebimento de dinheiro (parcela normal ou renovação).
+-- Cascata: excluir o contrato/parcela/ciclo pai remove os pagamentos ligados.
 create table payments (
   id uuid primary key default gen_random_uuid(),
-  contract_id uuid not null references loan_contracts(id),
-  installment_id uuid references installments(id),
-  renewal_cycle_id uuid references renewal_cycles(id),
+  contract_id uuid not null references loan_contracts(id) on delete cascade,
+  installment_id uuid references installments(id) on delete cascade,
+  renewal_cycle_id uuid references renewal_cycles(id) on delete cascade,
   payment_kind payment_kind not null,
 
   amount_received numeric(12,2) not null check (amount_received > 0),
   principal_component numeric(12,2) not null default 0,
   interest_component numeric(12,2) not null default 0,
+  late_charge_amount numeric(12,2) not null default 0,
 
   has_operational_fee boolean not null default false,
   operational_fee_amount numeric(12,2) not null default 0,
@@ -187,8 +194,11 @@ create table notifications_log (
   recipient_id uuid not null references profiles(id),
   event notification_event not null,
   channel notification_channel not null,
-  related_contract_id uuid references loan_contracts(id),
-  related_installment_id uuid references installments(id),
+  -- SET NULL (não CASCADE): notifications_log é um histórico de auditoria —
+  -- excluir o contrato/parcela referenciado não deve apagar a notificação,
+  -- só desfazer o link (e, mais importante, não deve BLOQUEAR a exclusão).
+  related_contract_id uuid references loan_contracts(id) on delete set null,
+  related_installment_id uuid references installments(id) on delete set null,
   title text not null,
   body text not null,
   read_at timestamptz,
@@ -455,7 +465,8 @@ create or replace function calc_installments_preview(
   p_interest_rate numeric,
   p_installments_count integer,
   p_due_type due_type,
-  p_first_installment_date date
+  p_first_installment_date date,
+  p_custom_interval_days integer default null
 )
 returns table (
   sequence_number integer,
@@ -479,6 +490,7 @@ begin
     when 'mensal' then interval '1 month'
     when 'quinzenal' then interval '15 days'
     when 'semanal' then interval '7 days'
+    when 'personalizado' then (coalesce(p_custom_interval_days, 30) || ' days')::interval
   end;
   for i in 1..p_installments_count loop
     sequence_number := i;
@@ -510,7 +522,8 @@ create or replace function create_loan_contract(
   p_late_interest_percent numeric,
   p_observations text,
   p_origin_request_id uuid default null,
-  p_installments_override jsonb default null
+  p_installments_override jsonb default null,
+  p_custom_interval_days integer default null
 )
 returns uuid
 language plpgsql
@@ -526,13 +539,13 @@ begin
 
   insert into loan_contracts (
     client_id, created_by, origin_request_id,
-    principal_amount, interest_rate, installments_count, due_type,
+    principal_amount, interest_rate, installments_count, due_type, custom_interval_days,
     has_operational_fee, operational_fee_amount,
     contract_date, first_installment_date,
     allows_renewal, late_fee_percent, late_interest_percent, observations
   ) values (
     p_client_id, auth.uid(), p_origin_request_id,
-    p_principal_amount, p_interest_rate, p_installments_count, p_due_type,
+    p_principal_amount, p_interest_rate, p_installments_count, p_due_type, p_custom_interval_days,
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0),
     p_contract_date, p_first_installment_date,
     p_allows_renewal, coalesce(p_late_fee_percent, 0), coalesce(p_late_interest_percent, 0), p_observations
@@ -552,7 +565,7 @@ begin
   else
     insert into installments (contract_id, sequence_number, due_date, principal_share, interest_share)
     select v_contract_id, sequence_number, due_date, principal_share, interest_share
-    from calc_installments_preview(p_principal_amount, p_interest_rate, p_installments_count, p_due_type, p_first_installment_date);
+    from calc_installments_preview(p_principal_amount, p_interest_rate, p_installments_count, p_due_type, p_first_installment_date, p_custom_interval_days);
   end if;
 
   if p_origin_request_id is not null then
@@ -571,6 +584,16 @@ begin
 
   return v_contract_id;
 end;
+$$;
+
+-- 5.5b Login por CPF: função pública (chamada ANTES do login, então precisa
+-- ser security definer) que só resolve CPF -> e-mail, nada mais sensível.
+create or replace function email_for_cpf(p_cpf text)
+returns text
+language sql stable
+security definer set search_path = public
+as $$
+  select email from profiles where cpf = p_cpf limit 1;
 $$;
 
 -- 5.6 Rejeitar solicitação
@@ -607,7 +630,8 @@ create or replace function receive_payment(
   p_amount_received numeric,
   p_has_operational_fee boolean,
   p_operational_fee_amount numeric,
-  p_notes text default null
+  p_notes text default null,
+  p_late_charge_amount numeric default 0
 )
 returns uuid
 language plpgsql
@@ -620,8 +644,11 @@ declare
   v_remaining_interest numeric;
   v_remaining_principal numeric;
   v_remaining_total numeric;
+  v_max_allowed numeric;
   v_pay_interest numeric;
   v_pay_principal numeric;
+  v_pay_late numeric;
+  v_after_interest numeric;
   v_remaining_count integer;
 begin
   if not is_gerente() then
@@ -636,26 +663,33 @@ begin
   v_remaining_interest := v_installment.interest_share - v_installment.interest_paid_partial;
   v_remaining_principal := v_installment.principal_share - v_installment.principal_paid_partial;
   v_remaining_total := v_remaining_interest + v_remaining_principal;
+  -- encargo de atraso (juros/multa por dias em atraso) é cobrado por cima do
+  -- saldo contratual da parcela, não entra no controle de parcial da parcela.
+  v_max_allowed := v_remaining_total + coalesce(p_late_charge_amount, 0);
 
-  if p_amount_received <= 0 or p_amount_received > v_remaining_total + 0.01 then
+  if p_amount_received <= 0 or p_amount_received > v_max_allowed + 0.01 then
     raise exception 'INVALID_AMOUNT';
   end if;
 
   select * into v_contract from loan_contracts where id = v_installment.contract_id for update;
 
-  -- paga juros primeiro, depois capital (padrão comum de amortização) --
+  -- paga juros primeiro, depois capital, e qualquer valor além do saldo
+  -- contratual da parcela é encargo de atraso (lucro extra, sem afetar o
+  -- controle de pagamento parcial da parcela) --
   -- permite pagamento parcial: se p_amount_received < v_remaining_total,
   -- a parcela continua em aberto pelo valor restante.
   v_pay_interest := least(p_amount_received, v_remaining_interest);
-  v_pay_principal := p_amount_received - v_pay_interest;
+  v_after_interest := p_amount_received - v_pay_interest;
+  v_pay_principal := least(v_after_interest, v_remaining_principal);
+  v_pay_late := v_after_interest - v_pay_principal;
 
   insert into payments (
     contract_id, installment_id, payment_kind, amount_received,
-    principal_component, interest_component,
+    principal_component, interest_component, late_charge_amount,
     has_operational_fee, operational_fee_amount, received_by, notes
   ) values (
     v_contract.id, p_installment_id, 'quitacao_parcela', p_amount_received,
-    v_pay_principal, v_pay_interest,
+    v_pay_principal, v_pay_interest + v_pay_late, v_pay_late,
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes
   ) returning id into v_payment_id;
 
@@ -706,6 +740,7 @@ as $$
 declare
   v_contract_id uuid;
   v_due_type due_type;
+  v_custom_days integer;
   v_principal numeric;
   v_interest numeric;
   v_full_debt numeric;
@@ -735,7 +770,7 @@ begin
     v_interest := v_full_debt; -- mantém o valor cheio como base do próximo ciclo abaixo
   end if;
 
-  select lc.due_type, lc.client_id into v_due_type, v_client_id
+  select lc.due_type, lc.client_id, lc.custom_interval_days into v_due_type, v_client_id, v_custom_days
     from loan_contracts lc where lc.id = v_contract_id;
 
   v_full_debt := coalesce(v_full_debt, v_principal + v_interest);
@@ -744,6 +779,7 @@ begin
     when 'mensal' then interval '1 month'
     when 'quinzenal' then interval '15 days'
     when 'semanal' then interval '7 days'
+    when 'personalizado' then (coalesce(v_custom_days, 30) || ' days')::interval
   end;
   v_new_due_date := current_date + v_step;
 
@@ -794,7 +830,8 @@ create or replace function receive_cycle_payment(
   p_amount_received numeric,
   p_has_operational_fee boolean,
   p_operational_fee_amount numeric,
-  p_notes text default null
+  p_notes text default null,
+  p_late_charge_amount numeric default 0
 )
 returns uuid
 language plpgsql
@@ -823,11 +860,11 @@ begin
 
   insert into payments (
     contract_id, renewal_cycle_id, payment_kind, amount_received,
-    principal_component, interest_component,
+    principal_component, interest_component, late_charge_amount,
     has_operational_fee, operational_fee_amount, received_by, notes
   ) values (
     v_contract.id, p_cycle_id, 'quitacao_final', p_amount_received,
-    v_principal, v_interest,
+    v_principal, v_interest + coalesce(p_late_charge_amount, 0), coalesce(p_late_charge_amount, 0),
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes
   ) returning id into v_payment_id;
 

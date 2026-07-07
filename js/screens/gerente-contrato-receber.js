@@ -34,6 +34,17 @@ async function openReceberModal(source, onDone) {
   // com uma relação ambígua com o ciclo renovado).
   const canRenew = contract.allows_renewal && Number(contract.installments_count) === 1;
 
+  // Encargo de atraso: juros simples proporcional aos dias em atraso (sobre o
+  // saldo desta parcela/ciclo) + multa fixa — sugestão editável pelo gerente,
+  // cobrada por cima do saldo contratual, sem alterar o amount_due histórico.
+  const dueDateStr = isInstallment ? item.due_date : item.new_due_date;
+  const diasAtraso = Math.max(0, Math.round((new Date(todayISO()) - new Date(dueDateStr)) / 86400000));
+  const lateInterestPercent = Number(contract.late_interest_percent || 0);
+  const lateFeePercent = Number(contract.late_fee_percent || 0);
+  const jurosAtrasoSugerido = diasAtraso > 0 ? Math.round(totalDue * (lateInterestPercent / 100 / 30) * diasAtraso * 100) / 100 : 0;
+  const multaAtrasoSugerida = diasAtraso > 0 ? Math.round(totalDue * (lateFeePercent / 100) * 100) / 100 : 0;
+  const exitFeeAmount = contract.has_operational_fee ? Number(contract.operational_fee_amount || 0) : 0;
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   document.body.appendChild(overlay);
@@ -48,14 +59,17 @@ async function openReceberModal(source, onDone) {
         <div class="modal-body">
           <div class="grid grid-2 mt-0">
             <div class="stat-card"><div class="label">Vencimento</div><div class="value" style="font-size:15px">${formatDate(isInstallment ? item.due_date : item.new_due_date)}</div></div>
-            <div class="stat-card"><div class="label">${alreadyPaid > 0 ? 'Restante em aberto' : 'Total com encargos'}</div><div class="value mono">${formatMoney(totalDue)}</div></div>
+            <div class="stat-card"><div class="label">${alreadyPaid > 0 ? 'Restante em aberto' : 'Total com encargos'}</div><div class="value mono">${formatMoney(totalDue + jurosAtrasoSugerido + multaAtrasoSugerida)}</div></div>
           </div>
           ${alreadyPaid > 0 ? `<p class="text-sm text-soft mt-8">Já foi recebido ${formatMoney(alreadyPaid)} desta parcela em pagamento(s) parcial(is) anterior(es).</p>` : ''}
+          ${diasAtraso > 0 ? `<p class="text-sm mt-8" style="color:var(--bad)">Em atraso há ${diasAtraso} dia(s).</p>` : ''}
+          ${exitFeeAmount > 0 ? `<p class="text-sm text-soft mt-8">Taxa de saída deste contrato: ${formatMoney(exitFeeAmount)} (já cobrada na criação do contrato — não entra na conta deste recebimento).</p>` : ''}
 
+          ${canRenew ? `
           <div class="auth-tabs mt-14">
             <button class="auth-tab ${receberMode === 'quitar' ? 'active' : ''}" id="tab-quitar">Quitar</button>
-            ${canRenew ? `<button class="auth-tab ${receberMode === 'renovar' ? 'active' : ''}" id="tab-renovar">Renovar</button>` : ''}
-          </div>
+            <button class="auth-tab ${receberMode === 'renovar' ? 'active' : ''}" id="tab-renovar">Renovar</button>
+          </div>` : ''}
 
           <div id="receber-feedback"></div>
           <div id="receber-fields"></div>
@@ -81,8 +95,16 @@ async function openReceberModal(source, onDone) {
   function paintFields() {
     const fields = document.getElementById('receber-fields');
     if (receberMode === 'quitar') {
+      const suggestedTotal = totalDue + jurosAtrasoSugerido + multaAtrasoSugerida;
       fields.innerHTML = `
-        <div class="field">
+        ${diasAtraso > 0 ? `
+        <div class="field-row">
+          <div class="field"><label>Juros de atraso (${diasAtraso}d)</label><input type="text" id="r-late-interest"></div>
+          <div class="field"><label>Multa por atraso</label><input type="text" id="r-late-fee"></div>
+        </div>
+        <span class="help">Sugestão calculada automaticamente — pode ajustar ou zerar antes de confirmar.</span>
+        ` : ''}
+        <div class="field mt-8">
           <label>Valor recebido (R$)</label>
           <input type="text" id="r-amount">
           <span class="help" id="r-partial-hint"></span>
@@ -90,28 +112,35 @@ async function openReceberModal(source, onDone) {
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-fee-toggle"><span class="track"></span></label><span>Aplicar taxas operacionais neste recebimento?</span></div>
         <div id="r-fee-fields" class="hidden mt-8"><div class="field"><label>Valor da taxa operacional (R$)</label><input type="text" id="r-fee-amount"></div></div>
         <div class="grid grid-2 mt-14">
-          <div class="stat-card" style="background:var(--bg)"><div class="label">Valor coletado (bruto)</div><div class="value mono" id="r-gross-collected" style="font-size:16px">${formatMoney(totalDue)}</div></div>
-          <div class="stat-card" style="background:var(--bg)"><div class="label">Valor coletado (líquido)</div><div class="value mono" id="r-net-collected" style="font-size:16px">${formatMoney(totalDue)}</div></div>
-          <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro bruto (juros)</div><div class="value mono" id="r-gross-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
+          <div class="stat-card" style="background:var(--bg)"><div class="label">Valor coletado (bruto)</div><div class="value mono" id="r-gross-collected" style="font-size:16px">${formatMoney(suggestedTotal)}</div></div>
+          <div class="stat-card" style="background:var(--bg)"><div class="label">Valor coletado (líquido)</div><div class="value mono" id="r-net-collected" style="font-size:16px">${formatMoney(suggestedTotal)}</div></div>
+          <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro bruto (juros + encargo de atraso)</div><div class="value mono" id="r-gross-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro líquido</div><div class="value mono" id="r-net-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
         </div>
       `;
       const amountInput = document.getElementById('r-amount');
       const feeInput = document.getElementById('r-fee-amount');
-      setMoneyValue(amountInput, totalDue);
+      const lateInterestInput = document.getElementById('r-late-interest');
+      const lateFeeInput = document.getElementById('r-late-fee');
+      setMoneyValue(amountInput, suggestedTotal);
       attachMoneyMask(amountInput);
       attachMoneyMask(feeInput);
       const feeToggle = document.getElementById('r-fee-toggle');
       const recompute = () => {
         const amount = getMoneyValue(amountInput);
         const fee = feeToggle.checked ? getMoneyValue(feeInput) : 0;
-        // pagamento parcial: juros é priorizado, então o "lucro" desta
-        // transação é o mínimo entre o valor pago e o juros restante.
-        const interestNow = Math.min(amount, interestPortion);
+        const lateAuthorized = (lateInterestInput ? getMoneyValue(lateInterestInput) : 0) + (lateFeeInput ? getMoneyValue(lateFeeInput) : 0);
+        // pagamento parcial: juros contratual é priorizado, depois capital;
+        // o encargo de atraso só entra na conta quando o valor recebido
+        // ultrapassa o saldo contratual da parcela (totalDue).
+        const contractualNow = Math.min(amount, totalDue);
+        const interestNow = Math.min(contractualNow, interestPortion);
+        const lateNow = Math.max(0, Math.min(amount - totalDue, lateAuthorized));
+        const grossProfit = interestNow + lateNow;
         document.getElementById('r-gross-collected').textContent = formatMoney(amount);
         document.getElementById('r-net-collected').textContent = formatMoney(amount - fee);
-        document.getElementById('r-gross-profit').textContent = formatMoney(interestNow);
-        document.getElementById('r-net-profit').textContent = formatMoney(interestNow - fee);
+        document.getElementById('r-gross-profit').textContent = formatMoney(grossProfit);
+        document.getElementById('r-net-profit').textContent = formatMoney(grossProfit - fee);
         const hint = document.getElementById('r-partial-hint');
         if (amount > 0 && amount < totalDue - 0.005) {
           hint.textContent = `Pagamento parcial — R$ ${formatNumber(totalDue - amount, 2)} continuam em aberto para esta parcela.`;
@@ -131,6 +160,22 @@ async function openReceberModal(source, onDone) {
       };
       feeInput.oninput = recompute;
       amountInput.oninput = recompute;
+      if (lateInterestInput) {
+        attachMoneyMask(lateInterestInput);
+        setMoneyValue(lateInterestInput, jurosAtrasoSugerido);
+        lateInterestInput.oninput = () => {
+          setMoneyValue(amountInput, totalDue + getMoneyValue(lateInterestInput) + getMoneyValue(lateFeeInput));
+          recompute();
+        };
+      }
+      if (lateFeeInput) {
+        attachMoneyMask(lateFeeInput);
+        setMoneyValue(lateFeeInput, multaAtrasoSugerida);
+        lateFeeInput.oninput = () => {
+          setMoneyValue(amountInput, totalDue + getMoneyValue(lateInterestInput) + getMoneyValue(lateFeeInput));
+          recompute();
+        };
+      }
       recompute();
     } else {
       fields.innerHTML = `
@@ -182,19 +227,24 @@ async function openReceberModal(source, onDone) {
         const amount = getMoneyValue(document.getElementById('r-amount'));
         const hasFee = document.getElementById('r-fee-toggle').checked;
         const feeAmount = hasFee ? getMoneyValue(document.getElementById('r-fee-amount')) : 0;
+        const lateInterestEl = document.getElementById('r-late-interest');
+        const lateFeeEl = document.getElementById('r-late-fee');
+        const lateChargeAmount = (lateInterestEl ? getMoneyValue(lateInterestEl) : 0) + (lateFeeEl ? getMoneyValue(lateFeeEl) : 0);
         if (!amount || amount <= 0) throw new Error('Informe um valor válido.');
-        if (amount > totalDue + 0.01) throw new Error(`O valor não pode ser maior que o restante desta parcela (${formatMoney(totalDue)}).`);
+        if (amount > totalDue + lateChargeAmount + 0.01) throw new Error(`O valor não pode ser maior que o restante desta parcela mais o encargo de atraso (${formatMoney(totalDue + lateChargeAmount)}).`);
 
         if (isInstallment) {
           const { error } = await supa.rpc('receive_payment', {
             p_installment_id: item.id, p_amount_received: amount,
             p_has_operational_fee: hasFee, p_operational_fee_amount: feeAmount,
+            p_late_charge_amount: lateChargeAmount,
           });
           if (error) throw error;
         } else {
           const { error } = await supa.rpc('receive_cycle_payment', {
             p_cycle_id: item.id, p_amount_received: amount,
             p_has_operational_fee: hasFee, p_operational_fee_amount: feeAmount,
+            p_late_charge_amount: lateChargeAmount,
           });
           if (error) throw error;
         }
