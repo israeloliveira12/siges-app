@@ -105,7 +105,7 @@ function rateReferenceTooltip() {
 
 function paintWizardStep2() {
   const body = document.getElementById('wizard-body');
-  const netDisbursed = Number(wiz.principal_amount || 0) - (wiz.has_operational_fee ? Number(wiz.operational_fee_amount || 0) : 0);
+  const totalDisbursed = Number(wiz.principal_amount || 0) + (wiz.has_operational_fee ? Number(wiz.operational_fee_amount || 0) : 0);
   const availableForClient = Math.max(0, wiz.client_limit - wiz.client_used);
 
   body.innerHTML = `
@@ -153,7 +153,11 @@ function paintWizardStep2() {
           <strong>Aplicar taxas operacionais neste contrato?</strong>
         </div>
         <div id="w-fee-fields" class="mt-14 ${wiz.has_operational_fee ? '' : 'hidden'}">
-          <div class="field"><label>Valor da taxa operacional (R$)</label><input type="number" min="0" step="0.01" id="w-fee-amount" value="${wiz.operational_fee_amount}"></div>
+          <div class="field">
+            <label>Valor da taxa operacional de saída (R$)</label>
+            <input type="number" min="0" step="0.01" id="w-fee-amount" value="${wiz.operational_fee_amount}">
+            <span class="help">Sugestão: ${formatNumber((App.settings && App.settings.default_exit_fee_percent) || 0, 2)}% do valor emprestado (editável).</span>
+          </div>
         </div>
         <div class="grid grid-2 mt-14">
           <div class="stat-card" style="background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px">
@@ -161,8 +165,8 @@ function paintWizardStep2() {
             <div class="value mono" style="font-size:16px" id="w-gross-preview">${formatMoney(wiz.principal_amount || 0)}</div>
           </div>
           <div class="stat-card" style="background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px">
-            <div class="label">Valor líquido a desembolsar</div>
-            <div class="value mono" style="font-size:16px" id="w-net-preview">${formatMoney(netDisbursed)}</div>
+            <div class="label">Valor total a desembolsar (contrato + taxa)</div>
+            <div class="value mono" style="font-size:16px" id="w-net-preview">${formatMoney(totalDisbursed)}</div>
           </div>
         </div>
       </div>
@@ -188,9 +192,18 @@ function paintWizardStep2() {
     const principal = Number(document.getElementById('w-principal').value || 0);
     const fee = feeToggle.checked ? Number(document.getElementById('w-fee-amount').value || 0) : 0;
     document.getElementById('w-gross-preview').textContent = formatMoney(principal);
-    document.getElementById('w-net-preview').textContent = formatMoney(principal - fee);
+    document.getElementById('w-net-preview').textContent = formatMoney(principal + fee);
   };
-  feeToggle.onchange = () => { document.getElementById('w-fee-fields').classList.toggle('hidden', !feeToggle.checked); recomputeNet(); };
+  feeToggle.onchange = () => {
+    document.getElementById('w-fee-fields').classList.toggle('hidden', !feeToggle.checked);
+    const feeInput = document.getElementById('w-fee-amount');
+    if (feeToggle.checked && !Number(feeInput.value)) {
+      const principal = Number(document.getElementById('w-principal').value || 0);
+      const pct = (App.settings && App.settings.default_exit_fee_percent) || 0;
+      feeInput.value = (principal * pct / 100).toFixed(2);
+    }
+    recomputeNet();
+  };
   document.getElementById('w-principal').oninput = () => { recomputeNet(); refreshRateHint(); };
   document.getElementById('w-fee-amount').oninput = recomputeNet;
   document.getElementById('w-due-type').onchange = refreshRateHint;
@@ -253,7 +266,7 @@ function paintWizardStep3() {
         <div class="stat-card"><div class="label">Juros</div><div class="value mono">${formatNumber(wiz.interest_rate, 2)}% (Simples)</div></div>
         <div class="stat-card"><div class="label">Parcelas</div><div class="value mono">${wiz.installments_count}x (${dueTypeLabel(wiz.due_type)})</div></div>
         <div class="stat-card"><div class="label">Valor total a receber</div><div class="value mono">${formatMoney(totalAmount)}</div></div>
-        <div class="stat-card"><div class="label">Valor líquido desembolsado</div><div class="value mono">${formatMoney(wiz.principal_amount - (wiz.has_operational_fee ? wiz.operational_fee_amount : 0))}</div></div>
+        <div class="stat-card"><div class="label">Total a desembolsar (contrato + taxa)</div><div class="value mono">${formatMoney(Number(wiz.principal_amount) + (wiz.has_operational_fee ? Number(wiz.operational_fee_amount) : 0))}</div></div>
       </div>
 
       <div class="flex justify-between items-center mt-20">

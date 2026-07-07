@@ -52,6 +52,13 @@ async function onAuthenticated(session) {
 
   await loadGlobalReferenceData();
 
+  if (isCliente() && App.client && App.client.approval_status !== 'aprovado') {
+    document.getElementById('app').classList.remove('ready');
+    document.getElementById('auth-screen').classList.add('active');
+    renderPendingApprovalScreen(App.client);
+    return;
+  }
+
   document.getElementById('app').classList.add('ready');
   document.getElementById('auth-screen').classList.remove('active');
 
@@ -109,16 +116,17 @@ async function doSignIn(email, password) {
   if (error) setAuthError(traduzErroAuth(error));
 }
 
-async function doSignUp(email, password, fullName) {
+async function doSignUp(email, password, profileData) {
   if (!email || !password) { setAuthError('Preencha e-mail e senha.'); return; }
   if (password.length < 6) { setAuthError('A senha precisa ter pelo menos 6 caracteres.'); return; }
   const { data, error } = await supa.auth.signUp({
-    email, password,
-    options: { data: { full_name: fullName || '' } },
+    email: email.trim().toLowerCase(),
+    password,
+    options: { data: profileData || {} },
   });
   if (error) { setAuthError(traduzErroAuth(error)); return; }
   if (!data.session) {
-    setAuthMessage('Conta criada! Confirme seu e-mail para poder entrar.');
+    setAuthMessage('Conta criada! Confirme seu e-mail e aguarde a aprovação de um administrador para poder entrar.');
   }
 }
 

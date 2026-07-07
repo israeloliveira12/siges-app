@@ -118,6 +118,11 @@ async function renderGerenteContratoDetalhe(params) {
   const abertas = (installments || []).filter((i) => i.status === 'pendente' || i.status === 'atrasada');
   const pagas = (installments || []).filter((i) => i.status === 'paga');
 
+  const totalInterestReceived = (payments || []).reduce((s, p) => s + Number(p.interest_component), 0);
+  const totalEntryFees = (payments || []).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
+  const exitFee = Number(contract.operational_fee_amount || 0);
+  const netContractProfit = totalInterestReceived - exitFee - totalEntryFees;
+
   root.innerHTML = `
     <button class="btn btn-ghost btn-sm" id="back-to-list">${Icons.chevronLeft} Voltar para contratos</button>
 
@@ -133,16 +138,26 @@ async function renderGerenteContratoDetalhe(params) {
         </div>
       </div>
       <div class="grid grid-4 mt-14">
-        <div class="stat-card"><div class="label">Aporte</div><div class="value mono">${formatMoney(contract.principal_amount)}</div></div>
+        <div class="stat-card"><div class="label">Aporte (dívida-base)</div><div class="value mono">${formatMoney(contract.principal_amount)}</div></div>
         <div class="stat-card"><div class="label">Juros</div><div class="value mono">${formatNumber(contract.interest_rate, 2)}%</div></div>
         <div class="stat-card"><div class="label">Pago total</div><div class="value mono">${formatMoney(totalPago)}</div></div>
-        <div class="stat-card"><div class="label">Líquido desembolsado</div><div class="value mono">${formatMoney(contract.net_disbursed_amount)}</div></div>
+        <div class="stat-card"><div class="label">Total desembolsado (contrato + taxa)</div><div class="value mono">${formatMoney(contract.total_disbursed_amount)}</div></div>
+      </div>
+      <div class="grid grid-2 mt-14">
+        <div class="stat-card" style="background:var(--brand-soft)">
+          <div class="label">Lucro líquido do contrato (juros − taxa de saída − taxas de entrada)</div>
+          <div class="value mono" style="font-size:20px">${formatMoney(netContractProfit)}</div>
+          <div class="hint">Juros recebidos ${formatMoney(totalInterestReceived)} − taxa de saída ${formatMoney(exitFee)} − taxas de entrada ${formatMoney(totalEntryFees)}</div>
+        </div>
       </div>
       ${contract.observations ? `<p class="text-sm text-soft mt-14">Obs: ${escapeHtml(contract.observations)}</p>` : ''}
     </div>
 
     <div class="card mt-14">
-      <h3>Parcelas</h3>
+      <div class="flex justify-between items-center">
+        <h3>Parcelas</h3>
+        <button class="btn btn-outline btn-sm" id="print-promissorias-btn">${Icons.printer} Notas promissórias (PDF)</button>
+      </div>
       <table class="data-table table-scroll mt-8">
         <thead><tr><th>Nº</th><th>Vencimento</th><th>Capital</th><th>Juros</th><th>Total</th><th>Status</th><th></th></tr></thead>
         <tbody>
@@ -154,9 +169,8 @@ async function renderGerenteContratoDetalhe(params) {
               <td data-label="Juros" class="mono">${formatMoney(i.interest_share)}</td>
               <td data-label="Total" class="mono">${formatMoney(i.amount_due)}</td>
               <td data-label="Status">${statusBadge(i.status, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[i.status])}</td>
-              <td data-label="" class="flex gap-8">
+              <td data-label="">
                 ${(i.status === 'pendente' || i.status === 'atrasada') ? `<button class="btn btn-accent btn-sm receive-inst-btn" data-id="${i.id}">Receber</button>` : ''}
-                <button class="icon-btn print-inst-btn" data-id="${i.id}" title="Imprimir nota promissória">${Icons.printer}</button>
               </td>
             </tr>
           `).join('')}
@@ -214,15 +228,12 @@ async function renderGerenteContratoDetalhe(params) {
     });
   };
 
-  root.querySelectorAll('.print-inst-btn').forEach((btn) => {
-    btn.onclick = () => {
-      const inst = (installments || []).find((i) => i.id === btn.dataset.id);
-      gerarPromissoriaPDF({
-        contract, installment: inst, clientProfile: p,
-        companyName: (App.settings && App.settings.company_name) || 'Siges Serviços Financeiros',
-      });
-    };
-  });
+  document.getElementById('print-promissorias-btn').onclick = () => {
+    gerarNotasPromissoriasPDF({
+      contract, installments: installments || [], clientProfile: p,
+      companyName: (App.settings && App.settings.company_name) || 'Siges Serviços Financeiros',
+    });
+  };
 
   root.querySelectorAll('.receive-inst-btn').forEach((btn) => {
     btn.onclick = () => openReceberModal({ sourceType: 'installment', id: btn.dataset.id, contract }, () => renderGerenteContratoDetalhe(params));

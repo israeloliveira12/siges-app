@@ -3,7 +3,22 @@
    ============================================================================ */
 
 let relatoriosTab = 'lucro';
-let relatoriosMonth = todayISO().slice(0, 7); // 'YYYY-MM'
+let relatoriosPeriodo = 'mes'; // 'dia' | 'mes' | 'ano'
+let relatoriosDia = todayISO();
+let relatoriosMes = todayISO().slice(0, 7);
+let relatoriosAno = todayISO().slice(0, 4);
+
+function periodoRange() {
+  if (relatoriosPeriodo === 'dia') {
+    return { start: relatoriosDia, end: addDaysISO(relatoriosDia, 1), bucket: 'dia' };
+  }
+  if (relatoriosPeriodo === 'ano') {
+    return { start: relatoriosAno + '-01-01', end: (Number(relatoriosAno) + 1) + '-01-01', bucket: 'mes' };
+  }
+  const start = relatoriosMes + '-01';
+  const end = addDaysISO(new Date(Number(relatoriosMes.slice(0, 4)), Number(relatoriosMes.slice(5, 7)), 0).toISOString().slice(0, 10), 1);
+  return { start, end, bucket: 'dia' };
+}
 
 async function renderGerenteRelatorios() {
   const root = document.getElementById('screen-gerente-relatorios');
@@ -14,104 +29,136 @@ async function renderGerenteRelatorios() {
         <button class="btn btn-sm ${relatoriosTab === 'fluxo' ? 'btn-primary' : 'btn-outline'}" id="tab-fluxo">Fluxo de Caixa</button>
         <button class="btn btn-sm ${relatoriosTab === 'analitico' ? 'btn-primary' : 'btn-outline'}" id="tab-analitico">Relatório Analítico</button>
       </div>
-      <input type="month" id="relatorios-month" value="${relatoriosMonth}">
+      <div class="flex gap-8 items-center">
+        <div class="auth-tabs" style="margin:0">
+          <button class="auth-tab ${relatoriosPeriodo === 'dia' ? 'active' : ''}" id="periodo-dia">Dia</button>
+          <button class="auth-tab ${relatoriosPeriodo === 'mes' ? 'active' : ''}" id="periodo-mes">Mês</button>
+          <button class="auth-tab ${relatoriosPeriodo === 'ano' ? 'active' : ''}" id="periodo-ano">Ano</button>
+        </div>
+        ${relatoriosPeriodo === 'dia' ? `<input type="date" id="relatorios-data" value="${relatoriosDia}">` : ''}
+        ${relatoriosPeriodo === 'mes' ? `<input type="month" id="relatorios-data" value="${relatoriosMes}">` : ''}
+        ${relatoriosPeriodo === 'ano' ? `<input type="number" id="relatorios-data" value="${relatoriosAno}" style="width:90px">` : ''}
+      </div>
     </div>
     <div id="relatorios-body" class="mt-14"><div class="text-soft">Carregando...</div></div>
   `;
   document.getElementById('tab-lucro').onclick = () => { relatoriosTab = 'lucro'; renderGerenteRelatorios(); };
   document.getElementById('tab-fluxo').onclick = () => { relatoriosTab = 'fluxo'; renderGerenteRelatorios(); };
   document.getElementById('tab-analitico').onclick = () => { relatoriosTab = 'analitico'; renderGerenteRelatorios(); };
-  document.getElementById('relatorios-month').onchange = (e) => { relatoriosMonth = e.target.value; renderGerenteRelatorios(); };
+  document.getElementById('periodo-dia').onclick = () => { relatoriosPeriodo = 'dia'; renderGerenteRelatorios(); };
+  document.getElementById('periodo-mes').onclick = () => { relatoriosPeriodo = 'mes'; renderGerenteRelatorios(); };
+  document.getElementById('periodo-ano').onclick = () => { relatoriosPeriodo = 'ano'; renderGerenteRelatorios(); };
+  document.getElementById('relatorios-data').onchange = (e) => {
+    if (relatoriosPeriodo === 'dia') relatoriosDia = e.target.value;
+    else if (relatoriosPeriodo === 'mes') relatoriosMes = e.target.value;
+    else relatoriosAno = e.target.value;
+    renderGerenteRelatorios();
+  };
 
-  const monthStart = relatoriosMonth + '-01';
-  const monthEnd = addDaysISO(new Date(Number(relatoriosMonth.slice(0, 4)), Number(relatoriosMonth.slice(5, 7)), 0).toISOString().slice(0, 10), 1);
+  const { start, end, bucket } = periodoRange();
 
   const [{ data: payments }, { data: contracts }] = await Promise.all([
-    supa.from('payments').select('*').gte('received_at', monthStart).lt('received_at', monthEnd),
-    supa.from('loan_contracts').select('*').gte('contract_date', monthStart).lt('contract_date', monthEnd),
+    supa.from('payments').select('*').gte('received_at', start).lt('received_at', end),
+    supa.from('loan_contracts').select('*').gte('contract_date', start).lt('contract_date', end),
   ]);
 
-  if (relatoriosTab === 'lucro') paintLucroAnalitico(payments || []);
-  else if (relatoriosTab === 'fluxo') paintFluxoCaixa(payments || [], contracts || []);
+  if (relatoriosTab === 'lucro') paintLucroAnalitico(payments || [], contracts || [], bucket);
+  else if (relatoriosTab === 'fluxo') paintFluxoCaixa(payments || [], contracts || [], bucket);
   else paintRelatorioAnalitico(payments || [], contracts || []);
 }
 
-function groupByDay(rows, dateField, valueFields) {
+function bucketKey(dateStr, bucket) {
+  return bucket === 'mes' ? String(dateStr).slice(0, 7) : String(dateStr).slice(0, 10);
+}
+
+function groupByBucket(rows, dateField, valueFields, bucket) {
   const map = {};
   rows.forEach((r) => {
-    const day = String(r[dateField]).slice(0, 10);
-    map[day] = map[day] || Object.fromEntries(valueFields.map((f) => [f, 0]));
-    valueFields.forEach((f) => { map[day][f] += Number(r[f] || 0); });
+    const key = bucketKey(r[dateField], bucket);
+    map[key] = map[key] || Object.fromEntries(valueFields.map((f) => [f, 0]));
+    valueFields.forEach((f) => { map[key][f] += Number(r[f] || 0); });
   });
   return map;
 }
 
-function paintLucroAnalitico(payments) {
+function bucketLabel(key, bucket) {
+  if (bucket === 'mes') {
+    const [y, m] = key.split('-');
+    const nomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    return nomes[Number(m) - 1] + '/' + y.slice(2);
+  }
+  return key.slice(8, 10);
+}
+
+function paintLucroAnalitico(payments, contracts, bucket) {
   const body = document.getElementById('relatorios-body');
-  const byDay = groupByDay(payments, 'received_at', ['net_profit', 'principal_component', 'amount_received']);
-  const days = Object.keys(byDay).sort();
-  const totalLucro = payments.reduce((s, p) => s + Number(p.net_profit), 0);
-  const today = todayISO();
-  const lucroHoje = byDay[today] ? byDay[today].net_profit : 0;
-  const retornoHoje = byDay[today] ? byDay[today].principal_component : 0;
+  const byBucketProfit = groupByBucket(payments, 'received_at', ['net_profit', 'principal_component', 'amount_received'], bucket);
+  const byBucketFees = groupByBucket(contracts, 'contract_date', ['operational_fee_amount'], bucket);
+  const keys = [...new Set([...Object.keys(byBucketProfit), ...Object.keys(byBucketFees)])].sort();
 
-  let melhorDia = null, piorDia = null;
-  days.forEach((d) => {
-    if (!melhorDia || byDay[d].net_profit > byDay[melhorDia].net_profit) melhorDia = d;
-    if (!piorDia || byDay[d].net_profit < byDay[piorDia].net_profit) piorDia = d;
-  });
+  const netFor = (k) => (byBucketProfit[k] ? byBucketProfit[k].net_profit : 0) - (byBucketFees[k] ? byBucketFees[k].operational_fee_amount : 0);
+  const totalLucro = keys.reduce((s, k) => s + netFor(k), 0);
 
-  const series = days.map((d) => ({ label: d.slice(8, 10), value: byDay[d].net_profit }));
+  const todayKey = bucketKey(todayISO(), bucket);
+  const lucroHoje = netFor(todayKey);
+  const retornoHoje = byBucketProfit[todayKey] ? byBucketProfit[todayKey].principal_component : 0;
+
+  let melhorDia = null;
+  keys.forEach((k) => { if (!melhorDia || netFor(k) > netFor(melhorDia)) melhorDia = k; });
+
+  const series = keys.map((k) => ({ label: bucketLabel(k, bucket), value: netFor(k) }));
 
   body.innerHTML = `
     <div class="grid grid-4">
-      <div class="card stat-card"><div class="label">Lucro total no mês</div><div class="value mono">${formatMoney(totalLucro)}</div></div>
+      <div class="card stat-card"><div class="label">Lucro total no período</div><div class="value mono">${formatMoney(totalLucro)}</div></div>
       <div class="card stat-card"><div class="label">Retorno hoje (capital)</div><div class="value mono">${formatMoney(retornoHoje)}</div></div>
       <div class="card stat-card"><div class="label">Lucro hoje</div><div class="value mono">${formatMoney(lucroHoje)}</div></div>
-      <div class="card stat-card"><div class="label">Dia mais lucrativo</div><div class="value" style="font-size:15px">${melhorDia ? formatDate(melhorDia) + ' · ' + formatMoney(byDay[melhorDia].net_profit) : '—'}</div></div>
+      <div class="card stat-card"><div class="label">${bucket === 'mes' ? 'Mês' : 'Dia'} mais lucrativo</div><div class="value" style="font-size:15px">${melhorDia ? bucketLabel(melhorDia, bucket) + ' · ' + formatMoney(netFor(melhorDia)) : '—'}</div></div>
     </div>
     <div class="card mt-14">
-      <h3>Lucro dia a dia</h3>
-      <div class="mt-8">${series.length ? barChartSVG(series, { color: CHART_COLORS.accent }) : '<p class="text-soft text-sm">Sem pagamentos neste mês.</p>'}</div>
+      <h3>Lucro por período (juros − taxa de saída dos contratos − taxas de entrada dos pagamentos)</h3>
+      <div class="mt-8">${series.length ? barChartSVG(series, { color: CHART_COLORS.accent }) : '<p class="text-soft text-sm">Sem movimento neste período.</p>'}</div>
     </div>
     <div class="card mt-14" style="padding:0">
       <table class="data-table table-scroll">
-        <thead><tr><th>Dia</th><th>Coletado</th><th>Retornado (capital)</th><th>Lucro</th></tr></thead>
+        <thead><tr><th>Período</th><th>Coletado</th><th>Retornado (capital)</th><th>Lucro líquido</th></tr></thead>
         <tbody>
-          ${days.map((d) => `<tr><td data-label="Dia">${formatDate(d)}</td><td data-label="Coletado" class="mono">${formatMoney(byDay[d].amount_received)}</td><td data-label="Retornado" class="mono">${formatMoney(byDay[d].principal_component)}</td><td data-label="Lucro" class="mono">${formatMoney(byDay[d].net_profit)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-soft">Sem movimento.</td></tr>'}
+          ${keys.map((k) => `<tr><td data-label="Período">${bucket === 'mes' ? bucketLabel(k, bucket) : formatDate(k)}</td><td data-label="Coletado" class="mono">${formatMoney(byBucketProfit[k] ? byBucketProfit[k].amount_received : 0)}</td><td data-label="Retornado" class="mono">${formatMoney(byBucketProfit[k] ? byBucketProfit[k].principal_component : 0)}</td><td data-label="Lucro" class="mono">${formatMoney(netFor(k))}</td></tr>`).join('') || '<tr><td colspan="4" class="text-soft">Sem movimento.</td></tr>'}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function paintFluxoCaixa(payments, contracts) {
+function paintFluxoCaixa(payments, contracts, bucket) {
   const body = document.getElementById('relatorios-body');
-  const recebidoMes = payments.reduce((s, p) => s + Number(p.amount_received), 0);
-  const aporteMes = contracts.reduce((s, c) => s + Number(c.principal_amount), 0);
-  const lucroLiquidoMes = payments.reduce((s, p) => s + Number(p.net_profit), 0);
-  const saldoLiquido = recebidoMes - aporteMes;
+  const recebido = payments.reduce((s, p) => s + Number(p.amount_received), 0);
+  const aporte = contracts.reduce((s, c) => s + Number(c.principal_amount), 0);
+  const exitFees = contracts.reduce((s, c) => s + Number(c.operational_fee_amount), 0);
+  const entryFees = payments.reduce((s, p) => s + Number(p.operational_fee_amount), 0);
+  const lucroLiquido = payments.reduce((s, p) => s + Number(p.interest_component), 0) - exitFees - entryFees;
+  const saldoLiquido = recebido - aporte;
 
-  const byDayIn = groupByDay(payments, 'received_at', ['amount_received']);
-  const byDayOut = groupByDay(contracts, 'contract_date', ['principal_amount']);
-  const allDays = [...new Set([...Object.keys(byDayIn), ...Object.keys(byDayOut)])].sort();
-  const seriesIn = allDays.map((d) => ({ label: d.slice(8, 10), value: (byDayIn[d] || { amount_received: 0 }).amount_received }));
-  const seriesOut = allDays.map((d) => ({ label: d.slice(8, 10), value: (byDayOut[d] || { principal_amount: 0 }).principal_amount }));
+  const byBucketIn = groupByBucket(payments, 'received_at', ['amount_received'], bucket);
+  const byBucketOut = groupByBucket(contracts, 'contract_date', ['principal_amount'], bucket);
+  const allKeys = [...new Set([...Object.keys(byBucketIn), ...Object.keys(byBucketOut)])].sort();
+  const seriesIn = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketIn[k] || { amount_received: 0 }).amount_received }));
+  const seriesOut = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketOut[k] || { principal_amount: 0 }).principal_amount }));
 
   body.innerHTML = `
     <div class="grid grid-4">
-      <div class="card stat-card"><div class="label">Aporte no mês</div><div class="value mono">${formatMoney(aporteMes)}</div></div>
-      <div class="card stat-card"><div class="label">Recebido no mês</div><div class="value mono">${formatMoney(recebidoMes)}</div></div>
-      <div class="card stat-card"><div class="label">Lucro líquido no mês</div><div class="value mono">${formatMoney(lucroLiquidoMes)}</div></div>
+      <div class="card stat-card"><div class="label">Aporte no período</div><div class="value mono">${formatMoney(aporte)}</div></div>
+      <div class="card stat-card"><div class="label">Recebido no período</div><div class="value mono">${formatMoney(recebido)}</div></div>
+      <div class="card stat-card"><div class="label">Lucro líquido (juros − taxas)</div><div class="value mono">${formatMoney(lucroLiquido)}</div></div>
       <div class="card stat-card"><div class="label">Saldo líquido (recebido − aporte)</div><div class="value mono" style="color:${saldoLiquido >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(saldoLiquido)}</div></div>
     </div>
     <div class="grid grid-2 mt-14">
       <div class="card">
-        <h3>Recebido por dia</h3>
+        <h3>Recebido por período</h3>
         <div class="mt-8">${seriesIn.length ? lineChartSVG(seriesIn, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
       </div>
       <div class="card">
-        <h3>Novo capital emprestado por dia</h3>
+        <h3>Novo capital emprestado por período</h3>
         <div class="mt-8">${seriesOut.length ? lineChartSVG(seriesOut, { color: CHART_COLORS.brand }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
       </div>
     </div>
@@ -123,12 +170,13 @@ function paintRelatorioAnalitico(payments, contracts) {
   const entradas = payments.reduce((s, p) => s + Number(p.amount_received), 0);
   const saidas = contracts.reduce((s, c) => s + Number(c.principal_amount), 0);
   const juros = payments.reduce((s, p) => s + Number(p.interest_component), 0);
-  const taxas = payments.reduce((s, p) => s + Number(p.operational_fee_amount), 0);
+  const exitFees = contracts.reduce((s, c) => s + Number(c.operational_fee_amount), 0);
+  const entryFees = payments.reduce((s, p) => s + Number(p.operational_fee_amount), 0);
 
   body.innerHTML = `
     <div class="grid grid-2">
       <div class="card">
-        <h3>Composição do mês</h3>
+        <h3>Composição do período</h3>
         <div class="flex items-center gap-14 mt-14" style="flex-wrap:wrap">
           ${donutChartSVG([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }])}
           <div style="flex:1;min-width:160px" class="flex flex-col gap-8">
@@ -142,11 +190,13 @@ function paintRelatorioAnalitico(payments, contracts) {
           <div class="stat-card"><div class="label">Entradas (recebimentos)</div><div class="value mono">${formatMoney(entradas)}</div></div>
           <div class="stat-card"><div class="label">Saídas (novo crédito)</div><div class="value mono">${formatMoney(saidas)}</div></div>
           <div class="stat-card"><div class="label">Juros recebidos (bruto)</div><div class="value mono">${formatMoney(juros)}</div></div>
-          <div class="stat-card"><div class="label">Taxas operacionais descontadas</div><div class="value mono">${formatMoney(taxas)}</div></div>
+          <div class="stat-card"><div class="label">Taxas de saída (contratos)</div><div class="value mono">${formatMoney(exitFees)}</div></div>
+          <div class="stat-card"><div class="label">Taxas de entrada (recebimentos)</div><div class="value mono">${formatMoney(entryFees)}</div></div>
+          <div class="stat-card"><div class="label">Lucro líquido total</div><div class="value mono">${formatMoney(juros - exitFees - entryFees)}</div></div>
         </div>
       </div>
     </div>
-    <p class="text-sm text-soft mt-14">Metodologia: entradas somam todos os pagamentos recebidos no mês (parcelas e renovações); saídas somam o valor bruto de novos contratos criados no mês. Juros/taxas refletem o detalhamento de cada pagamento.</p>
+    <p class="text-sm text-soft mt-14">Metodologia: entradas somam todos os pagamentos recebidos no período (parcelas e renovações); saídas somam o valor bruto de novos contratos criados no período. Lucro líquido considera juros recebidos menos taxas operacionais de saída (desembolso) e de entrada (recebimento).</p>
   `;
 }
 

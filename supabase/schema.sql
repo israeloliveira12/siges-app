@@ -22,6 +22,7 @@ create type notification_event as enum (
 );
 create type payment_kind as enum ('quitacao_parcela', 'renovacao_juros', 'quitacao_final');
 create type request_source as enum ('installment', 'renewal_cycle');
+create type client_approval_status as enum ('pendente', 'aprovado', 'rejeitado');
 
 -- ============================================================================
 -- 2. TABELAS
@@ -38,6 +39,7 @@ create table profiles (
   avatar_url text,
   created_by uuid references profiles(id),
   active boolean not null default true,
+  is_primary_admin boolean not null default false, -- só o 1º gerente criado; pode apagar todos os dados
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -50,6 +52,14 @@ create table clients (
   birth_date date,
   region text,
   client_group text,
+  company text,
+  job_title text,
+  salary numeric(12,2),
+  pix_key text,
+  approval_status client_approval_status not null default 'pendente',
+  decided_by uuid references profiles(id),
+  decided_at timestamptz,
+  decision_reason text,
   score integer not null default 50 check (score between 0 and 100),
   score_tier text not null default 'Bom',
   score_updated_at timestamptz,
@@ -87,7 +97,9 @@ create table loan_contracts (
 
   has_operational_fee boolean not null default false,
   operational_fee_amount numeric(12,2) not null default 0 check (operational_fee_amount >= 0),
-  net_disbursed_amount numeric(12,2) generated always as (principal_amount - operational_fee_amount) stored,
+  -- taxa operacional de SAÍDA é desembolsada A MAIS (não descontada do cliente):
+  -- empresta-se principal_amount ao cliente, e o caixa do gerente sai com o total abaixo.
+  total_disbursed_amount numeric(12,2) generated always as (principal_amount + operational_fee_amount) stored,
 
   contract_date date not null,
   first_installment_date date not null,
@@ -198,8 +210,11 @@ create table system_settings (
   id boolean primary key default true check (id),
   critical_days_threshold integer not null default 15,
   loss_days_threshold integer not null default 60,
-  default_operational_fee_percent numeric(6,3) not null default 0,
+  default_exit_fee_percent numeric(6,3) not null default 0,   -- % sobre o valor emprestado (saída/desembolso)
+  default_entry_fee_percent numeric(6,3) not null default 0,  -- % sobre o valor recebido (entrada/recebimento)
   company_name text not null default 'Siges Serviços Financeiros',
+  company_whatsapp text,
+  company_pix_key text,
   updated_at timestamptz not null default now()
 );
 insert into system_settings (id) values (true);
@@ -244,13 +259,21 @@ begin
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
-    new.email,
+    lower(new.email),
     'cliente'
   )
   on conflict (id) do nothing;
 
-  insert into public.clients (profile_id)
-  values (new.id)
+  insert into public.clients (profile_id, cpf, phone, company, job_title, salary, pix_key)
+  values (
+    new.id,
+    new.raw_user_meta_data->>'cpf',
+    new.raw_user_meta_data->>'phone',
+    new.raw_user_meta_data->>'company',
+    new.raw_user_meta_data->>'job_title',
+    nullif(new.raw_user_meta_data->>'salary', '')::numeric,
+    new.raw_user_meta_data->>'pix_key'
+  )
   on conflict (profile_id) do nothing;
 
   return new;
@@ -272,6 +295,16 @@ security definer set search_path = public
 as $$
   select exists (
     select 1 from profiles where id = auth.uid() and role = 'gerente' and active
+  );
+$$;
+
+create or replace function is_primary_admin()
+returns boolean
+language sql stable
+security definer set search_path = public
+as $$
+  select exists (
+    select 1 from profiles where id = auth.uid() and role = 'gerente' and is_primary_admin and active
   );
 $$;
 
@@ -833,7 +866,11 @@ create or replace function update_client_profile(
   p_credit_limit numeric,
   p_region text,
   p_client_group text,
-  p_notes text
+  p_notes text,
+  p_company text default null,
+  p_job_title text default null,
+  p_salary numeric default null,
+  p_pix_key text default null
 )
 returns void
 language plpgsql
@@ -848,8 +885,87 @@ begin
     where id = p_client_id;
 
   update clients set credit_limit = p_credit_limit, region = p_region,
-    client_group = p_client_group, notes = p_notes
+    client_group = p_client_group, notes = p_notes,
+    company = p_company, job_title = p_job_title, salary = p_salary, pix_key = p_pix_key
     where profile_id = p_client_id;
+end;
+$$;
+
+-- 5.11b Editar dados básicos de outro administrador/gerente (nunca altera
+-- is_primary_admin por aqui, propositalmente)
+create or replace function update_gerente_profile(
+  p_gerente_id uuid,
+  p_full_name text,
+  p_phone text,
+  p_active boolean
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  update profiles set full_name = p_full_name, phone = p_phone, active = p_active, updated_at = now()
+    where id = p_gerente_id and role = 'gerente';
+end;
+$$;
+
+-- 5.12 Aprovar / reprovar o cadastro de um cliente (item obrigatório antes de
+-- ele conseguir usar o sistema, além da confirmação de e-mail do Supabase Auth)
+create or replace function approve_client(p_client_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  update clients set approval_status = 'aprovado', decided_by = auth.uid(), decided_at = now(), decision_reason = null
+    where profile_id = p_client_id;
+
+  insert into notifications_log (recipient_id, event, channel, title, body)
+  values (p_client_id, 'solicitacao_aprovada', 'in_app', 'Cadastro aprovado',
+          'Sua conta foi aprovada. Você já pode usar o SIGES normalmente.');
+end;
+$$;
+
+create or replace function reject_client(p_client_id uuid, p_reason text)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  update clients set approval_status = 'rejeitado', decided_by = auth.uid(), decided_at = now(), decision_reason = p_reason
+    where profile_id = p_client_id;
+
+  insert into notifications_log (recipient_id, event, channel, title, body)
+  values (p_client_id, 'solicitacao_reprovada', 'in_app', 'Cadastro não aprovado',
+          coalesce('Motivo: ' || p_reason, 'Seu cadastro não foi aprovado.'));
+end;
+$$;
+
+-- 5.13 Apagar todos os dados de negócio — só o admin primário. Chamada pela
+-- serverless function /api/wipe-all-data.js, que também remove as contas de
+-- auth.users dos clientes via service_role (SQL puro não alcança auth.users).
+create or replace function wipe_all_business_data()
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_primary_admin() then
+    raise exception 'FORBIDDEN';
+  end if;
+
+  delete from payments;
+  delete from renewal_cycles;
+  delete from installments;
+  delete from loan_contracts;
+  delete from loan_requests;
+  delete from notifications_log;
+  delete from push_subscriptions;
+  delete from clients;
+  delete from profiles where role = 'cliente';
 end;
 $$;
 
@@ -887,7 +1003,10 @@ create policy "clients_gerente_update" on clients for update using (is_gerente()
 create policy "requests_select" on loan_requests for select
   using (client_id = auth.uid() or is_gerente());
 create policy "requests_insert_self" on loan_requests for insert
-  with check (client_id = auth.uid());
+  with check (
+    client_id = auth.uid()
+    and exists (select 1 from clients c where c.profile_id = auth.uid() and c.approval_status = 'aprovado')
+  );
 create policy "requests_update_gerente" on loan_requests for update
   using (is_gerente());
 

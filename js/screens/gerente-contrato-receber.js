@@ -83,7 +83,16 @@ async function openReceberModal(source, onDone) {
         const fee = feeToggle.checked ? Number(document.getElementById('r-fee-amount').value || 0) : 0;
         document.getElementById('r-net-profit').textContent = formatMoney(interestPortion - fee);
       };
-      feeToggle.onchange = () => { document.getElementById('r-fee-fields').classList.toggle('hidden', !feeToggle.checked); recompute(); };
+      feeToggle.onchange = () => {
+        document.getElementById('r-fee-fields').classList.toggle('hidden', !feeToggle.checked);
+        const feeInput = document.getElementById('r-fee-amount');
+        if (feeToggle.checked && !Number(feeInput.value)) {
+          const amount = Number(document.getElementById('r-amount').value || 0);
+          const pct = (App.settings && App.settings.default_entry_fee_percent) || 0;
+          feeInput.value = (amount * pct / 100).toFixed(2);
+        }
+        recompute();
+      };
       document.getElementById('r-fee-amount').oninput = recompute;
     } else {
       fields.innerHTML = `
@@ -103,7 +112,16 @@ async function openReceberModal(source, onDone) {
         document.getElementById('r-gross-profit').textContent = formatMoney(interestAmount);
         document.getElementById('r-net-profit').textContent = formatMoney(interestAmount - fee);
       };
-      feeToggle.onchange = () => { document.getElementById('r-fee-fields').classList.toggle('hidden', !feeToggle.checked); recompute(); };
+      feeToggle.onchange = () => {
+        document.getElementById('r-fee-fields').classList.toggle('hidden', !feeToggle.checked);
+        const feeInput = document.getElementById('r-fee-amount');
+        if (feeToggle.checked && !Number(feeInput.value)) {
+          const interestAmount = Number(document.getElementById('r-interest-amount').value || 0);
+          const pct = (App.settings && App.settings.default_entry_fee_percent) || 0;
+          feeInput.value = (interestAmount * pct / 100).toFixed(2);
+        }
+        recompute();
+      };
       document.getElementById('r-fee-amount').oninput = recompute;
       document.getElementById('r-interest-amount').oninput = recompute;
     }

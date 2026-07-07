@@ -78,6 +78,14 @@ function scoreTierBadge(tier) {
   return `<span class="badge ${map[tier] || 'badge-neutral'}">${escapeHtml(tier)}</span>`;
 }
 
+function formatCpf(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
 function dueTypeLabel(t) {
   return { mensal: 'Mensal', quinzenal: 'Quinzenal', semanal: 'Semanal' }[t] || t;
 }

@@ -4,9 +4,9 @@
 
 const MESES_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
-function gerarPromissoriaPDF({ contract, installment, clientProfile, companyName }) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+// Desenha uma nota promissória na página ATUAL do doc (não cria/salva nada) —
+// usada para montar um único PDF com várias páginas, uma por parcela.
+function drawPromissoriaPage(doc, { contract, installment, clientProfile, companyName }) {
   const dueDate = new Date(installment.due_date + 'T00:00:00');
 
   doc.setFont('helvetica', 'bold');
@@ -39,8 +39,21 @@ function gerarPromissoriaPDF({ contract, installment, clientProfile, companyName
   doc.line(20, afterTextY + 35, 120, afterTextY + 35);
   doc.setFontSize(9);
   doc.text('Assinatura', 20, afterTextY + 40);
+}
 
-  doc.save(`nota-promissoria-contrato-${contract.contract_number}-parcela-${installment.sequence_number}.pdf`);
+// Gera UM único PDF com todas as notas promissórias do contrato, uma parcela
+// por página (em vez de um arquivo separado para cada parcela).
+function gerarNotasPromissoriasPDF({ contract, installments, clientProfile, companyName }) {
+  if (!installments || !installments.length) { showToast('Este contrato não tem parcelas.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+
+  installments.forEach((installment, idx) => {
+    if (idx > 0) doc.addPage();
+    drawPromissoriaPage(doc, { contract, installment, clientProfile, companyName });
+  });
+
+  doc.save(`notas-promissorias-contrato-${contract.contract_number}.pdf`);
 }
 
 function gerarExtratoPDF({ contract, installments, clientProfile, score, companyName }) {

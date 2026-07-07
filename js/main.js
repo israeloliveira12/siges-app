@@ -17,7 +17,7 @@ const NAV_ITEMS = {
     { route: 'gerente/contratos', label: 'Contratos', icon: 'contract' },
     { route: 'gerente/solicitacoes', label: 'Solicitações', icon: 'inbox' },
     { route: 'gerente/clientes', label: 'Clientes', icon: 'users' },
-    { route: 'gerente/gerentes', label: 'Gerentes', icon: 'userPlus' },
+    { route: 'gerente/gerentes', label: 'Administradores', icon: 'userPlus' },
     { route: 'gerente/relatorios', label: 'Relatórios', icon: 'chart' },
     { route: 'gerente/score', label: 'Score de Clientes', icon: 'score' },
     { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings' },
@@ -52,7 +52,7 @@ function renderShellForRole() {
   });
 
   document.getElementById('sidebar-user-name').textContent = userDisplayName();
-  document.getElementById('sidebar-user-role').textContent = role === 'gerente' ? 'Gerente' : 'Cliente';
+  document.getElementById('sidebar-user-role').textContent = role === 'gerente' ? 'Administrador' : 'Cliente';
   document.getElementById('topbar-signout').onclick = handleSignOut;
 
   renderBell();

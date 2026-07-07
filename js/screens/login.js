@@ -42,7 +42,22 @@ function renderLoginScreen() {
             <div class="field">
               <label>Nome completo</label>
               <input type="text" id="f-name" autocomplete="name" required>
-            </div>` : ''}
+            </div>
+            <div class="field-row">
+              <div class="field"><label>CPF</label><input type="text" id="f-cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" required></div>
+              <div class="field"><label>Telefone / WhatsApp</label><input type="tel" id="f-phone" placeholder="(11) 99999-0000"></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Empresa</label><input type="text" id="f-company"></div>
+              <div class="field"><label>Cargo</label><input type="text" id="f-job-title"></div>
+            </div>
+            <div class="field"><label>Salário (R$)</label><input type="number" min="0" step="0.01" id="f-salary"></div>
+            <div class="field">
+              <label>Chave Pix</label>
+              <input type="text" id="f-pix-key">
+              <span class="help">Atenção: o CPF cadastrado acima deve ser o mesmo CPF do dono da chave Pix.</span>
+            </div>
+          ` : ''}
           <div class="field">
             <label>E-mail</label>
             <input type="email" id="f-email" autocomplete="email" required>
@@ -62,7 +77,7 @@ function renderLoginScreen() {
         <button class="google-btn" id="google-btn">${Icons.google} Continuar com Google</button>
 
         <p class="text-sm text-soft text-center mt-14">
-          Este cadastro é exclusivo para clientes. Contas de gerente são criadas internamente pela equipe Siges.
+          Este cadastro é exclusivo para clientes. Contas de administrador são criadas internamente pela equipe Siges.
         </p>
       </div>
     </div>
@@ -71,6 +86,9 @@ function renderLoginScreen() {
   document.getElementById('tab-login').onclick = () => { authMode = 'login'; renderLoginScreen(); };
   document.getElementById('tab-signup').onclick = () => { authMode = 'signup'; renderLoginScreen(); };
   document.getElementById('google-btn').onclick = () => withAuthButtonsDisabled(['google-btn'], doGoogleSignIn);
+
+  const cpfInput = document.getElementById('f-cpf');
+  if (cpfInput) cpfInput.oninput = () => { cpfInput.value = formatCpf(cpfInput.value); };
 
   const forgotLink = document.getElementById('forgot-link');
   if (forgotLink) {
@@ -90,11 +108,46 @@ function renderLoginScreen() {
       if (authMode === 'login') {
         await doSignIn(email, password);
       } else {
-        const fullName = document.getElementById('f-name').value.trim();
-        await doSignUp(email, password, fullName);
+        const cpf = document.getElementById('f-cpf').value.trim();
+        if (cpf.replace(/\D/g, '').length !== 11) { setAuthError('Informe um CPF válido (11 dígitos).'); return; }
+        const profileData = {
+          full_name: document.getElementById('f-name').value.trim(),
+          cpf,
+          phone: document.getElementById('f-phone').value.trim(),
+          company: document.getElementById('f-company').value.trim(),
+          job_title: document.getElementById('f-job-title').value.trim(),
+          salary: document.getElementById('f-salary').value,
+          pix_key: document.getElementById('f-pix-key').value.trim(),
+        };
+        await doSignUp(email, password, profileData);
       }
     });
   };
+}
+
+function renderPendingApprovalScreen(client) {
+  const root = document.getElementById('auth-screen');
+  const rejected = client.approval_status === 'rejeitado';
+  root.innerHTML = `
+    <div class="auth-shell">
+      <div class="auth-card text-center">
+        <div class="auth-logo">
+          ${Icons.logo}
+          <div class="name">SIGES</div>
+          <div class="sub">Siges Serviços Financeiros</div>
+        </div>
+        ${rejected ? `
+          <div class="auth-error">Seu cadastro não foi aprovado.</div>
+          ${client.decision_reason ? `<p class="text-sm text-soft mt-8">Motivo: ${escapeHtml(client.decision_reason)}</p>` : ''}
+        ` : `
+          <div class="auth-msg">Seu cadastro está em análise.</div>
+          <p class="text-sm text-soft mt-14">Um administrador precisa aprovar sua conta antes que você possa acessar o sistema. Isso costuma ser rápido — tente novamente mais tarde ou entre em contato com a Siges.</p>
+        `}
+        <button class="btn btn-outline btn-block mt-20" id="pending-signout">Sair</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('pending-signout').onclick = handleSignOut;
 }
 
 function renderResetPasswordModal() {

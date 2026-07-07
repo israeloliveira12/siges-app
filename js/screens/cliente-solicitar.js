@@ -29,7 +29,7 @@ async function renderClienteSolicitar() {
           <div class="field">
             <label>Valor desejado (R$)</label>
             <input type="number" id="s-amount" min="1" step="0.01" max="${available || undefined}" required>
-            <span class="help">O valor será analisado pelo gerente, que pode ajustar as condições finais.</span>
+            <span class="help">O valor será analisado por um administrador, que pode ajustar as condições finais.</span>
           </div>
           <div class="field">
             <label>Número de parcelas desejado (opcional)</label>
@@ -70,7 +70,7 @@ async function renderClienteSolicitar() {
 
     if (!amount || amount <= 0) { feedback.innerHTML = '<div class="auth-error">Informe um valor válido.</div>'; return; }
     if (available > 0 && amount > available) {
-      feedback.innerHTML = `<div class="auth-error">O valor solicitado ultrapassa seu limite disponível (${formatMoney(available)}). Você ainda pode enviar, mas o gerente poderá ajustar.</div>`;
+      feedback.innerHTML = `<div class="auth-error">O valor solicitado ultrapassa seu limite disponível (${formatMoney(available)}). Você ainda pode enviar, mas o administrador poderá ajustar.</div>`;
     }
 
     const btn = document.getElementById('s-submit');
@@ -86,7 +86,7 @@ async function renderClienteSolicitar() {
       notifyEvent('solicitacao_criada', null,
         'Nova solicitação de empréstimo',
         `${userDisplayName()} solicitou ${formatMoney(amount)}.`);
-      showToast('Solicitação enviada! O gerente foi notificado.');
+      showToast('Solicitação enviada! O administrador foi notificado.');
       await renderClienteSolicitar();
     } catch (e2) {
       feedback.innerHTML = `<div class="auth-error">${escapeHtml(e2.message || String(e2))}</div>`;

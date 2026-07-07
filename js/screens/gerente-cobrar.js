@@ -2,6 +2,43 @@
    Gerente — Cobrar: vencimentos de hoje e atrasados
    ============================================================================ */
 
+function formatDateShortYear(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = String(iso).slice(0, 10).split('-');
+  return `${d}/${m}/${y.slice(2)}`;
+}
+
+function buildWhatsappUrl(item) {
+  const p = ((item.contract || {}).clients || {}).profiles || {};
+  const phoneDigits = String(p.phone || '').replace(/\D/g, '');
+  if (!phoneDigits) return null;
+  const withCountry = phoneDigits.startsWith('55') ? phoneDigits : '55' + phoneDigits;
+
+  const parcelaLabel = item.type === 'installment'
+    ? `${item.seq} de ${(item.contract || {}).installments_count || '?'}`
+    : String(item.seq);
+
+  const atencao = item.status === 'atrasada'
+    ? 'Efetue o pagamento da sua parcela atrasada'
+    : 'Sua parcela vence hoje — efetue o pagamento para evitar atraso';
+
+  const texto = [
+    '*Cobrança de Pagamento*',
+    '',
+    `*Empresa:* ${(App.settings && App.settings.company_name) || 'Siges Serviços Financeiros'}`,
+    `*Cliente:* ${p.full_name || ''}`,
+    `*Contrato:* ${(item.contract || {}).contract_number || ''}`,
+    `*Parcela* ${parcelaLabel}`,
+    `*Valor da Parcela:* ${formatMoney(item.amount)}`,
+    `*Data Vencimento:* ${formatDateShortYear(item.due_date)}`,
+    `*Chave Pix:* ${(App.settings && App.settings.company_pix_key) || '—'}`,
+    '',
+    `*Atenção:* ${atencao}`,
+  ].join('\n');
+
+  return `https://wa.me/${withCountry}?text=${encodeURIComponent(texto)}`;
+}
+
 async function renderGerenteCobrar() {
   const root = document.getElementById('screen-gerente-cobrar');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
@@ -15,7 +52,7 @@ async function renderGerenteCobrar() {
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received').gte('received_at', monthStart),
-    supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(contract_number, allows_renewal, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
+    supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(contract_number, allows_renewal, installments_count, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
     supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(contract_number, allows_renewal, principal_amount, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
   ]);
 
@@ -36,7 +73,7 @@ async function renderGerenteCobrar() {
   const atrasados = items.filter((i) => i.status === 'atrasada').sort((a, b) => a.due_date.localeCompare(b.due_date));
   const dividaTotal = sum(items, 'amount');
 
-  function listBlock(title, list, emptyMsg) {
+  function listBlock(list, emptyMsg) {
     if (!list.length) return `<div class="empty-state">${Icons.check}<p>${emptyMsg}</p></div>`;
     return `
       <table class="data-table table-scroll">
@@ -44,13 +81,19 @@ async function renderGerenteCobrar() {
         <tbody>
           ${list.map((i) => {
             const p = ((i.contract || {}).clients || {}).profiles || {};
+            const waUrl = buildWhatsappUrl(i);
             return `
             <tr>
               <td data-label="Cliente"><div>${escapeHtml(p.full_name || '—')}<div class="text-sm text-soft">${escapeHtml(p.phone || '')}</div></div></td>
               <td data-label="Contrato">#${(i.contract || {}).contract_number} · ${i.seq}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
               <td data-label="Valor" class="mono">${formatMoney(i.amount)}</td>
-              <td data-label=""><button class="btn btn-accent btn-sm cobrar-item-btn" data-type="${i.type}" data-id="${i.id}">Receber</button></td>
+              <td data-label="">
+                <div class="flex gap-8">
+                  <button class="btn btn-accent btn-sm cobrar-item-btn" data-type="${i.type}" data-id="${i.id}">Receber</button>
+                  ${waUrl ? `<a class="btn btn-outline btn-sm" href="${waUrl}" target="_blank" rel="noopener" title="Cobrar via WhatsApp">${Icons.alarm} WhatsApp</a>` : ''}
+                </div>
+              </td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -67,12 +110,12 @@ async function renderGerenteCobrar() {
 
     <div class="card mt-14">
       <h3>Vencidos hoje (${vencidosHoje.length})</h3>
-      <div class="mt-8">${listBlock('Vencidos hoje', vencidosHoje, 'Nenhum vencimento hoje.')}</div>
+      <div class="mt-8">${listBlock(vencidosHoje, 'Nenhum vencimento hoje.')}</div>
     </div>
 
     <div class="card mt-14" style="border-color:var(--bad)">
       <h3 style="color:var(--bad)">Atrasados (${atrasados.length}) — total ${formatMoney(dividaTotal)}</h3>
-      <div class="mt-8">${listBlock('Atrasados', atrasados, 'Nenhum contrato em atraso.')}</div>
+      <div class="mt-8">${listBlock(atrasados, 'Nenhum contrato em atraso.')}</div>
     </div>
   `;
 
