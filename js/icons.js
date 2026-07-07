@@ -3,12 +3,10 @@
    ============================================================================ */
 
 const Icons = {
-  logo: `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="64" height="64" rx="14" fill="#0B416B"/>
-    <path d="M14 46 L46 14" stroke="#1E9A95" stroke-width="9" stroke-linecap="round"/>
-    <path d="M46 14 L46 24 M46 14 L36 14" stroke="#1E9A95" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="32" y="41" font-family="Segoe UI, Arial, sans-serif" font-weight="700" font-size="20" fill="#fff" text-anchor="middle">SG</text>
-  </svg>`,
+  // Monograma oficial "SG" (S + G entrelaçados com a seta de crescimento),
+  // extraído da arte original da Siges — mantido em um card branco próprio
+  // para o traço navy nunca perder contraste sobre fundos escuros (sidebar).
+  logo: `<img src="icons/icon-192.png" alt="SIGES" style="border-radius:22%;display:block">`,
 
   dashboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>`,
   users: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="8.5" r="2.6"/><path d="M15.5 13c2.9.3 5 2.6 5 5.5"/></svg>`,

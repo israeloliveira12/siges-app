@@ -27,7 +27,7 @@ function renderLoginScreen() {
         <div class="auth-logo">
           ${Icons.logo}
           <div class="name">SIGES</div>
-          <div class="sub">Siges Serviços Financeiros</div>
+          <div class="sub">Serviços Financeiros</div>
         </div>
 
         <div class="auth-tabs">
@@ -134,7 +134,7 @@ function renderPendingApprovalScreen(client) {
         <div class="auth-logo">
           ${Icons.logo}
           <div class="name">SIGES</div>
-          <div class="sub">Siges Serviços Financeiros</div>
+          <div class="sub">Serviços Financeiros</div>
         </div>
         ${rejected ? `
           <div class="auth-error">Seu cadastro não foi aprovado.</div>
