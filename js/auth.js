@@ -84,7 +84,12 @@ async function handleAuthEvent(session) {
     if (!authHandled) { authHandled = true; showAuthGate(); }
     return;
   }
-  if (authHandled && App.session && App.session.user.id === session.user.id) return;
+  const alreadyBooted = authHandled && App.session && App.session.user.id === session.user.id;
+  // Sempre atualiza a sessão (inclusive o access_token), mesmo quando não
+  // reprocessa o boot inteiro — sem isso, o token some depois do refresh
+  // automático do Supabase e as chamadas a /api/* passam a falhar.
+  App.session = session;
+  if (alreadyBooted) return;
   authHandled = true;
   await onAuthenticated(session);
 }

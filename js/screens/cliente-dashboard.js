@@ -29,7 +29,10 @@ async function renderClienteDashboard() {
   const score = App.client ? App.client.score : 50;
   const tier = App.client ? App.client.score_tier : 'Bom';
 
+  const firstName = (userDisplayName() || '').trim().split(' ')[0];
+
   root.innerHTML = `
+    <h2 style="margin-bottom:16px">Olá, ${escapeHtml(firstName)}!</h2>
     <div class="grid grid-3">
       <div class="card stat-card">
         <div class="label">Limite disponível</div>

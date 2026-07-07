@@ -91,111 +91,122 @@ async function gerarExtratoPDF({ contract, installments, clientProfile, score, c
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const NAVY = [11, 65, 107];
-  const TEAL = [30, 154, 149];
+  const INK_SOFT = [91, 102, 99];
+  const LINE = [220, 226, 223];
+  // Logo sem fundo, direto sobre a página branca (mantém contraste do S navy —
+  // colocá-la sobre uma faixa colorida a fazia sumir).
   const logoDataUrl = await loadImageDataUrl('icons/logo-mark.png');
 
-  // Cabeçalho: logo + nome da empresa + faixa navy
-  doc.setFillColor(...NAVY);
-  doc.rect(0, 0, 210, 34, 'F');
+  // Cabeçalho — minimalista: logo pequena + nome da empresa, sem faixa de cor
   if (logoDataUrl) {
-    try { doc.addImage(logoDataUrl, 'PNG', 16, 7, 20, 20); } catch (e) { /* segue sem logo se o formato falhar */ }
+    try { doc.addImage(logoDataUrl, 'PNG', 20, 14, 12, 12); } catch (e) { /* segue sem logo se o formato falhar */ }
   }
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(...NAVY);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text(companyName, 42, 16);
+  doc.setFontSize(13);
+  doc.text(companyName, 36, 20);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text(`Extrato do Contrato #${contract.contract_number}`, 42, 23);
-  doc.setFontSize(8);
-  doc.text(`Emitido em ${formatDate(todayISO())}`, 42, 29);
+  doc.setTextColor(...INK_SOFT);
+  doc.setFontSize(8.5);
+  doc.text(`Extrato do Contrato #${contract.contract_number} · Emitido em ${formatDate(todayISO())}`, 36, 25.5);
 
   if (score != null) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.text(String(score), 190, 16, { align: 'right' });
-    doc.setFontSize(7.5);
+    doc.setTextColor(...NAVY);
+    doc.setFontSize(16);
+    doc.text(String(score), 190, 18, { align: 'right' });
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.text('SCORE DO CLIENTE', 190, 21, { align: 'right' });
+    doc.setTextColor(...INK_SOFT);
+    doc.text('SCORE DO CLIENTE', 190, 22.5, { align: 'right' });
   }
-  doc.setTextColor(0, 0, 0);
 
-  // Dados do cliente
-  doc.setFillColor(244, 246, 247);
-  doc.rect(20, 42, 170, 16, 'F');
+  doc.setDrawColor(...LINE);
+  doc.setLineWidth(0.3);
+  doc.line(20, 32, 190, 32);
+
+  // Dados do cliente — texto simples, sem caixa preenchida
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.text('CLIENTE', 25, 48);
-  doc.text('CPF', 130, 48);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...INK_SOFT);
+  doc.text('CLIENTE', 20, 40);
+  doc.text('CPF', 130, 40);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
-  doc.text(clientProfile.full_name || '—', 25, 54);
-  doc.text(clientProfile.cpf || '—', 130, 54);
+  doc.setTextColor(20, 33, 43);
+  doc.text(clientProfile.full_name || '—', 20, 46);
+  doc.text(clientProfile.cpf || '—', 130, 46);
+
+  doc.setDrawColor(...LINE);
+  doc.line(20, 52, 190, 52);
 
   const paid = installments.filter((i) => i.status === 'paga');
   const remaining = installments.filter((i) => i.status !== 'paga');
   const totalDue = installments.reduce((s, i) => s + Number(i.amount_due), 0);
   const totalPaid = paid.reduce((s, i) => s + Number(i.amount_due), 0);
 
-  // Cards de resumo
-  const cardY = 64, cardW = 54, cardH = 22, gap = 4;
-  const cards = [
-    { label: 'DÍVIDA TOTAL', value: formatMoney(totalDue), color: NAVY },
-    { label: 'VALOR PAGO', value: formatMoney(totalPaid), color: TEAL },
-    { label: 'PARCELAS RESTANTES', value: `${remaining.length} de ${installments.length}`, color: NAVY },
+  // Resumo — três colunas de texto simples, sem blocos coloridos
+  const summary = [
+    { label: 'DÍVIDA TOTAL', value: formatMoney(totalDue) },
+    { label: 'VALOR PAGO', value: formatMoney(totalPaid) },
+    { label: 'PARCELAS RESTANTES', value: `${remaining.length} de ${installments.length}` },
   ];
-  cards.forEach((c, i) => {
-    const x = 20 + i * (cardW + gap);
-    doc.setDrawColor(220, 226, 223);
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(x, cardY, cardW, cardH, 2, 2, 'FD');
-    doc.setFillColor(...c.color);
-    doc.rect(x, cardY, 2, cardH, 'F');
+  const colW = 170 / 3;
+  summary.forEach((c, i) => {
+    const x = 20 + i * colW;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    doc.setTextColor(90, 100, 96);
-    doc.text(c.label, x + 6, cardY + 8);
-    doc.setFontSize(12);
-    doc.setTextColor(...c.color);
-    doc.text(c.value, x + 6, cardY + 16);
+    doc.setTextColor(...INK_SOFT);
+    doc.text(c.label, x, 60);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(...NAVY);
+    doc.text(c.value, x, 67);
   });
-  doc.setTextColor(0, 0, 0);
 
-  // Tabela de parcelas
-  let y = 100;
-  doc.setFillColor(...NAVY);
-  doc.rect(20, y - 6, 170, 8, 'F');
+  doc.setDrawColor(...LINE);
+  doc.line(20, 73, 190, 73);
+
+  // Tabela de parcelas — cabeçalho com sublinha fina, sem preenchimento
+  let y = 84;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(255, 255, 255);
-  const cols = [24, 42, 78, 114, 145, 178];
+  doc.setFontSize(8);
+  doc.setTextColor(...INK_SOFT);
+  const cols = [20, 40, 76, 112, 143, 176];
   ['Nº', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
-  doc.setTextColor(0, 0, 0);
-  y += 8;
+  doc.setDrawColor(...NAVY);
+  doc.setLineWidth(0.4);
+  doc.line(20, y + 2.5, 190, y + 2.5);
+  y += 10;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
+  doc.setTextColor(20, 33, 43);
   installments.forEach((inst, idx) => {
     if (y > 270) {
       doc.addPage();
       y = 24;
-      doc.setFillColor(...NAVY);
-      doc.rect(20, y - 6, 170, 8, 'F');
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(8);
+      doc.setTextColor(...INK_SOFT);
       ['Nº', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
-      doc.setTextColor(0, 0, 0);
+      doc.setDrawColor(...NAVY);
+      doc.line(20, y + 2.5, 190, y + 2.5);
+      y += 10;
       doc.setFont('helvetica', 'normal');
-      y += 8;
+      doc.setFontSize(9);
+      doc.setTextColor(20, 33, 43);
     }
-    if (idx % 2 === 0) { doc.setFillColor(248, 249, 247); doc.rect(20, y - 5, 170, 7, 'F'); }
     const statusLabel = { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[inst.status];
     doc.text(String(inst.sequence_number), cols[0], y);
     doc.text(formatDate(inst.due_date), cols[1], y);
     doc.text(inst.paid_at ? formatDate(inst.paid_at) : '—', cols[2], y);
     doc.text(formatMoney(inst.amount_due), cols[3], y);
     doc.text(statusLabel, cols[4], y);
-    y += 7;
+    doc.setDrawColor(240, 242, 240);
+    doc.setLineWidth(0.2);
+    doc.line(20, y + 2.5, 190, y + 2.5);
+    y += 8;
   });
 
   addExtratoFooter(doc, companyName);
