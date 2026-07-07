@@ -49,6 +49,7 @@ Rode `git status` em `supabase/` para ver quais migrations ainda não foram comm
 
 ## Limitações conhecidas (v1, ver README para detalhes)
 
+- **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.
 - WhatsApp é só via link `wa.me` (zero custo, sem API paga) — não há envio automático de WhatsApp pelo servidor.
 - Sem paginação em nenhuma listagem (`gerente-clientes.js`, `gerente-contratos-lista.js` etc.) — inofensivo no volume atual, mas é o primeiro ponto a atacar se o negócio crescer muito.
 - Sem testes automatizados — valide sempre manualmente no preview, incluindo viewport mobile.
