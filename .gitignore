@@ -1,0 +1,10 @@
+.vercel
+.DS_Store
+Thumbs.db
+*.log
+.claude/
+
+# Material de referência/identidade visual (não faz parte do site publicado)
+Identidade Visual/
+Referencias de um site que já existe/
+Regra de emprestimo de valores/

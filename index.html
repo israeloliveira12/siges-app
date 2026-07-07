@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SIGES — Siges Serviços Financeiros</title>
+<meta name="description" content="Sistema de gestão de empréstimos da Siges Serviços Financeiros">
+<meta name="theme-color" content="#0B416B">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Tela de autenticação (login/cadastro) -->
+<div id="auth-screen" class="active"></div>
+
+<!-- App principal (só aparece depois de autenticado) -->
+<div id="app">
+  <div class="app-shell">
+
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <span id="sidebar-logo-svg"></span>
+        <div>
+          <div class="name">SIGES</div>
+          <div class="sub">Serviços Financeiros</div>
+        </div>
+      </div>
+      <nav id="sidebar-nav" class="nav-group"></nav>
+      <div class="sidebar-footer">
+        <div class="flex items-center gap-10" style="padding:8px 10px 12px">
+          <div>
+            <div style="font-size:13px;font-weight:700" id="sidebar-user-name">—</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.55)" id="sidebar-user-role">—</div>
+          </div>
+        </div>
+        <button class="nav-link" id="sidebar-signout"><span id="sidebar-signout-icon"></span><span>Sair</span></button>
+      </div>
+    </aside>
+
+    <div class="main-col">
+      <header class="topbar">
+        <div class="topbar-title" id="topbar-title">SIGES</div>
+        <div class="topbar-actions">
+          <div id="bell-wrap" class="bell-wrap"></div>
+          <button class="icon-btn" id="topbar-signout" title="Sair"></button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section id="screen-cliente-dashboard" class="screen"></section>
+        <section id="screen-cliente-solicitar" class="screen"></section>
+        <section id="screen-cliente-emprestimos" class="screen"></section>
+        <section id="screen-cliente-score" class="screen"></section>
+        <section id="screen-cliente-notificacoes" class="screen"></section>
+
+        <section id="screen-gerente-dashboard" class="screen"></section>
+        <section id="screen-gerente-clientes" class="screen"></section>
+        <section id="screen-gerente-gerentes" class="screen"></section>
+        <section id="screen-gerente-solicitacoes" class="screen"></section>
+        <section id="screen-gerente-contrato-novo" class="screen"></section>
+        <section id="screen-gerente-contratos" class="screen"></section>
+        <section id="screen-gerente-cobrar" class="screen"></section>
+        <section id="screen-gerente-relatorios" class="screen"></section>
+        <section id="screen-gerente-score" class="screen"></section>
+        <section id="screen-gerente-configuracoes" class="screen"></section>
+      </main>
+    </div>
+  </div>
+
+  <nav id="tabbar-mobile" class="tabbar-mobile"></nav>
+</div>
+
+<div id="toast-root"></div>
+
+<script src="js/icons.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/state.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/router.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/notifications-ui.js"></script>
+<script src="js/push.js"></script>
+<script src="js/screens/login.js"></script>
+<script src="js/screens/cliente-dashboard.js"></script>
+<script src="js/screens/cliente-solicitar.js"></script>
+<script src="js/screens/cliente-emprestimos.js"></script>
+<script src="js/screens/cliente-score.js"></script>
+<script src="js/screens/cliente-notificacoes.js"></script>
+<script src="js/screens/gerente-dashboard.js"></script>
+<script src="js/screens/gerente-clientes.js"></script>
+<script src="js/screens/gerente-gerentes.js"></script>
+<script src="js/screens/gerente-solicitacoes.js"></script>
+<script src="js/screens/gerente-contrato-novo.js"></script>
+<script src="js/screens/gerente-contratos-lista.js"></script>
+<script src="js/screens/gerente-contrato-receber.js"></script>
+<script src="js/screens/gerente-cobrar.js"></script>
+<script src="js/screens/gerente-relatorios.js"></script>
+<script src="js/screens/gerente-score.js"></script>
+<script src="js/screens/gerente-configuracoes.js"></script>
+<script src="js/screens/pdf-gerador.js"></script>
+<script src="js/main.js"></script>
+
+<script>
+  document.getElementById('sidebar-logo-svg').innerHTML = Icons.logo;
+  document.getElementById('topbar-signout').innerHTML = Icons.logout;
+  document.getElementById('sidebar-signout-icon').innerHTML = Icons.logout;
+  document.getElementById('sidebar-signout').onclick = handleSignOut;
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>

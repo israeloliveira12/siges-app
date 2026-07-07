@@ -1,0 +1,35 @@
+/* ============================================================================
+   Cliente Supabase com service_role — SÓ pode ser importado dentro de /api.
+   NUNCA importe este arquivo em código que roda no navegador.
+   ============================================================================ */
+
+export const SUPABASE_URL = process.env.SUPABASE_URL;
+export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+export async function supabaseAdminFetch(path, options = {}) {
+  const res = await fetch(SUPABASE_URL + path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+      ...(options.headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+// Verifica o token de acesso de quem está chamando a function e retorna o
+// profile correspondente (usado para checar se é gerente antes de agir).
+export async function getCallerProfile(accessToken) {
+  if (!accessToken) return null;
+  const { ok, data } = await supabaseAdminFetch('/auth/v1/user', {
+    headers: { Authorization: 'Bearer ' + accessToken },
+  });
+  if (!ok || !data || !data.id) return null;
+
+  const profileRes = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${data.id}&select=id,role,active`, { method: 'GET' });
+  if (!profileRes.ok || !Array.isArray(profileRes.data) || !profileRes.data.length) return null;
+  return profileRes.data[0];
+}
