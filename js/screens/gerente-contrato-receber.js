@@ -1,6 +1,7 @@
 /* ============================================================================
-   Modal de recebimento — quitar parcela/ciclo OU renovar (só juros, dívida
-   inteira renova por mais um período)
+   Modal de recebimento — quitar (total ou parcial) parcela/ciclo OU renovar
+   (só juros, dívida inteira renova por mais um período — só para contratos
+   de parcela única)
    ============================================================================ */
 
 let receberMode = 'quitar'; // 'quitar' | 'renovar'
@@ -20,8 +21,18 @@ async function openReceberModal(source, onDone) {
 
   const contract = source.contract;
   const isInstallment = source.sourceType === 'installment';
-  const totalDue = isInstallment ? Number(item.amount_due) : Number(item.full_debt_amount);
-  const interestPortion = isInstallment ? Number(item.interest_share) : (Number(item.full_debt_amount) - Number(contract.principal_amount));
+
+  // Para parcelas, considera o que já foi pago parcialmente antes.
+  const alreadyPaid = isInstallment ? (Number(item.principal_paid_partial || 0) + Number(item.interest_paid_partial || 0)) : 0;
+  const totalDue = isInstallment ? (Number(item.amount_due) - alreadyPaid) : Number(item.full_debt_amount);
+  const interestPortion = isInstallment
+    ? (Number(item.interest_share) - Number(item.interest_paid_partial || 0))
+    : (Number(item.full_debt_amount) - Number(contract.principal_amount));
+
+  // Renovação só é permitida em contratos de parcela única (senão a
+  // renovação de UMA parcela deixaria as outras parcelas do contrato
+  // com uma relação ambígua com o ciclo renovado).
+  const canRenew = contract.allows_renewal && Number(contract.installments_count) === 1;
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -37,12 +48,13 @@ async function openReceberModal(source, onDone) {
         <div class="modal-body">
           <div class="grid grid-2 mt-0">
             <div class="stat-card"><div class="label">Vencimento</div><div class="value" style="font-size:15px">${formatDate(isInstallment ? item.due_date : item.new_due_date)}</div></div>
-            <div class="stat-card"><div class="label">Total com encargos</div><div class="value mono">${formatMoney(totalDue)}</div></div>
+            <div class="stat-card"><div class="label">${alreadyPaid > 0 ? 'Restante em aberto' : 'Total com encargos'}</div><div class="value mono">${formatMoney(totalDue)}</div></div>
           </div>
+          ${alreadyPaid > 0 ? `<p class="text-sm text-soft mt-8">Já foi recebido ${formatMoney(alreadyPaid)} desta parcela em pagamento(s) parcial(is) anterior(es).</p>` : ''}
 
           <div class="auth-tabs mt-14">
             <button class="auth-tab ${receberMode === 'quitar' ? 'active' : ''}" id="tab-quitar">Quitar</button>
-            ${contract.allows_renewal ? `<button class="auth-tab ${receberMode === 'renovar' ? 'active' : ''}" id="tab-renovar">Renovar</button>` : ''}
+            ${canRenew ? `<button class="auth-tab ${receberMode === 'renovar' ? 'active' : ''}" id="tab-renovar">Renovar</button>` : ''}
           </div>
 
           <div id="receber-feedback"></div>
@@ -70,10 +82,16 @@ async function openReceberModal(source, onDone) {
     const fields = document.getElementById('receber-fields');
     if (receberMode === 'quitar') {
       fields.innerHTML = `
-        <div class="field"><label>Valor recebido (R$)</label><input type="text" id="r-amount"></div>
+        <div class="field">
+          <label>Valor recebido (R$)</label>
+          <input type="text" id="r-amount">
+          <span class="help" id="r-partial-hint"></span>
+        </div>
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-fee-toggle"><span class="track"></span></label><span>Aplicar taxas operacionais neste recebimento?</span></div>
         <div id="r-fee-fields" class="hidden mt-8"><div class="field"><label>Valor da taxa operacional (R$)</label><input type="text" id="r-fee-amount"></div></div>
         <div class="grid grid-2 mt-14">
+          <div class="stat-card" style="background:var(--bg)"><div class="label">Valor coletado (bruto)</div><div class="value mono" id="r-gross-collected" style="font-size:16px">${formatMoney(totalDue)}</div></div>
+          <div class="stat-card" style="background:var(--bg)"><div class="label">Valor coletado (líquido)</div><div class="value mono" id="r-net-collected" style="font-size:16px">${formatMoney(totalDue)}</div></div>
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro bruto (juros)</div><div class="value mono" id="r-gross-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro líquido</div><div class="value mono" id="r-net-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
         </div>
@@ -85,8 +103,21 @@ async function openReceberModal(source, onDone) {
       attachMoneyMask(feeInput);
       const feeToggle = document.getElementById('r-fee-toggle');
       const recompute = () => {
+        const amount = getMoneyValue(amountInput);
         const fee = feeToggle.checked ? getMoneyValue(feeInput) : 0;
-        document.getElementById('r-net-profit').textContent = formatMoney(interestPortion - fee);
+        // pagamento parcial: juros é priorizado, então o "lucro" desta
+        // transação é o mínimo entre o valor pago e o juros restante.
+        const interestNow = Math.min(amount, interestPortion);
+        document.getElementById('r-gross-collected').textContent = formatMoney(amount);
+        document.getElementById('r-net-collected').textContent = formatMoney(amount - fee);
+        document.getElementById('r-gross-profit').textContent = formatMoney(interestNow);
+        document.getElementById('r-net-profit').textContent = formatMoney(interestNow - fee);
+        const hint = document.getElementById('r-partial-hint');
+        if (amount > 0 && amount < totalDue - 0.005) {
+          hint.textContent = `Pagamento parcial — R$ ${formatNumber(totalDue - amount, 2)} continuam em aberto para esta parcela.`;
+        } else {
+          hint.textContent = '';
+        }
       };
       feeToggle.onchange = () => {
         document.getElementById('r-fee-fields').classList.toggle('hidden', !feeToggle.checked);
@@ -100,6 +131,7 @@ async function openReceberModal(source, onDone) {
       };
       feeInput.oninput = recompute;
       amountInput.oninput = recompute;
+      recompute();
     } else {
       fields.innerHTML = `
         <p class="text-sm text-soft mt-8">O cliente paga só os juros deste ciclo, e a dívida cheia (${formatMoney(totalDue)}) renova para o próximo período.</p>
@@ -151,6 +183,7 @@ async function openReceberModal(source, onDone) {
         const hasFee = document.getElementById('r-fee-toggle').checked;
         const feeAmount = hasFee ? getMoneyValue(document.getElementById('r-fee-amount')) : 0;
         if (!amount || amount <= 0) throw new Error('Informe um valor válido.');
+        if (amount > totalDue + 0.01) throw new Error(`O valor não pode ser maior que o restante desta parcela (${formatMoney(totalDue)}).`);
 
         if (isInstallment) {
           const { error } = await supa.rpc('receive_payment', {
@@ -165,9 +198,12 @@ async function openReceberModal(source, onDone) {
           });
           if (error) throw error;
         }
-        notifyEvent('pagamento_recebido', contract.client_id, 'Pagamento recebido',
-          `Recebemos seu pagamento de ${formatMoney(amount)}.`);
-        showToast('Pagamento registrado.');
+        const isPartial = amount < totalDue - 0.005;
+        notifyEvent('pagamento_recebido', contract.client_id, isPartial ? 'Pagamento parcial recebido' : 'Pagamento recebido',
+          isPartial
+            ? `Recebemos ${formatMoney(amount)}. Restam ${formatMoney(totalDue - amount)} desta parcela.`
+            : `Recebemos seu pagamento de ${formatMoney(amount)}.`);
+        showToast(isPartial ? 'Pagamento parcial registrado.' : 'Pagamento registrado.');
       } else {
         const interestAmount = getMoneyValue(document.getElementById('r-interest-amount'));
         const hasFee = document.getElementById('r-fee-toggle').checked;

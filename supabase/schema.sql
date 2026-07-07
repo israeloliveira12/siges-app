@@ -128,6 +128,8 @@ create table installments (
   principal_share numeric(12,2) not null,
   interest_share numeric(12,2) not null,
   amount_due numeric(12,2) generated always as (principal_share + interest_share) stored,
+  principal_paid_partial numeric(12,2) not null default 0, -- pagamento parcial já recebido (capital)
+  interest_paid_partial numeric(12,2) not null default 0,  -- pagamento parcial já recebido (juros)
   status installment_status not null default 'pendente',
   paid_at timestamptz,
   renewed_into_cycle_id uuid,
@@ -286,6 +288,26 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function handle_new_user();
 
+-- Ao promover uma conta de cliente para gerente, remove a linha de clients
+-- criada por padrão pelo trigger acima (senão o novo gerente continua
+-- aparecendo na lista de clientes).
+create or replace function trg_cleanup_client_on_promotion()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if new.role = 'gerente' and old.role = 'cliente' then
+    delete from clients where profile_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger after_profile_role_promoted
+  after update of role on profiles
+  for each row execute function trg_cleanup_client_on_promotion();
+
 -- ============================================================================
 -- 4. FUNÇÕES HELPER DE RLS (security definer para evitar recursão de policy)
 -- ============================================================================
@@ -346,7 +368,7 @@ begin
         order by rc.cycle_number desc limit 1
       )
       else (
-        select coalesce(sum(i.amount_due), 0) from installments i
+        select coalesce(sum(i.amount_due - i.principal_paid_partial - i.interest_paid_partial), 0) from installments i
         where i.contract_id = lc.id and i.status in ('pendente','atrasada')
       )
     end
@@ -579,7 +601,7 @@ begin
 end;
 $$;
 
--- 5.7 Receber pagamento (quitação normal de parcela)
+-- 5.7 Receber pagamento (quitação total ou parcial de uma parcela)
 create or replace function receive_payment(
   p_installment_id uuid,
   p_amount_received numeric,
@@ -595,7 +617,12 @@ declare
   v_installment installments%rowtype;
   v_contract loan_contracts%rowtype;
   v_payment_id uuid;
-  v_remaining integer;
+  v_remaining_interest numeric;
+  v_remaining_principal numeric;
+  v_remaining_total numeric;
+  v_pay_interest numeric;
+  v_pay_principal numeric;
+  v_remaining_count integer;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
@@ -606,7 +633,21 @@ begin
     raise exception 'INSTALLMENT_NOT_PAYABLE';
   end if;
 
+  v_remaining_interest := v_installment.interest_share - v_installment.interest_paid_partial;
+  v_remaining_principal := v_installment.principal_share - v_installment.principal_paid_partial;
+  v_remaining_total := v_remaining_interest + v_remaining_principal;
+
+  if p_amount_received <= 0 or p_amount_received > v_remaining_total + 0.01 then
+    raise exception 'INVALID_AMOUNT';
+  end if;
+
   select * into v_contract from loan_contracts where id = v_installment.contract_id for update;
+
+  -- paga juros primeiro, depois capital (padrão comum de amortização) --
+  -- permite pagamento parcial: se p_amount_received < v_remaining_total,
+  -- a parcela continua em aberto pelo valor restante.
+  v_pay_interest := least(p_amount_received, v_remaining_interest);
+  v_pay_principal := p_amount_received - v_pay_interest;
 
   insert into payments (
     contract_id, installment_id, payment_kind, amount_received,
@@ -614,24 +655,36 @@ begin
     has_operational_fee, operational_fee_amount, received_by, notes
   ) values (
     v_contract.id, p_installment_id, 'quitacao_parcela', p_amount_received,
-    v_installment.principal_share, v_installment.interest_share,
+    v_pay_principal, v_pay_interest,
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes
   ) returning id into v_payment_id;
 
-  update installments set status = 'paga', paid_at = now() where id = p_installment_id;
+  update installments set
+    principal_paid_partial = principal_paid_partial + v_pay_principal,
+    interest_paid_partial = interest_paid_partial + v_pay_interest
+  where id = p_installment_id;
 
-  select count(*) into v_remaining from installments
-    where contract_id = v_contract.id and status in ('pendente', 'atrasada');
+  if v_remaining_total - p_amount_received <= 0.01 then
+    update installments set status = 'paga', paid_at = now() where id = p_installment_id;
 
-  if v_remaining = 0 and not exists (
-    select 1 from renewal_cycles where contract_id = v_contract.id and status in ('pendente', 'atrasada')
-  ) then
-    update loan_contracts set status = 'quitado', updated_at = now() where id = v_contract.id;
+    select count(*) into v_remaining_count from installments
+      where contract_id = v_contract.id and status in ('pendente', 'atrasada');
+
+    if v_remaining_count = 0 and not exists (
+      select 1 from renewal_cycles where contract_id = v_contract.id and status in ('pendente', 'atrasada')
+    ) then
+      update loan_contracts set status = 'quitado', updated_at = now() where id = v_contract.id;
+    end if;
+
+    insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body)
+    values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id, p_installment_id,
+            'Pagamento recebido', 'Recebemos seu pagamento de R$ ' || p_amount_received || '.');
+  else
+    insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body)
+    values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id, p_installment_id,
+            'Pagamento parcial recebido',
+            'Recebemos R$ ' || p_amount_received || '. Restam R$ ' || round(v_remaining_total - p_amount_received, 2) || ' desta parcela.');
   end if;
-
-  insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body)
-  values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id, p_installment_id,
-          'Pagamento recebido', 'Recebemos seu pagamento de R$ ' || p_amount_received || '.');
 
   return v_payment_id;
 end;

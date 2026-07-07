@@ -53,7 +53,7 @@ async function renderGerenteCobrar() {
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received').gte('received_at', monthStart),
     supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(contract_number, allows_renewal, installments_count, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
-    supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(contract_number, allows_renewal, principal_amount, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
+    supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(contract_number, allows_renewal, installments_count, principal_amount, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
   ]);
 
   const sum = (rows, f) => (rows || []).reduce((s, r) => s + Number(r[f] || 0), 0);

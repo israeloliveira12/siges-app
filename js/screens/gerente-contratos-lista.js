@@ -169,7 +169,7 @@ async function renderGerenteContratoDetalhe(params) {
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
               <td data-label="Capital" class="mono">${formatMoney(i.principal_share)}</td>
               <td data-label="Juros" class="mono">${formatMoney(i.interest_share)}</td>
-              <td data-label="Total" class="mono">${formatMoney(i.amount_due)}</td>
+              <td data-label="Total"><div><div class="mono">${formatMoney(i.amount_due)}</div>${(i.principal_paid_partial > 0 || i.interest_paid_partial > 0) ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
               <td data-label="Status">${statusBadge(i.status, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[i.status])}</td>
               <td data-label="">
                 <div class="flex gap-8">
