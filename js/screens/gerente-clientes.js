@@ -193,22 +193,22 @@ function openClienteModal(client) {
         <div id="modal-feedback"></div>
         ${!isEdit ? `
         <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" required></div>
-        <div class="field"><label>Senha inicial</label><input type="password" id="m-password" minlength="6" required></div>
+        <div class="field"><label>Senha inicial</label>${passwordFieldHtml('m-password', 'minlength="6" required')}</div>
         ` : ''}
         <div class="field"><label>Nome completo</label><input type="text" id="m-name" value="${escapeHtml(p.full_name || '')}"></div>
         <div class="field-row">
           <div class="field"><label>CPF</label><input type="text" id="m-cpf" maxlength="14" value="${escapeHtml(formatCpf(p.cpf || ''))}"></div>
-          <div class="field"><label>Telefone</label><input type="tel" id="m-phone" value="${escapeHtml(p.phone || '')}"></div>
+          <div class="field"><label>Telefone</label><input type="tel" id="m-phone" placeholder="(00) 00000-0000" value="${escapeHtml(formatPhoneBR(p.phone || ''))}"></div>
         </div>
         <div class="field-row">
           <div class="field"><label>Empresa</label><input type="text" id="m-company" value="${escapeHtml((client && client.company) || '')}"></div>
           <div class="field"><label>Cargo</label><input type="text" id="m-job-title" value="${escapeHtml((client && client.job_title) || '')}"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Salário (R$)</label><input type="number" min="0" step="0.01" id="m-salary" value="${(client && client.salary) || ''}"></div>
+          <div class="field"><label>Salário (R$)</label><input type="text" id="m-salary" placeholder="0,00"></div>
           <div class="field"><label>Chave Pix</label><input type="text" id="m-pix-key" value="${escapeHtml((client && client.pix_key) || '')}"></div>
         </div>
-        <div class="field"><label>Limite de crédito (R$)</label><input type="number" min="0" step="0.01" id="m-limit" value="${client ? client.credit_limit : 0}"></div>
+        <div class="field"><label>Limite de crédito (R$)</label><input type="text" id="m-limit" placeholder="0,00"></div>
         <div class="field-row">
           <div class="field"><label>Região</label><input type="text" id="m-region" value="${escapeHtml((client && client.region) || '')}"></div>
           <div class="field"><label>Grupo</label><input type="text" id="m-group" placeholder="Ex: Carteira Assinada" value="${escapeHtml((client && client.client_group) || '')}"></div>
@@ -226,6 +226,12 @@ function openClienteModal(client) {
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   document.getElementById('m-cpf').oninput = (e) => { e.target.value = formatCpf(e.target.value); };
+  wirePasswordToggles(overlay);
+  attachPhoneMask(document.getElementById('m-phone'));
+  attachMoneyMask(document.getElementById('m-salary'));
+  attachMoneyMask(document.getElementById('m-limit'));
+  if (client && client.salary) setMoneyValue(document.getElementById('m-salary'), client.salary);
+  setMoneyValue(document.getElementById('m-limit'), client ? client.credit_limit : 0);
 
   document.getElementById('save-modal').onclick = async () => {
     const feedback = document.getElementById('modal-feedback');
@@ -233,14 +239,14 @@ function openClienteModal(client) {
     const payload = {
       full_name: document.getElementById('m-name').value.trim(),
       cpf: document.getElementById('m-cpf').value.trim() || null,
-      phone: document.getElementById('m-phone').value.trim() || null,
-      credit_limit: Number(document.getElementById('m-limit').value || 0),
+      phone: document.getElementById('m-phone').value.replace(/\D/g, '') || null,
+      credit_limit: getMoneyValue(document.getElementById('m-limit')),
       region: document.getElementById('m-region').value.trim() || null,
       client_group: document.getElementById('m-group').value.trim() || null,
       notes: document.getElementById('m-notes').value.trim() || null,
       company: document.getElementById('m-company').value.trim() || null,
       job_title: document.getElementById('m-job-title').value.trim() || null,
-      salary: document.getElementById('m-salary').value ? Number(document.getElementById('m-salary').value) : null,
+      salary: getMoneyValue(document.getElementById('m-salary')) || null,
       pix_key: document.getElementById('m-pix-key').value.trim() || null,
     };
     const btn = document.getElementById('save-modal');

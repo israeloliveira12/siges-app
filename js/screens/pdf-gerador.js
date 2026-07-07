@@ -13,7 +13,8 @@ function drawPromissoriaPage(doc, { contract, installment, clientProfile, compan
   doc.setFontSize(16);
   doc.text('NOTA PROMISSÓRIA', 20, 25);
   doc.setFontSize(11);
-  doc.text(`Nº ${contract.contract_number}/${installment.sequence_number}`, 20, 32);
+  doc.text(`Contrato nº: ${contract.contract_number}`, 20, 32);
+  doc.text(`Parcela: ${installment.sequence_number} de ${contract.installments_count}`, 20, 38);
 
   doc.setFontSize(11);
   doc.text(`Vencimento: ${formatDate(installment.due_date)}`, 140, 25);
@@ -56,58 +57,138 @@ function gerarNotasPromissoriasPDF({ contract, installments, clientProfile, comp
   doc.save(`notas-promissorias-contrato-${contract.contract_number}.pdf`);
 }
 
-function gerarExtratoPDF({ contract, installments, clientProfile, score, companyName }) {
+async function loadImageDataUrl(path) {
+  try {
+    const res = await fetch(path);
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    return null; // segue sem logo se por algum motivo não conseguir carregar
+  }
+}
+
+function addExtratoFooter(doc, companyName) {
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(220, 226, 223);
+    doc.line(20, 283, 190, 283);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text(`Documento gerado por ${companyName}`, 20, 289);
+    doc.text(`Página ${p} de ${pageCount}`, 190, 289, { align: 'right' });
+    doc.setTextColor(0);
+  }
+}
+
+async function gerarExtratoPDF({ contract, installments, clientProfile, score, companyName }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const NAVY = [11, 65, 107];
+  const TEAL = [30, 154, 149];
+  const logoDataUrl = await loadImageDataUrl('icons/logo-mark.png');
 
+  // Cabeçalho: logo + nome da empresa + faixa navy
+  doc.setFillColor(...NAVY);
+  doc.rect(0, 0, 210, 34, 'F');
+  if (logoDataUrl) {
+    try { doc.addImage(logoDataUrl, 'PNG', 16, 7, 20, 20); } catch (e) { /* segue sem logo se o formato falhar */ }
+  }
+  doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(15);
-  doc.text(companyName, 20, 20);
-  doc.setFontSize(11);
-  doc.text(`Extrato do Contrato #${contract.contract_number}`, 20, 28);
-
+  doc.text(companyName, 42, 16);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.text(`Cliente: ${clientProfile.full_name || ''}`, 20, 38);
-  doc.text(`CPF: ${clientProfile.cpf || '—'}`, 20, 44);
+  doc.text(`Extrato do Contrato #${contract.contract_number}`, 42, 23);
+  doc.setFontSize(8);
+  doc.text(`Emitido em ${formatDate(todayISO())}`, 42, 29);
 
   if (score != null) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20);
-    doc.text(String(score), 175, 22, { align: 'right' });
-    doc.setFontSize(8);
+    doc.setFontSize(22);
+    doc.text(String(score), 190, 16, { align: 'right' });
+    doc.setFontSize(7.5);
     doc.setFont('helvetica', 'normal');
-    doc.text('Score do cliente', 175, 27, { align: 'right' });
+    doc.text('SCORE DO CLIENTE', 190, 21, { align: 'right' });
   }
+  doc.setTextColor(0, 0, 0);
+
+  // Dados do cliente
+  doc.setFillColor(244, 246, 247);
+  doc.rect(20, 42, 170, 16, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('CLIENTE', 25, 48);
+  doc.text('CPF', 130, 48);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10.5);
+  doc.text(clientProfile.full_name || '—', 25, 54);
+  doc.text(clientProfile.cpf || '—', 130, 54);
 
   const paid = installments.filter((i) => i.status === 'paga');
   const remaining = installments.filter((i) => i.status !== 'paga');
   const totalDue = installments.reduce((s, i) => s + Number(i.amount_due), 0);
   const totalPaid = paid.reduce((s, i) => s + Number(i.amount_due), 0);
 
-  doc.setFillColor(244, 246, 247);
-  doc.rect(20, 52, 170, 20, 'F');
-  doc.setFontSize(9);
-  doc.text('Dívida total', 25, 59);
-  doc.text('Valor pago', 90, 59);
-  doc.text('Parcelas restantes', 145, 59);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text(formatMoney(totalDue), 25, 67);
-  doc.text(formatMoney(totalPaid), 90, 67);
-  doc.text(`${remaining.length} de ${installments.length}`, 145, 67);
+  // Cards de resumo
+  const cardY = 64, cardW = 54, cardH = 22, gap = 4;
+  const cards = [
+    { label: 'DÍVIDA TOTAL', value: formatMoney(totalDue), color: NAVY },
+    { label: 'VALOR PAGO', value: formatMoney(totalPaid), color: TEAL },
+    { label: 'PARCELAS RESTANTES', value: `${remaining.length} de ${installments.length}`, color: NAVY },
+  ];
+  cards.forEach((c, i) => {
+    const x = 20 + i * (cardW + gap);
+    doc.setDrawColor(220, 226, 223);
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(x, cardY, cardW, cardH, 2, 2, 'FD');
+    doc.setFillColor(...c.color);
+    doc.rect(x, cardY, 2, cardH, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(90, 100, 96);
+    doc.text(c.label, x + 6, cardY + 8);
+    doc.setFontSize(12);
+    doc.setTextColor(...c.color);
+    doc.text(c.value, x + 6, cardY + 16);
+  });
+  doc.setTextColor(0, 0, 0);
 
-  let y = 85;
+  // Tabela de parcelas
+  let y = 100;
+  doc.setFillColor(...NAVY);
+  doc.rect(20, y - 6, 170, 8, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  const cols = [20, 35, 75, 110, 140, 170];
+  doc.setFontSize(8.5);
+  doc.setTextColor(255, 255, 255);
+  const cols = [24, 42, 78, 114, 145, 178];
   ['Nº', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
-  doc.line(20, y + 2, 190, y + 2);
+  doc.setTextColor(0, 0, 0);
   y += 8;
 
   doc.setFont('helvetica', 'normal');
-  installments.forEach((inst) => {
-    if (y > 275) { doc.addPage(); y = 20; }
+  doc.setFontSize(9);
+  installments.forEach((inst, idx) => {
+    if (y > 270) {
+      doc.addPage();
+      y = 24;
+      doc.setFillColor(...NAVY);
+      doc.rect(20, y - 6, 170, 8, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      ['Nº', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+      y += 8;
+    }
+    if (idx % 2 === 0) { doc.setFillColor(248, 249, 247); doc.rect(20, y - 5, 170, 7, 'F'); }
     const statusLabel = { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[inst.status];
     doc.text(String(inst.sequence_number), cols[0], y);
     doc.text(formatDate(inst.due_date), cols[1], y);
@@ -117,9 +198,6 @@ function gerarExtratoPDF({ contract, installments, clientProfile, score, company
     y += 7;
   });
 
-  doc.setFontSize(8);
-  doc.setTextColor(120);
-  doc.text(`Documento gerado por ${companyName}`, 20, 290);
-
+  addExtratoFooter(doc, companyName);
   doc.save(`extrato-contrato-${contract.contract_number}.pdf`);
 }

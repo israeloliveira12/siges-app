@@ -172,6 +172,16 @@ input[type="date"], input[type="tel"], select, textarea {
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 textarea { resize: vertical; min-height: 70px; }
 
+.password-wrap { position: relative; }
+.password-wrap input { padding-right: 40px; }
+.password-toggle-btn {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--ink-soft); display: flex;
+  align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 6px;
+}
+.password-toggle-btn:hover { background: var(--bg); color: var(--ink); }
+.password-toggle-btn svg { width: 18px; height: 18px; }
+
 .field-row { display: flex; gap: 12px; }
 .field-row > .field { flex: 1; }
 

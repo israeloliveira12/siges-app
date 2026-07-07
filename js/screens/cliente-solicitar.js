@@ -28,7 +28,7 @@ async function renderClienteSolicitar() {
         <form id="solicitar-form" class="mt-14">
           <div class="field">
             <label>Valor desejado (R$)</label>
-            <input type="number" id="s-amount" min="1" step="0.01" max="${available || undefined}" required>
+            <input type="text" id="s-amount" placeholder="0,00" required>
             <span class="help">O valor será analisado por um administrador, que pode ajustar as condições finais.</span>
           </div>
           <div class="field">
@@ -60,11 +60,13 @@ async function renderClienteSolicitar() {
     </div>
   `;
 
+  attachMoneyMask(document.getElementById('s-amount'));
+
   document.getElementById('solicitar-form').onsubmit = async (e) => {
     e.preventDefault();
     const feedback = document.getElementById('solicitar-feedback');
     feedback.innerHTML = '';
-    const amount = Number(document.getElementById('s-amount').value);
+    const amount = getMoneyValue(document.getElementById('s-amount'));
     const installments = document.getElementById('s-installments').value ? Number(document.getElementById('s-installments').value) : null;
     const message = document.getElementById('s-message').value.trim() || null;
 

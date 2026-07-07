@@ -12,8 +12,8 @@ async function renderGerenteConfiguracoes() {
       <h3>Dados da empresa</h3>
       <div class="field mt-14"><label>Nome da empresa</label><input type="text" id="cfg-company-name" value="${escapeHtml(settings.company_name)}"></div>
       <div class="field-row">
-        <div class="field"><label>WhatsApp da empresa</label><input type="tel" id="cfg-company-whatsapp" placeholder="Ex: 5511999990000" value="${escapeHtml(settings.company_whatsapp || '')}">
-          <span class="help">Com DDI+DDD, só números (ex: 5511999990000). Usado para futuros contatos da empresa.</span>
+        <div class="field"><label>WhatsApp da empresa</label><input type="tel" id="cfg-company-whatsapp" placeholder="(00) 00000-0000" value="${escapeHtml(formatPhoneBR(settings.company_whatsapp || ''))}">
+          <span class="help">Usado nas mensagens de cobrança e futuros contatos da empresa.</span>
         </div>
         <div class="field"><label>Chave Pix da empresa</label><input type="text" id="cfg-company-pix" value="${escapeHtml(settings.company_pix_key || '')}">
           <span class="help">Aparece nas mensagens de cobrança enviadas ao cliente.</span>
@@ -35,14 +35,24 @@ async function renderGerenteConfiguracoes() {
       <p class="text-sm text-soft mt-8">Usadas como sugestão automática (sempre editável) ao criar um contrato (taxa de saída) e ao receber um pagamento (taxa de entrada).</p>
       <div class="field-row mt-14">
         <div class="field">
-          <label>Taxa de saída (%)</label>
+          <label>Taxa de saída — percentual (%)</label>
           <input type="number" min="0" step="0.01" id="cfg-exit-fee" value="${settings.default_exit_fee_percent}">
-          <span class="help">Calculada sobre o valor emprestado (dívida-base) ao criar um contrato.</span>
         </div>
         <div class="field">
-          <label>Taxa de entrada (%)</label>
+          <label>Taxa de saída — valor fixo (R$)</label>
+          <input type="text" id="cfg-exit-fee-fixed" value="">
+          <span class="help">Ex: 0,99. Somado à % — sobre o valor emprestado, ao criar um contrato.</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Taxa de entrada — percentual (%)</label>
           <input type="number" min="0" step="0.01" id="cfg-entry-fee" value="${settings.default_entry_fee_percent}">
-          <span class="help">Calculada sobre o valor recebido ao quitar/renovar uma parcela.</span>
+        </div>
+        <div class="field">
+          <label>Taxa de entrada — valor fixo (R$)</label>
+          <input type="text" id="cfg-entry-fee-fixed" value="">
+          <span class="help">Ex: 0,99. Somado à % — sobre o valor recebido, ao quitar/renovar.</span>
         </div>
       </div>
     </div>
@@ -76,6 +86,12 @@ async function renderGerenteConfiguracoes() {
     </div>` : ''}
   `;
 
+  attachPhoneMask(document.getElementById('cfg-company-whatsapp'));
+  setMoneyValue(document.getElementById('cfg-exit-fee-fixed'), settings.default_exit_fee_fixed);
+  setMoneyValue(document.getElementById('cfg-entry-fee-fixed'), settings.default_entry_fee_fixed);
+  attachMoneyMask(document.getElementById('cfg-exit-fee-fixed'));
+  attachMoneyMask(document.getElementById('cfg-entry-fee-fixed'));
+
   document.getElementById('cfg-save').onclick = async () => {
     const feedback = document.getElementById('cfg-feedback');
     feedback.innerHTML = '';
@@ -86,7 +102,9 @@ async function renderGerenteConfiguracoes() {
       critical_days_threshold: parseInt(document.getElementById('cfg-critical-days').value || '15', 10),
       loss_days_threshold: parseInt(document.getElementById('cfg-loss-days').value || '60', 10),
       default_exit_fee_percent: Number(document.getElementById('cfg-exit-fee').value || 0),
+      default_exit_fee_fixed: getMoneyValue(document.getElementById('cfg-exit-fee-fixed')),
       default_entry_fee_percent: Number(document.getElementById('cfg-entry-fee').value || 0),
+      default_entry_fee_fixed: getMoneyValue(document.getElementById('cfg-entry-fee-fixed')),
     };
     const { error } = await supa.from('system_settings').update(payload).eq('id', true);
     if (error) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }

@@ -70,60 +70,71 @@ async function openReceberModal(source, onDone) {
     const fields = document.getElementById('receber-fields');
     if (receberMode === 'quitar') {
       fields.innerHTML = `
-        <div class="field"><label>Valor recebido (R$)</label><input type="number" step="0.01" id="r-amount" value="${totalDue}"></div>
+        <div class="field"><label>Valor recebido (R$)</label><input type="text" id="r-amount"></div>
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-fee-toggle"><span class="track"></span></label><span>Aplicar taxas operacionais neste recebimento?</span></div>
-        <div id="r-fee-fields" class="hidden mt-8"><div class="field"><label>Valor da taxa operacional (R$)</label><input type="number" step="0.01" id="r-fee-amount" value="0"></div></div>
+        <div id="r-fee-fields" class="hidden mt-8"><div class="field"><label>Valor da taxa operacional (R$)</label><input type="text" id="r-fee-amount"></div></div>
         <div class="grid grid-2 mt-14">
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro bruto (juros)</div><div class="value mono" id="r-gross-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro líquido</div><div class="value mono" id="r-net-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
         </div>
       `;
+      const amountInput = document.getElementById('r-amount');
+      const feeInput = document.getElementById('r-fee-amount');
+      setMoneyValue(amountInput, totalDue);
+      attachMoneyMask(amountInput);
+      attachMoneyMask(feeInput);
       const feeToggle = document.getElementById('r-fee-toggle');
       const recompute = () => {
-        const fee = feeToggle.checked ? Number(document.getElementById('r-fee-amount').value || 0) : 0;
+        const fee = feeToggle.checked ? getMoneyValue(feeInput) : 0;
         document.getElementById('r-net-profit').textContent = formatMoney(interestPortion - fee);
       };
       feeToggle.onchange = () => {
         document.getElementById('r-fee-fields').classList.toggle('hidden', !feeToggle.checked);
-        const feeInput = document.getElementById('r-fee-amount');
-        if (feeToggle.checked && !Number(feeInput.value)) {
-          const amount = Number(document.getElementById('r-amount').value || 0);
+        if (feeToggle.checked && !getMoneyValue(feeInput)) {
+          const amount = getMoneyValue(amountInput);
           const pct = (App.settings && App.settings.default_entry_fee_percent) || 0;
-          feeInput.value = (amount * pct / 100).toFixed(2);
+          const fixed = (App.settings && App.settings.default_entry_fee_fixed) || 0;
+          setMoneyValue(feeInput, amount * pct / 100 + fixed);
         }
         recompute();
       };
-      document.getElementById('r-fee-amount').oninput = recompute;
+      feeInput.oninput = recompute;
+      amountInput.oninput = recompute;
     } else {
       fields.innerHTML = `
         <p class="text-sm text-soft mt-8">O cliente paga só os juros deste ciclo, e a dívida cheia (${formatMoney(totalDue)}) renova para o próximo período.</p>
-        <div class="field mt-8"><label>Valor de juros recebido (R$)</label><input type="number" step="0.01" id="r-interest-amount" value="${interestPortion}"></div>
+        <div class="field mt-8"><label>Valor de juros recebido (R$)</label><input type="text" id="r-interest-amount"></div>
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-fee-toggle"><span class="track"></span></label><span>Aplicar taxas operacionais neste recebimento?</span></div>
-        <div id="r-fee-fields" class="hidden mt-8"><div class="field"><label>Valor da taxa operacional (R$)</label><input type="number" step="0.01" id="r-fee-amount" value="0"></div></div>
+        <div id="r-fee-fields" class="hidden mt-8"><div class="field"><label>Valor da taxa operacional (R$)</label><input type="text" id="r-fee-amount"></div></div>
         <div class="grid grid-2 mt-14">
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro bruto (juros)</div><div class="value mono" id="r-gross-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro líquido</div><div class="value mono" id="r-net-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
         </div>
       `;
+      const interestInput = document.getElementById('r-interest-amount');
+      const feeInput = document.getElementById('r-fee-amount');
+      setMoneyValue(interestInput, interestPortion);
+      attachMoneyMask(interestInput);
+      attachMoneyMask(feeInput);
       const feeToggle = document.getElementById('r-fee-toggle');
       const recompute = () => {
-        const interestAmount = Number(document.getElementById('r-interest-amount').value || 0);
-        const fee = feeToggle.checked ? Number(document.getElementById('r-fee-amount').value || 0) : 0;
+        const interestAmount = getMoneyValue(interestInput);
+        const fee = feeToggle.checked ? getMoneyValue(feeInput) : 0;
         document.getElementById('r-gross-profit').textContent = formatMoney(interestAmount);
         document.getElementById('r-net-profit').textContent = formatMoney(interestAmount - fee);
       };
       feeToggle.onchange = () => {
         document.getElementById('r-fee-fields').classList.toggle('hidden', !feeToggle.checked);
-        const feeInput = document.getElementById('r-fee-amount');
-        if (feeToggle.checked && !Number(feeInput.value)) {
-          const interestAmount = Number(document.getElementById('r-interest-amount').value || 0);
+        if (feeToggle.checked && !getMoneyValue(feeInput)) {
+          const interestAmount = getMoneyValue(interestInput);
           const pct = (App.settings && App.settings.default_entry_fee_percent) || 0;
-          feeInput.value = (interestAmount * pct / 100).toFixed(2);
+          const fixed = (App.settings && App.settings.default_entry_fee_fixed) || 0;
+          setMoneyValue(feeInput, interestAmount * pct / 100 + fixed);
         }
         recompute();
       };
-      document.getElementById('r-fee-amount').oninput = recompute;
-      document.getElementById('r-interest-amount').oninput = recompute;
+      feeInput.oninput = recompute;
+      interestInput.oninput = recompute;
     }
   }
 
@@ -136,9 +147,9 @@ async function openReceberModal(source, onDone) {
     feedback.innerHTML = '';
     try {
       if (receberMode === 'quitar') {
-        const amount = Number(document.getElementById('r-amount').value || 0);
+        const amount = getMoneyValue(document.getElementById('r-amount'));
         const hasFee = document.getElementById('r-fee-toggle').checked;
-        const feeAmount = hasFee ? Number(document.getElementById('r-fee-amount').value || 0) : 0;
+        const feeAmount = hasFee ? getMoneyValue(document.getElementById('r-fee-amount')) : 0;
         if (!amount || amount <= 0) throw new Error('Informe um valor válido.');
 
         if (isInstallment) {
@@ -158,9 +169,9 @@ async function openReceberModal(source, onDone) {
           `Recebemos seu pagamento de ${formatMoney(amount)}.`);
         showToast('Pagamento registrado.');
       } else {
-        const interestAmount = Number(document.getElementById('r-interest-amount').value || 0);
+        const interestAmount = getMoneyValue(document.getElementById('r-interest-amount'));
         const hasFee = document.getElementById('r-fee-toggle').checked;
-        const feeAmount = hasFee ? Number(document.getElementById('r-fee-amount').value || 0) : 0;
+        const feeAmount = hasFee ? getMoneyValue(document.getElementById('r-fee-amount')) : 0;
         if (interestAmount < 0) throw new Error('Valor inválido.');
 
         const { error } = await supa.rpc('renew_installment', {

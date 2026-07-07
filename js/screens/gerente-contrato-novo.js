@@ -123,7 +123,7 @@ function paintWizardStep2() {
 
       <div class="field">
         <label>Valor emprestado — dívida-base (R$)</label>
-        <input type="number" min="1" step="0.01" id="w-principal" value="${wiz.principal_amount}">
+        <input type="text" id="w-principal" value="">
       </div>
 
       <div class="field-row">
@@ -155,8 +155,8 @@ function paintWizardStep2() {
         <div id="w-fee-fields" class="mt-14 ${wiz.has_operational_fee ? '' : 'hidden'}">
           <div class="field">
             <label>Valor da taxa operacional de saída (R$)</label>
-            <input type="number" min="0" step="0.01" id="w-fee-amount" value="${wiz.operational_fee_amount}">
-            <span class="help">Sugestão: ${formatNumber((App.settings && App.settings.default_exit_fee_percent) || 0, 2)}% do valor emprestado (editável).</span>
+            <input type="text" id="w-fee-amount" value="">
+            <span class="help">Sugestão: ${formatNumber((App.settings && App.settings.default_exit_fee_percent) || 0, 2)}% do valor emprestado + ${formatMoney((App.settings && App.settings.default_exit_fee_fixed) || 0)} fixo (editável).</span>
           </div>
         </div>
         <div class="grid grid-2 mt-14">
@@ -187,29 +187,36 @@ function paintWizardStep2() {
     </div>
   `;
 
+  const principalInput = document.getElementById('w-principal');
+  const feeAmountInput = document.getElementById('w-fee-amount');
+  if (wiz.principal_amount) setMoneyValue(principalInput, wiz.principal_amount);
+  if (wiz.operational_fee_amount) setMoneyValue(feeAmountInput, wiz.operational_fee_amount);
+  attachMoneyMask(principalInput);
+  attachMoneyMask(feeAmountInput);
+
   const feeToggle = document.getElementById('w-fee-toggle');
   const recomputeNet = () => {
-    const principal = Number(document.getElementById('w-principal').value || 0);
-    const fee = feeToggle.checked ? Number(document.getElementById('w-fee-amount').value || 0) : 0;
+    const principal = getMoneyValue(principalInput);
+    const fee = feeToggle.checked ? getMoneyValue(feeAmountInput) : 0;
     document.getElementById('w-gross-preview').textContent = formatMoney(principal);
     document.getElementById('w-net-preview').textContent = formatMoney(principal + fee);
   };
   feeToggle.onchange = () => {
     document.getElementById('w-fee-fields').classList.toggle('hidden', !feeToggle.checked);
-    const feeInput = document.getElementById('w-fee-amount');
-    if (feeToggle.checked && !Number(feeInput.value)) {
-      const principal = Number(document.getElementById('w-principal').value || 0);
+    if (feeToggle.checked && !getMoneyValue(feeAmountInput)) {
+      const principal = getMoneyValue(principalInput);
       const pct = (App.settings && App.settings.default_exit_fee_percent) || 0;
-      feeInput.value = (principal * pct / 100).toFixed(2);
+      const fixed = (App.settings && App.settings.default_exit_fee_fixed) || 0;
+      setMoneyValue(feeAmountInput, principal * pct / 100 + fixed);
     }
     recomputeNet();
   };
-  document.getElementById('w-principal').oninput = () => { recomputeNet(); refreshRateHint(); };
-  document.getElementById('w-fee-amount').oninput = recomputeNet;
+  principalInput.oninput = () => { recomputeNet(); refreshRateHint(); };
+  feeAmountInput.oninput = recomputeNet;
   document.getElementById('w-due-type').onchange = refreshRateHint;
 
   function refreshRateHint() {
-    wiz.principal_amount = document.getElementById('w-principal').value;
+    wiz.principal_amount = getMoneyValue(principalInput);
     wiz.due_type = document.getElementById('w-due-type').value;
     const wrap = document.getElementById('w-rate').parentElement;
     const helpEl = wrap.querySelector('.help');
@@ -220,12 +227,12 @@ function paintWizardStep2() {
   document.getElementById('w-next').onclick = async () => {
     wiz.contract_date = document.getElementById('w-contract-date').value;
     wiz.first_installment_date = document.getElementById('w-first-date').value;
-    wiz.principal_amount = Number(document.getElementById('w-principal').value || 0);
+    wiz.principal_amount = getMoneyValue(document.getElementById('w-principal'));
     wiz.interest_rate = Number(document.getElementById('w-rate').value || 0);
     wiz.installments_count = Math.max(1, parseInt(document.getElementById('w-installments').value || '1', 10));
     wiz.due_type = document.getElementById('w-due-type').value;
     wiz.has_operational_fee = document.getElementById('w-fee-toggle').checked;
-    wiz.operational_fee_amount = wiz.has_operational_fee ? Number(document.getElementById('w-fee-amount').value || 0) : 0;
+    wiz.operational_fee_amount = wiz.has_operational_fee ? getMoneyValue(document.getElementById('w-fee-amount')) : 0;
     wiz.allows_renewal = document.getElementById('w-renewal').checked;
     wiz.late_fee_percent = Number(document.getElementById('w-late-fee').value || 0);
     wiz.late_interest_percent = Number(document.getElementById('w-late-interest').value || 0);

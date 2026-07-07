@@ -132,9 +132,11 @@ async function renderGerenteContratoDetalhe(params) {
           <h3>Contrato #${contract.contract_number} — ${escapeHtml(p.full_name || '')}</h3>
           <div class="text-sm text-soft">CPF ${escapeHtml(p.cpf || '—')} · ${escapeHtml(p.phone || '')}</div>
         </div>
-        <div class="flex items-center gap-8">
+        <div class="flex items-center gap-8" style="flex-wrap:wrap">
           ${statusBadge(contract.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[contract.status])}
           <button class="btn btn-outline btn-sm" id="print-extrato-btn">${Icons.printer} Extrato PDF</button>
+          <button class="btn btn-outline btn-sm" id="edit-contract-btn">${Icons.edit} Editar contrato</button>
+          <button class="btn btn-outline btn-sm" id="delete-contract-btn" style="color:var(--bad)">${Icons.trash} Excluir contrato</button>
         </div>
       </div>
       <div class="grid grid-4 mt-14">
@@ -170,7 +172,12 @@ async function renderGerenteContratoDetalhe(params) {
               <td data-label="Total" class="mono">${formatMoney(i.amount_due)}</td>
               <td data-label="Status">${statusBadge(i.status, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[i.status])}</td>
               <td data-label="">
-                ${(i.status === 'pendente' || i.status === 'atrasada') ? `<button class="btn btn-accent btn-sm receive-inst-btn" data-id="${i.id}">Receber</button>` : ''}
+                <div class="flex gap-8">
+                  ${(i.status === 'pendente' || i.status === 'atrasada') ? `
+                    <button class="btn btn-accent btn-sm receive-inst-btn" data-id="${i.id}">Receber</button>
+                    <button class="icon-btn edit-inst-btn" data-id="${i.id}" title="Editar/reagendar parcela">${Icons.edit}</button>
+                  ` : ''}
+                </div>
               </td>
             </tr>
           `).join('')}
@@ -221,7 +228,7 @@ async function renderGerenteContratoDetalhe(params) {
 
   document.getElementById('print-extrato-btn').onclick = async () => {
     const { data: clientData } = await supa.from('clients').select('score').eq('profile_id', contract.client_id).maybeSingle();
-    gerarExtratoPDF({
+    await gerarExtratoPDF({
       contract, installments: installments || [], clientProfile: p,
       score: clientData ? clientData.score : null,
       companyName: (App.settings && App.settings.company_name) || 'Siges Serviços Financeiros',
@@ -235,12 +242,173 @@ async function renderGerenteContratoDetalhe(params) {
     });
   };
 
+  document.getElementById('edit-contract-btn').onclick = () => openEditContratoModal(contract, () => renderGerenteContratoDetalhe(params));
+  document.getElementById('delete-contract-btn').onclick = () => openDeleteContratoConfirm(contract);
+
   root.querySelectorAll('.receive-inst-btn').forEach((btn) => {
     btn.onclick = () => openReceberModal({ sourceType: 'installment', id: btn.dataset.id, contract }, () => renderGerenteContratoDetalhe(params));
+  });
+  root.querySelectorAll('.edit-inst-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const inst = (installments || []).find((i) => i.id === btn.dataset.id);
+      openEditInstallmentModal(inst, () => renderGerenteContratoDetalhe(params));
+    };
   });
   root.querySelectorAll('.receive-cycle-btn').forEach((btn) => {
     btn.onclick = () => openReceberModal({ sourceType: 'renewal_cycle', id: btn.dataset.id, contract }, () => renderGerenteContratoDetalhe(params));
   });
+}
+
+function openEditContratoModal(contract, onDone) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-head"><h3>Editar contrato #${contract.contract_number}</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-body">
+        <div id="ec-feedback"></div>
+        <p class="text-sm text-soft">O valor emprestado e o número de parcelas não podem ser alterados aqui (isso exigiria recalcular todas as parcelas já geradas) — para isso, edite as parcelas individualmente ou exclua e crie um novo contrato.</p>
+        <div class="field mt-14"><label>Juros (%) do período contratado</label><input type="number" min="0" step="0.01" id="ec-rate" value="${contract.interest_rate}"></div>
+        <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="ec-fee-toggle" ${contract.has_operational_fee ? 'checked' : ''}><span class="track"></span></label><span>Aplicar taxa operacional de saída?</span></div>
+        <div id="ec-fee-fields" class="mt-8 ${contract.has_operational_fee ? '' : 'hidden'}">
+          <div class="field"><label>Valor da taxa de saída (R$)</label><input type="text" id="ec-fee-amount"></div>
+        </div>
+        <div class="toggle-row mt-14"><label class="switch"><input type="checkbox" id="ec-renewal" ${contract.allows_renewal ? 'checked' : ''}><span class="track"></span></label><span>Permite renovação</span></div>
+        <div class="field-row mt-14">
+          <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="ec-late-fee" value="${contract.late_fee_percent}"></div>
+          <div class="field"><label>Juros por atraso (% a.m.)</label><input type="number" min="0" step="0.01" id="ec-late-interest" value="${contract.late_interest_percent}"></div>
+        </div>
+        <div class="field"><label>Observações</label><textarea id="ec-observations">${escapeHtml(contract.observations || '')}</textarea></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
+        <button class="btn btn-primary" id="save-modal">Salvar alterações</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  document.getElementById('close-modal').onclick = close;
+  document.getElementById('cancel-modal').onclick = close;
+
+  const feeToggle = document.getElementById('ec-fee-toggle');
+  const feeInput = document.getElementById('ec-fee-amount');
+  setMoneyValue(feeInput, contract.operational_fee_amount);
+  attachMoneyMask(feeInput);
+  feeToggle.onchange = () => document.getElementById('ec-fee-fields').classList.toggle('hidden', !feeToggle.checked);
+
+  document.getElementById('save-modal').onclick = async () => {
+    const btn = document.getElementById('save-modal');
+    btn.disabled = true;
+    const { error } = await supa.rpc('update_contract', {
+      p_contract_id: contract.id,
+      p_interest_rate: Number(document.getElementById('ec-rate').value || 0),
+      p_has_operational_fee: feeToggle.checked,
+      p_operational_fee_amount: feeToggle.checked ? getMoneyValue(feeInput) : 0,
+      p_allows_renewal: document.getElementById('ec-renewal').checked,
+      p_late_fee_percent: Number(document.getElementById('ec-late-fee').value || 0),
+      p_late_interest_percent: Number(document.getElementById('ec-late-interest').value || 0),
+      p_observations: document.getElementById('ec-observations').value.trim() || null,
+    });
+    if (error) {
+      document.getElementById('ec-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    close();
+    showToast('Contrato atualizado.');
+    if (typeof onDone === 'function') onDone();
+  };
+}
+
+function openDeleteContratoConfirm(contract) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head"><h3 style="color:var(--bad)">Excluir contrato</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-body">
+        <p class="text-sm">Tem certeza que deseja excluir o contrato <strong>#${contract.contract_number}</strong> permanentemente? Isso apaga todas as parcelas, pagamentos e ciclos de renovação ligados a ele. Essa ação não pode ser desfeita.</p>
+        <div id="dc-feedback" class="mt-8"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
+        <button class="btn btn-danger" id="confirm-delete">Excluir permanentemente</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  document.getElementById('close-modal').onclick = close;
+  document.getElementById('cancel-modal').onclick = close;
+  document.getElementById('confirm-delete').onclick = async () => {
+    const btn = document.getElementById('confirm-delete');
+    btn.disabled = true;
+    const { error } = await supa.rpc('delete_contract', { p_contract_id: contract.id });
+    if (error) {
+      document.getElementById('dc-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    close();
+    showToast('Contrato excluído.');
+    router.navigate('#/gerente/contratos');
+  };
+}
+
+function openEditInstallmentModal(installment, onDone) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-head"><h3>Editar/reagendar parcela ${installment.sequence_number}</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-body">
+        <div id="ei-feedback"></div>
+        <div class="field"><label>Nova data de vencimento</label><input type="date" id="ei-due-date" value="${installment.due_date}"></div>
+        <div class="field-row">
+          <div class="field"><label>Capital (R$)</label><input type="text" id="ei-principal"></div>
+          <div class="field"><label>Juros (R$)</label><input type="text" id="ei-interest"></div>
+        </div>
+        <p class="text-sm text-soft">Novo total da parcela: <strong class="mono" id="ei-total-preview">${formatMoney(installment.amount_due)}</strong></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
+        <button class="btn btn-primary" id="save-modal">Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  document.getElementById('close-modal').onclick = close;
+  document.getElementById('cancel-modal').onclick = close;
+
+  const principalInput = document.getElementById('ei-principal');
+  const interestInput = document.getElementById('ei-interest');
+  setMoneyValue(principalInput, installment.principal_share);
+  setMoneyValue(interestInput, installment.interest_share);
+  attachMoneyMask(principalInput);
+  attachMoneyMask(interestInput);
+  const updatePreview = () => {
+    document.getElementById('ei-total-preview').textContent = formatMoney(getMoneyValue(principalInput) + getMoneyValue(interestInput));
+  };
+  principalInput.oninput = updatePreview;
+  interestInput.oninput = updatePreview;
+
+  document.getElementById('save-modal').onclick = async () => {
+    const btn = document.getElementById('save-modal');
+    btn.disabled = true;
+    const { error } = await supa.rpc('update_installment_schedule', {
+      p_installment_id: installment.id,
+      p_due_date: document.getElementById('ei-due-date').value,
+      p_principal_share: getMoneyValue(principalInput),
+      p_interest_share: getMoneyValue(interestInput),
+    });
+    if (error) {
+      document.getElementById('ei-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    close();
+    showToast('Parcela atualizada.');
+    if (typeof onDone === 'function') onDone();
+  };
 }
 
 registerRoute('gerente/contratos/:id', { role: 'gerente', screenId: 'gerente-contratos', title: 'Detalhe do Contrato', render: renderGerenteContratoDetalhe });

@@ -85,7 +85,7 @@ create table loan_requests (
 -- 2.4 loan_contracts — contrato "pai"
 create table loan_contracts (
   id uuid primary key default gen_random_uuid(),
-  contract_number serial,
+  contract_number integer unique, -- 5 dígitos aleatórios, atribuído pelo trigger set_contract_number()
   client_id uuid not null references clients(profile_id),
   created_by uuid not null references profiles(id),
   origin_request_id uuid references loan_requests(id),
@@ -211,7 +211,9 @@ create table system_settings (
   critical_days_threshold integer not null default 15,
   loss_days_threshold integer not null default 60,
   default_exit_fee_percent numeric(6,3) not null default 0,   -- % sobre o valor emprestado (saída/desembolso)
+  default_exit_fee_fixed numeric(12,2) not null default 0,    -- valor fixo somado à % de saída (ex: R$0,99)
   default_entry_fee_percent numeric(6,3) not null default 0,  -- % sobre o valor recebido (entrada/recebimento)
+  default_entry_fee_fixed numeric(12,2) not null default 0,   -- valor fixo somado à % de entrada
   company_name text not null default 'Siges Serviços Financeiros',
   company_whatsapp text,
   company_pix_key text,
@@ -389,6 +391,40 @@ $$;
 create trigger before_insert_loan_contract
   before insert on loan_contracts
   for each row execute function trg_check_credit_limit();
+
+-- 5.3b Número do contrato: 5 dígitos aleatórios, únicos
+create or replace function generate_contract_number()
+returns integer
+language plpgsql
+as $$
+declare
+  candidate integer;
+  already_used boolean;
+begin
+  loop
+    candidate := floor(random() * 90000 + 10000)::integer; -- 10000..99999
+    select exists(select 1 from loan_contracts where contract_number = candidate) into already_used;
+    exit when not already_used;
+  end loop;
+  return candidate;
+end;
+$$;
+
+create or replace function set_contract_number()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.contract_number is null then
+    new.contract_number := generate_contract_number();
+  end if;
+  return new;
+end;
+$$;
+
+create trigger before_insert_contract_number
+  before insert on loan_contracts
+  for each row execute function set_contract_number();
 
 -- 5.4 Cálculo de parcelas (juros simples, dividido igualmente) — usado tanto
 -- para preview (sem gravar) quanto para geração de verdade
@@ -891,6 +927,73 @@ begin
 end;
 $$;
 
+-- 5.11a Editar contrato (campos que não exigem recalcular parcelas já geradas)
+create or replace function update_contract(
+  p_contract_id uuid,
+  p_interest_rate numeric,
+  p_has_operational_fee boolean,
+  p_operational_fee_amount numeric,
+  p_allows_renewal boolean,
+  p_late_fee_percent numeric,
+  p_late_interest_percent numeric,
+  p_observations text
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  update loan_contracts set
+    interest_rate = p_interest_rate,
+    has_operational_fee = p_has_operational_fee,
+    operational_fee_amount = coalesce(p_operational_fee_amount, 0),
+    allows_renewal = p_allows_renewal,
+    late_fee_percent = coalesce(p_late_fee_percent, 0),
+    late_interest_percent = coalesce(p_late_interest_percent, 0),
+    observations = p_observations,
+    updated_at = now()
+  where id = p_contract_id;
+end;
+$$;
+
+-- Editar/reagendar uma parcela específica (só enquanto não estiver paga)
+create or replace function update_installment_schedule(
+  p_installment_id uuid,
+  p_due_date date,
+  p_principal_share numeric,
+  p_interest_share numeric
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  update installments set
+    due_date = p_due_date,
+    principal_share = p_principal_share,
+    interest_share = p_interest_share
+  where id = p_installment_id and status in ('pendente', 'atrasada');
+end;
+$$;
+
+-- Excluir um contrato inteiro (e todo o histórico ligado a ele)
+create or replace function delete_contract(p_contract_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  delete from payments where contract_id = p_contract_id;
+  delete from renewal_cycles where contract_id = p_contract_id;
+  delete from installments where contract_id = p_contract_id;
+  update loan_requests set resulting_contract_id = null where resulting_contract_id = p_contract_id;
+  delete from loan_contracts where id = p_contract_id;
+end;
+$$;
+
 -- 5.11b Editar dados básicos de outro administrador/gerente (nunca altera
 -- is_primary_admin por aqui, propositalmente)
 create or replace function update_gerente_profile(
@@ -957,14 +1060,14 @@ begin
     raise exception 'FORBIDDEN';
   end if;
 
-  delete from payments;
-  delete from renewal_cycles;
-  delete from installments;
-  delete from loan_contracts;
-  delete from loan_requests;
-  delete from notifications_log;
-  delete from push_subscriptions;
-  delete from clients;
+  delete from payments where true;
+  delete from renewal_cycles where true;
+  delete from installments where true;
+  delete from loan_contracts where true;
+  delete from loan_requests where true;
+  delete from notifications_log where true;
+  delete from push_subscriptions where true;
+  delete from clients where true;
   delete from profiles where role = 'cliente';
 end;
 $$;

@@ -52,7 +52,7 @@ function openEditGerenteModal(gerente) {
       <div class="modal-body">
         <div id="eg-feedback"></div>
         <div class="field"><label>Nome completo</label><input type="text" id="eg-name" value="${escapeHtml(gerente.full_name || '')}"></div>
-        <div class="field"><label>Telefone</label><input type="tel" id="eg-phone" value="${escapeHtml(gerente.phone || '')}"></div>
+        <div class="field"><label>Telefone</label><input type="tel" id="eg-phone" placeholder="(00) 00000-0000" value="${escapeHtml(formatPhoneBR(gerente.phone || ''))}"></div>
         <div class="toggle-row">
           <label class="switch"><input type="checkbox" id="eg-active" ${gerente.active ? 'checked' : ''} ${gerente.is_primary_admin ? 'disabled' : ''}><span class="track"></span></label>
           <span>Conta ativa${gerente.is_primary_admin ? ' (admin primário não pode ser desativado por aqui)' : ''}</span>
@@ -67,13 +67,14 @@ function openEditGerenteModal(gerente) {
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
+  attachPhoneMask(document.getElementById('eg-phone'));
   document.getElementById('save-modal').onclick = async () => {
     const btn = document.getElementById('save-modal');
     btn.disabled = true;
     const { error } = await supa.rpc('update_gerente_profile', {
       p_gerente_id: gerente.id,
       p_full_name: document.getElementById('eg-name').value.trim(),
-      p_phone: document.getElementById('eg-phone').value.trim() || null,
+      p_phone: document.getElementById('eg-phone').value.replace(/\D/g, '') || null,
       p_active: gerente.is_primary_admin ? true : document.getElementById('eg-active').checked,
     });
     if (error) {
@@ -97,7 +98,7 @@ function openNovoGerenteModal() {
         <div id="ng-feedback"></div>
         <div class="field"><label>Nome completo</label><input type="text" id="ng-name"></div>
         <div class="field"><label>E-mail</label><input type="email" id="ng-email"></div>
-        <div class="field"><label>Senha inicial</label><input type="password" id="ng-password" minlength="6"></div>
+        <div class="field"><label>Senha inicial</label>${passwordFieldHtml('ng-password', 'minlength="6"')}</div>
         <p class="text-sm text-soft">Este novo administrador terá acesso total ao sistema, exceto a opção de apagar todos os dados (exclusiva do admin primário).</p>
       </div>
       <div class="modal-foot">
@@ -109,6 +110,7 @@ function openNovoGerenteModal() {
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
+  wirePasswordToggles(overlay);
   document.getElementById('save-modal').onclick = async () => {
     const feedback = document.getElementById('ng-feedback');
     feedback.innerHTML = '';

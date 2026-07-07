@@ -78,6 +78,70 @@ function scoreTierBadge(tier) {
   return `<span class="badge ${map[tier] || 'badge-neutral'}">${escapeHtml(tier)}</span>`;
 }
 
+// HTML de um campo de senha com botão de mostrar/ocultar ("olhinho").
+// Uso: `<div class="field"><label>Senha</label>${passwordFieldHtml('f-password')}</div>`
+// e chamar wirePasswordToggles() depois de inserir o HTML no DOM.
+function passwordFieldHtml(id, extraAttrs = '') {
+  return `<div class="password-wrap">
+    <input type="password" id="${id}" ${extraAttrs}>
+    <button type="button" class="password-toggle-btn" data-target="${id}" tabindex="-1">${Icons.eye}</button>
+  </div>`;
+}
+
+function wirePasswordToggles(root) {
+  (root || document).querySelectorAll('.password-toggle-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const input = document.getElementById(btn.dataset.target);
+      if (!input) return;
+      input.type = input.type === 'password' ? 'text' : 'password';
+    };
+  });
+}
+
+function formatPhoneBR(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 2) return digits.length ? `(${digits}` : '';
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function attachPhoneMask(input) {
+  if (!input) return;
+  input.setAttribute('inputmode', 'numeric');
+  input.addEventListener('input', () => { input.value = formatPhoneBR(input.value); });
+}
+
+// Máscara de valor em reais (aplica separador de milhar "." e decimal ","
+// automaticamente enquanto a pessoa digita, como um campo de caixa registradora).
+function attachMoneyMask(input) {
+  if (!input) return;
+  input.setAttribute('inputmode', 'decimal');
+  input.addEventListener('input', () => {
+    let digits = input.value.replace(/\D/g, '');
+    if (!digits) { input.value = ''; return; }
+    digits = digits.replace(/^0+(?=\d)/, '');
+    while (digits.length < 3) digits = '0' + digits;
+    const cents = digits.slice(-2);
+    const intPart = digits.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    input.value = intPart + ',' + cents;
+  });
+}
+
+function getMoneyValue(input) {
+  if (!input || !input.value) return 0;
+  const raw = input.value.replace(/\./g, '').replace(',', '.');
+  return Number(raw) || 0;
+}
+
+function setMoneyValue(input, num) {
+  if (!input) return;
+  const n = Number(num || 0);
+  const [intPart, centsPart] = n.toFixed(2).split('.');
+  const withDots = intPart.replace('-', '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  input.value = (n < 0 ? '-' : '') + withDots + ',' + centsPart;
+}
+
 function formatCpf(value) {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 11);
   return digits

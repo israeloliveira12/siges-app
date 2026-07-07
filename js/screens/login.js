@@ -45,13 +45,13 @@ function renderLoginScreen() {
             </div>
             <div class="field-row">
               <div class="field"><label>CPF</label><input type="text" id="f-cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" required></div>
-              <div class="field"><label>Telefone / WhatsApp</label><input type="tel" id="f-phone" placeholder="(11) 99999-0000"></div>
+              <div class="field"><label>Telefone / WhatsApp</label><input type="tel" id="f-phone" placeholder="(00) 00000-0000"></div>
             </div>
             <div class="field-row">
               <div class="field"><label>Empresa</label><input type="text" id="f-company"></div>
               <div class="field"><label>Cargo</label><input type="text" id="f-job-title"></div>
             </div>
-            <div class="field"><label>Salário (R$)</label><input type="number" min="0" step="0.01" id="f-salary"></div>
+            <div class="field"><label>Salário (R$)</label><input type="text" id="f-salary" placeholder="0,00"></div>
             <div class="field">
               <label>Chave Pix</label>
               <input type="text" id="f-pix-key">
@@ -64,7 +64,7 @@ function renderLoginScreen() {
           </div>
           <div class="field">
             <label>Senha</label>
-            <input type="password" id="f-password" autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}" required>
+            ${passwordFieldHtml('f-password', `autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}" required`)}
           </div>
           ${authMode === 'login' ? `<div class="text-sm mt-8"><a href="#" id="forgot-link" style="color:var(--accent)">Esqueci minha senha</a></div>` : ''}
           <button type="submit" class="btn btn-primary btn-block mt-14" id="submit-btn">
@@ -89,6 +89,9 @@ function renderLoginScreen() {
 
   const cpfInput = document.getElementById('f-cpf');
   if (cpfInput) cpfInput.oninput = () => { cpfInput.value = formatCpf(cpfInput.value); };
+  attachPhoneMask(document.getElementById('f-phone'));
+  attachMoneyMask(document.getElementById('f-salary'));
+  wirePasswordToggles();
 
   const forgotLink = document.getElementById('forgot-link');
   if (forgotLink) {
@@ -116,7 +119,7 @@ function renderLoginScreen() {
           phone: document.getElementById('f-phone').value.trim(),
           company: document.getElementById('f-company').value.trim(),
           job_title: document.getElementById('f-job-title').value.trim(),
-          salary: document.getElementById('f-salary').value,
+          salary: getMoneyValue(document.getElementById('f-salary')) || null,
           pix_key: document.getElementById('f-pix-key').value.trim(),
         };
         await doSignUp(email, password, profileData);
@@ -160,13 +163,14 @@ function renderResetPasswordModal() {
         <div id="reset-feedback"></div>
         <div class="field">
           <label>Nova senha</label>
-          <input type="password" id="new-password" minlength="6" required>
+          ${passwordFieldHtml('new-password', 'minlength="6" required')}
         </div>
         <button class="btn btn-primary btn-block" id="reset-submit">Salvar nova senha</button>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+  wirePasswordToggles(overlay);
   document.getElementById('reset-submit').onclick = async () => {
     const pwd = document.getElementById('new-password').value;
     if (pwd.length < 6) {
