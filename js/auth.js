@@ -169,5 +169,9 @@ function traduzErroAuth(error) {
   if (msg.includes('Invalid login credentials')) return 'E-mail ou senha incorretos.';
   if (msg.includes('User already registered')) return 'Já existe uma conta com esse e-mail.';
   if (msg.includes('Email not confirmed')) return 'Confirme seu e-mail antes de entrar.';
+  if (msg.includes('profiles_cpf_key')) return 'Já existe uma conta cadastrada com esse CPF.';
+  if (msg.includes('email_address_invalid')) return 'Informe um e-mail válido.';
+  if (msg.includes('duplicate key value')) return 'Alguns dos dados informados já estão em uso por outra conta.';
+  if (msg.startsWith('{') || msg.length > 200) return 'Ocorreu um erro. Tente novamente em instantes.';
   return msg || 'Ocorreu um erro. Tente novamente.';
 }
