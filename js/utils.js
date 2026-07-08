@@ -2,6 +2,18 @@
    Funções utilitárias puras (sem dependência de estado)
    ============================================================================ */
 
+const INCOME_BRACKETS = [
+  'Até R$ 1.621',
+  'De R$ 1.622 até R$ 3.000',
+  'De R$ 3.001 até R$ 5.000',
+  'Acima de R$ 5.000',
+];
+
+function incomeBracketOptionsHtml(selected, includeBlank) {
+  const blank = includeBlank ? `<option value="" ${!selected ? 'selected' : ''}>Não informado</option>` : '';
+  return blank + INCOME_BRACKETS.map((b) => `<option value="${b}" ${selected === b ? 'selected' : ''}>${b}</option>`).join('');
+}
+
 function formatMoney(value) {
   const n = Number(value || 0);
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

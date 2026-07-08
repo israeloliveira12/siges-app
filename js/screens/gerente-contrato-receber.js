@@ -178,19 +178,29 @@ async function openReceberModal(source, onDone) {
       }
       recompute();
     } else {
+      const suggestedInterest = interestPortion + jurosAtrasoSugerido + multaAtrasoSugerida;
       fields.innerHTML = `
         <p class="text-sm text-soft mt-8">O cliente paga só os juros deste ciclo, e a dívida cheia (${formatMoney(totalDue)}) renova para o próximo período.</p>
+        ${diasAtraso > 0 ? `
+        <div class="field-row">
+          <div class="field"><label>Juros de atraso (${diasAtraso}d)</label><input type="text" id="r-late-interest"></div>
+          <div class="field"><label>Multa por atraso</label><input type="text" id="r-late-fee"></div>
+        </div>
+        <span class="help">Sugestão calculada automaticamente — pode ajustar ou zerar antes de confirmar.</span>
+        ` : ''}
         <div class="field mt-8"><label>Valor de juros recebido (R$)</label><input type="text" id="r-interest-amount"></div>
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-fee-toggle"><span class="track"></span></label><span>Aplicar taxas operacionais neste recebimento?</span></div>
         <div id="r-fee-fields" class="hidden mt-8"><div class="field"><label>Valor da taxa operacional (R$)</label><input type="text" id="r-fee-amount"></div></div>
         <div class="grid grid-2 mt-14">
-          <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro bruto (juros)</div><div class="value mono" id="r-gross-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
-          <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro líquido</div><div class="value mono" id="r-net-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
+          <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro bruto (juros + encargo de atraso)</div><div class="value mono" id="r-gross-profit" style="font-size:16px">${formatMoney(suggestedInterest)}</div></div>
+          <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro líquido</div><div class="value mono" id="r-net-profit" style="font-size:16px">${formatMoney(suggestedInterest)}</div></div>
         </div>
       `;
       const interestInput = document.getElementById('r-interest-amount');
       const feeInput = document.getElementById('r-fee-amount');
-      setMoneyValue(interestInput, interestPortion);
+      const lateInterestInput = document.getElementById('r-late-interest');
+      const lateFeeInput = document.getElementById('r-late-fee');
+      setMoneyValue(interestInput, suggestedInterest);
       attachMoneyMask(interestInput);
       attachMoneyMask(feeInput);
       const feeToggle = document.getElementById('r-fee-toggle');
@@ -212,6 +222,22 @@ async function openReceberModal(source, onDone) {
       };
       feeInput.oninput = recompute;
       interestInput.oninput = recompute;
+      if (lateInterestInput) {
+        attachMoneyMask(lateInterestInput);
+        setMoneyValue(lateInterestInput, jurosAtrasoSugerido);
+        lateInterestInput.oninput = () => {
+          setMoneyValue(interestInput, interestPortion + getMoneyValue(lateInterestInput) + getMoneyValue(lateFeeInput));
+          recompute();
+        };
+      }
+      if (lateFeeInput) {
+        attachMoneyMask(lateFeeInput);
+        setMoneyValue(lateFeeInput, multaAtrasoSugerida);
+        lateFeeInput.oninput = () => {
+          setMoneyValue(interestInput, interestPortion + getMoneyValue(lateInterestInput) + getMoneyValue(lateFeeInput));
+          recompute();
+        };
+      }
     }
   }
 
@@ -258,14 +284,18 @@ async function openReceberModal(source, onDone) {
         const interestAmount = getMoneyValue(document.getElementById('r-interest-amount'));
         const hasFee = document.getElementById('r-fee-toggle').checked;
         const feeAmount = hasFee ? getMoneyValue(document.getElementById('r-fee-amount')) : 0;
+        const lateInterestEl = document.getElementById('r-late-interest');
+        const lateFeeEl = document.getElementById('r-late-fee');
+        const lateChargeAmount = Math.min(interestAmount, (lateInterestEl ? getMoneyValue(lateInterestEl) : 0) + (lateFeeEl ? getMoneyValue(lateFeeEl) : 0));
         if (interestAmount < 0) throw new Error('Valor inválido.');
 
         const { error } = await supa.rpc('renew_installment', {
           p_source_type: isInstallment ? 'installment' : 'renewal_cycle',
           p_source_id: item.id,
-          p_interest_only_amount: interestAmount,
+          p_interest_only_amount: interestAmount - lateChargeAmount,
           p_has_operational_fee: hasFee,
           p_operational_fee_amount: feeAmount,
+          p_late_charge_amount: lateChargeAmount,
         });
         if (error) throw error;
         notifyEvent('renovacao_registrada', contract.client_id, 'Renovação registrada',

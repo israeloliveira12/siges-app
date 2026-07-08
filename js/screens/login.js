@@ -51,7 +51,13 @@ function renderLoginScreen() {
               <div class="field"><label>Empresa</label><input type="text" id="f-company" required></div>
               <div class="field"><label>Cargo</label><input type="text" id="f-job-title" required></div>
             </div>
-            <div class="field"><label>Salário (R$)</label><input type="text" id="f-salary" placeholder="0,00" required></div>
+            <div class="field">
+              <label>Renda Mensal</label>
+              <select id="f-salary" required>
+                <option value="" disabled selected>Selecione...</option>
+                ${incomeBracketOptionsHtml(null, false)}
+              </select>
+            </div>
             <div class="field">
               <label>Chave Pix</label>
               <input type="text" id="f-pix-key" required>
@@ -90,7 +96,6 @@ function renderLoginScreen() {
   const cpfInput = document.getElementById('f-cpf');
   if (cpfInput) cpfInput.oninput = () => { cpfInput.value = formatCpf(cpfInput.value); };
   attachPhoneMask(document.getElementById('f-phone'));
-  attachMoneyMask(document.getElementById('f-salary'));
   wirePasswordToggles();
 
   const forgotLink = document.getElementById('forgot-link');
@@ -119,7 +124,7 @@ function renderLoginScreen() {
           phone: document.getElementById('f-phone').value.trim(),
           company: document.getElementById('f-company').value.trim(),
           job_title: document.getElementById('f-job-title').value.trim(),
-          salary: getMoneyValue(document.getElementById('f-salary')) || null,
+          salary: document.getElementById('f-salary').value || null,
           pix_key: document.getElementById('f-pix-key').value.trim(),
         };
         await doSignUp(email, password, profileData);

@@ -144,16 +144,17 @@ function paintWizardStep2() {
       </div>
       <p class="text-sm text-soft mt-8">Limite disponível para este cliente: <strong class="mono">${formatMoney(availableForClient)}</strong></p>
 
-      <div class="field-row mt-14">
-        <div class="field"><label>Data do contrato</label><input type="date" id="w-contract-date" value="${wiz.contract_date}"></div>
-        <div class="field"><label>Data da 1ª parcela</label><input type="date" id="w-first-date" value="${wiz.first_installment_date}"></div>
-      </div>
-
+      <div class="form-section-title">Valor e datas</div>
       <div class="field">
         <label>Valor emprestado — dívida-base (R$)</label>
         <input type="text" id="w-principal" value="">
       </div>
+      <div class="field-row">
+        <div class="field"><label>Data do contrato</label><input type="date" id="w-contract-date" value="${wiz.contract_date}"></div>
+        <div class="field"><label>Data da 1ª parcela</label><input type="date" id="w-first-date" value="${wiz.first_installment_date}"></div>
+      </div>
 
+      <div class="form-section-title">Prazo e parcelas</div>
       <div class="field-row">
         <div class="field">
           <label>Juros (%) do período contratado</label>
@@ -165,7 +166,6 @@ function paintWizardStep2() {
           <input type="number" min="1" step="1" id="w-installments" value="${wiz.installments_count}">
         </div>
       </div>
-
       <div class="field-row">
         <div class="field">
           <label>Tipo de vencimento *</label>
@@ -181,39 +181,36 @@ function paintWizardStep2() {
         </div>
       </div>
 
-      <div class="card" style="background:var(--bg);box-shadow:none;margin:16px 0">
-        <div class="toggle-row">
-          <label class="switch"><input type="checkbox" id="w-fee-toggle" ${wiz.has_operational_fee ? 'checked' : ''}><span class="track"></span></label>
-          <strong>Aplicar taxas operacionais neste contrato?</strong>
+      <div class="form-section-title">Taxa operacional</div>
+      <div class="toggle-row">
+        <label class="switch"><input type="checkbox" id="w-fee-toggle" ${wiz.has_operational_fee ? 'checked' : ''}><span class="track"></span></label>
+        <span>Aplicar taxa operacional de saída neste contrato?</span>
+      </div>
+      <div id="w-fee-fields" class="mt-14 ${wiz.has_operational_fee ? '' : 'hidden'}">
+        <div class="field">
+          <label>Valor da taxa operacional de saída (R$)</label>
+          <input type="text" id="w-fee-amount" value="">
+          <span class="help">Sugestão: ${formatNumber((App.settings && App.settings.default_exit_fee_percent) || 0, 2)}% do valor emprestado + ${formatMoney((App.settings && App.settings.default_exit_fee_fixed) || 0)} fixo (editável).</span>
         </div>
-        <div id="w-fee-fields" class="mt-14 ${wiz.has_operational_fee ? '' : 'hidden'}">
-          <div class="field">
-            <label>Valor da taxa operacional de saída (R$)</label>
-            <input type="text" id="w-fee-amount" value="">
-            <span class="help">Sugestão: ${formatNumber((App.settings && App.settings.default_exit_fee_percent) || 0, 2)}% do valor emprestado + ${formatMoney((App.settings && App.settings.default_exit_fee_fixed) || 0)} fixo (editável).</span>
-          </div>
-        </div>
-        <div class="grid grid-2 mt-14">
-          <div class="stat-card" style="background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px">
-            <div class="label">Valor do contrato (dívida-base)</div>
-            <div class="value mono" style="font-size:16px" id="w-gross-preview">${formatMoney(wiz.principal_amount || 0)}</div>
-          </div>
-          <div class="stat-card" style="background:#fff;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px">
-            <div class="label">Valor total a desembolsar (contrato + taxa)</div>
-            <div class="value mono" style="font-size:16px" id="w-net-preview">${formatMoney(totalDisbursed)}</div>
-          </div>
-        </div>
+      </div>
+      <div class="grid grid-2 mt-8">
+        <div class="stat-card"><div class="label">Valor do contrato (dívida-base)</div><div class="value mono" style="font-size:16px" id="w-gross-preview">${formatMoney(wiz.principal_amount || 0)}</div></div>
+        <div class="stat-card"><div class="label">Valor total a desembolsar (contrato + taxa)</div><div class="value mono" style="font-size:16px" id="w-net-preview">${formatMoney(totalDisbursed)}</div></div>
       </div>
 
-      <div class="field-row">
-        <div class="toggle-row field"><label class="switch"><input type="checkbox" id="w-renewal" ${wiz.allows_renewal ? 'checked' : ''}><span class="track"></span></label><span>Permite renovação (juros repete)</span></div>
+      <div class="form-section-title">Renovação e encargo de atraso</div>
+      <div class="toggle-row">
+        <label class="switch"><input type="checkbox" id="w-renewal" ${wiz.allows_renewal ? 'checked' : ''}><span class="track"></span></label>
+        <span>Permite renovação (juros repete)</span>
       </div>
-      <div class="field-row">
+      <div class="field-row mt-14">
         <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="w-late-fee" value="${wiz.late_fee_percent}"></div>
         <div class="field"><label>Juros por atraso (% a.m.)</label><input type="number" min="0" step="0.01" id="w-late-interest" value="${wiz.late_interest_percent}"></div>
       </div>
       <span class="help">Aplicados no momento do recebimento, proporcionalmente aos dias em atraso da parcela/ciclo (juros) + valor fixo (multa) — o gerente pode ajustar ou zerar em cada recebimento.</span>
-      <div class="field mt-14"><label>Observações</label><textarea id="w-observations">${escapeHtml(wiz.observations)}</textarea></div>
+
+      <div class="form-section-title">Observações</div>
+      <div class="field"><textarea id="w-observations">${escapeHtml(wiz.observations)}</textarea></div>
 
       <div class="modal-foot" style="border:none;padding:14px 0 0">
         <button class="btn btn-ghost" id="w-back">${Icons.chevronLeft} Voltar</button>

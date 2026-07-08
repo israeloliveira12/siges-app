@@ -172,6 +172,15 @@ input[type="date"], input[type="tel"], select, textarea {
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 textarea { resize: vertical; min-height: 70px; }
 
+/* Remove o "chrome" nativo do navegador em number/date para manter a mesma
+   linguagem visual flat/minimalista dos demais campos (senão o spinner e o
+   ícone de calendário nativos destoam do resto do formulário). */
+input[type="number"] { -moz-appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.55; cursor: pointer; }
+input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
+
 .password-wrap { position: relative; }
 .password-wrap input { padding-right: 40px; }
 .password-toggle-btn {
@@ -184,6 +193,12 @@ textarea { resize: vertical; min-height: 70px; }
 
 .field-row { display: flex; gap: 12px; }
 .field-row > .field { flex: 1; }
+
+.form-section-title {
+  font-size: 12px; color: var(--ink-soft); font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+  border-top: 1px solid var(--line); padding-top: 16px; margin: 20px 0 12px;
+}
+.form-section-title:first-child { border-top: none; padding-top: 0; margin-top: 0; }
 
 .toggle-row { display: flex; align-items: center; gap: 10px; }
 .switch { position: relative; width: 42px; height: 24px; flex: none; }

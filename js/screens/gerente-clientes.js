@@ -205,7 +205,7 @@ function openClienteModal(client) {
           <div class="field"><label>Cargo</label><input type="text" id="m-job-title" value="${escapeHtml((client && client.job_title) || '')}"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Salário (R$)</label><input type="text" id="m-salary" placeholder="0,00"></div>
+          <div class="field"><label>Renda Mensal</label><select id="m-salary">${incomeBracketOptionsHtml((client && client.salary) || null, true)}</select></div>
           <div class="field"><label>Chave Pix</label><input type="text" id="m-pix-key" value="${escapeHtml((client && client.pix_key) || '')}"></div>
         </div>
         <div class="field"><label>Limite de crédito (R$)</label><input type="text" id="m-limit" placeholder="0,00"></div>
@@ -228,9 +228,7 @@ function openClienteModal(client) {
   document.getElementById('m-cpf').oninput = (e) => { e.target.value = formatCpf(e.target.value); };
   wirePasswordToggles(overlay);
   attachPhoneMask(document.getElementById('m-phone'));
-  attachMoneyMask(document.getElementById('m-salary'));
   attachMoneyMask(document.getElementById('m-limit'));
-  if (client && client.salary) setMoneyValue(document.getElementById('m-salary'), client.salary);
   setMoneyValue(document.getElementById('m-limit'), client ? client.credit_limit : 0);
 
   document.getElementById('save-modal').onclick = async () => {
@@ -246,7 +244,7 @@ function openClienteModal(client) {
       notes: document.getElementById('m-notes').value.trim() || null,
       company: document.getElementById('m-company').value.trim() || null,
       job_title: document.getElementById('m-job-title').value.trim() || null,
-      salary: getMoneyValue(document.getElementById('m-salary')) || null,
+      salary: document.getElementById('m-salary').value || null,
       pix_key: document.getElementById('m-pix-key').value.trim() || null,
     };
     const btn = document.getElementById('save-modal');

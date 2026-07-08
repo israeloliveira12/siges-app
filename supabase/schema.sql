@@ -54,7 +54,7 @@ create table clients (
   client_group text,
   company text,
   job_title text,
-  salary numeric(12,2),
+  salary text,
   pix_key text,
   approval_status client_approval_status not null default 'pendente',
   decided_by uuid references profiles(id),
@@ -285,7 +285,7 @@ begin
     new.raw_user_meta_data->>'phone',
     new.raw_user_meta_data->>'company',
     new.raw_user_meta_data->>'job_title',
-    nullif(new.raw_user_meta_data->>'salary', '')::numeric,
+    nullif(new.raw_user_meta_data->>'salary', ''),
     new.raw_user_meta_data->>'pix_key'
   )
   on conflict (profile_id) do nothing;
@@ -731,7 +731,8 @@ create or replace function renew_installment(
   p_interest_only_amount numeric,
   p_has_operational_fee boolean,
   p_operational_fee_amount numeric,
-  p_notes text default null
+  p_notes text default null,
+  p_late_charge_amount numeric default 0
 )
 returns uuid
 language plpgsql
@@ -804,11 +805,11 @@ begin
 
   insert into payments (
     contract_id, renewal_cycle_id, payment_kind, amount_received,
-    principal_component, interest_component,
+    principal_component, interest_component, late_charge_amount,
     has_operational_fee, operational_fee_amount, received_by, notes
   ) values (
-    v_contract_id, v_new_cycle_id, 'renovacao_juros', p_interest_only_amount,
-    0, p_interest_only_amount,
+    v_contract_id, v_new_cycle_id, 'renovacao_juros', p_interest_only_amount + coalesce(p_late_charge_amount, 0),
+    0, p_interest_only_amount + coalesce(p_late_charge_amount, 0), coalesce(p_late_charge_amount, 0),
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes
   ) returning id into v_payment_id;
 
@@ -891,6 +892,8 @@ returns void
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_client_id uuid;
 begin
   update installments set status = 'atrasada'
     where status = 'pendente' and due_date < current_date;
@@ -915,6 +918,15 @@ begin
           and rc.new_due_date < current_date - (select loss_days_threshold from system_settings)
       )
     );
+
+  -- Recalcula o score de todo cliente com contrato atrasado ou em perda, para
+  -- o score refletir o estado atual mesmo sem nenhum recebimento novo (senão
+  -- o score de um cliente inadimplente que não interage mais fica parado).
+  for v_client_id in
+    select distinct client_id from loan_contracts where status in ('atrasado', 'perda')
+  loop
+    perform recalculate_client_score(v_client_id);
+  end loop;
 end;
 $$;
 
@@ -995,7 +1007,7 @@ create or replace function update_client_profile(
   p_notes text,
   p_company text default null,
   p_job_title text default null,
-  p_salary numeric default null,
+  p_salary text default null,
   p_pix_key text default null
 )
 returns void
