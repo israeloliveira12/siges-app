@@ -29,12 +29,23 @@ function freshWizard() {
   };
 }
 
+// Sempre busca limite/consumo direto do banco (nunca confia em cache) — evita
+// mostrar "Limite disponível" desatualizado se o admin mudou o limite do
+// cliente em outra tela nesta mesma sessão.
+async function refreshClientLimit(clientId) {
+  const { data: freshClient } = await supa.from('clients').select('credit_limit').eq('profile_id', clientId).maybeSingle();
+  wiz.client_limit = Number(freshClient ? freshClient.credit_limit : 0);
+  const { data } = await supa.rpc('client_outstanding_principal', { p_client_id: clientId });
+  wiz.client_used = Number(data) || 0;
+}
+
 async function renderGerenteContratoNovo() {
   if (pendingContractPrefill) {
     wiz = freshWizard();
     Object.assign(wiz, pendingContractPrefill);
     wiz.step = 2;
     pendingContractPrefill = null;
+    await refreshClientLimit(wiz.client_id);
   } else if (!wiz) {
     wiz = freshWizard();
   }
@@ -115,9 +126,7 @@ function paintWizardStep1() {
     const c = wizClientsList.find((x) => x.profile_id === wizSelectedClientId);
     wiz.client_id = c.profile_id;
     wiz.client_name = (c.profiles || {}).full_name || (c.profiles || {}).email;
-    wiz.client_limit = Number(c.credit_limit);
-    const { data } = await supa.rpc('client_outstanding_balance', { p_client_id: c.profile_id });
-    wiz.client_used = Number(data) || 0;
+    await refreshClientLimit(c.profile_id);
     wiz.step = 2;
     paintWizard();
   };
@@ -205,9 +214,9 @@ function paintWizardStep2() {
       </div>
       <div class="field-row mt-14">
         <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="w-late-fee" value="${wiz.late_fee_percent}"></div>
-        <div class="field"><label>Juros por atraso (% a.m.)</label><input type="number" min="0" step="0.01" id="w-late-interest" value="${wiz.late_interest_percent}"></div>
+        <div class="field"><label>Juros por atraso (% ao dia)</label><input type="number" min="0" step="0.01" id="w-late-interest" value="${wiz.late_interest_percent}"></div>
       </div>
-      <span class="help">Aplicados no momento do recebimento, proporcionalmente aos dias em atraso da parcela/ciclo (juros) + valor fixo (multa) — o gerente pode ajustar ou zerar em cada recebimento.</span>
+      <span class="help">Aplicados no momento do recebimento: juros compostos diariamente sobre o saldo da parcela/ciclo em atraso (ex: 2% ao dia) + multa fixa uma vez — o gerente pode ajustar ou zerar em cada recebimento.</span>
 
       <div class="form-section-title">Observações</div>
       <div class="field"><textarea id="w-observations">${escapeHtml(wiz.observations)}</textarea></div>
@@ -307,8 +316,8 @@ function paintWizardStep3() {
       <div class="grid grid-3 mt-14">
         <div class="stat-card"><div class="label">Cliente</div><div class="value" style="font-size:15px">${escapeHtml(wiz.client_name)}</div></div>
         <div class="stat-card"><div class="label">Valor liberado</div><div class="value mono">${formatMoney(wiz.principal_amount)}</div></div>
-        <div class="stat-card"><div class="label">Juros</div><div class="value mono">${formatNumber(wiz.interest_rate, 2)}% (Simples)</div></div>
-        <div class="stat-card"><div class="label">Parcelas</div><div class="value mono">${wiz.installments_count}x (${dueTypeLabel(wiz.due_type, wiz.custom_interval_days)})</div></div>
+        <div class="stat-card"><div class="label">Juros</div><div class="value" style="font-size:15px">${formatNumber(wiz.interest_rate, 2)}% (Simples)</div></div>
+        <div class="stat-card"><div class="label">Parcelas</div><div class="value" style="font-size:15px">${wiz.installments_count}x (${dueTypeLabel(wiz.due_type, wiz.custom_interval_days)})</div></div>
         <div class="stat-card"><div class="label">Valor total a receber</div><div class="value mono">${formatMoney(totalAmount)}</div></div>
         <div class="stat-card"><div class="label">Total a desembolsar (contrato + taxa)</div><div class="value mono">${formatMoney(Number(wiz.principal_amount) + (wiz.has_operational_fee ? Number(wiz.operational_fee_amount) : 0))}</div></div>
       </div>

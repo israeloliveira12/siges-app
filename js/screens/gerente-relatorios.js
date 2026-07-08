@@ -7,6 +7,8 @@ let relatoriosPeriodo = 'mes'; // 'dia' | 'mes' | 'ano'
 let relatoriosDia = todayISO();
 let relatoriosMes = todayISO().slice(0, 7);
 let relatoriosAno = todayISO().slice(0, 4);
+let futurosDataLimite = '';
+let futurosTipo = 'todos'; // 'todos' | 'parcela' | 'renovacao'
 
 function periodoRange() {
   if (relatoriosPeriodo === 'dia') {
@@ -24,11 +26,13 @@ async function renderGerenteRelatorios() {
   const root = document.getElementById('screen-gerente-relatorios');
   root.innerHTML = `
     <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
-      <div class="flex gap-8">
+      <div class="flex gap-8" style="flex-wrap:wrap">
         <button class="btn btn-sm ${relatoriosTab === 'lucro' ? 'btn-primary' : 'btn-outline'}" id="tab-lucro">Lucro Analítico</button>
         <button class="btn btn-sm ${relatoriosTab === 'fluxo' ? 'btn-primary' : 'btn-outline'}" id="tab-fluxo">Fluxo de Caixa</button>
         <button class="btn btn-sm ${relatoriosTab === 'analitico' ? 'btn-primary' : 'btn-outline'}" id="tab-analitico">Relatório Analítico</button>
+        <button class="btn btn-sm ${relatoriosTab === 'futuro' ? 'btn-primary' : 'btn-outline'}" id="tab-futuro">Lançamentos Futuros</button>
       </div>
+      ${relatoriosTab !== 'futuro' ? `
       <div class="flex gap-8 items-center">
         <div class="auth-tabs" style="margin:0">
           <button class="auth-tab ${relatoriosPeriodo === 'dia' ? 'active' : ''}" id="periodo-dia">Dia</button>
@@ -38,22 +42,34 @@ async function renderGerenteRelatorios() {
         ${relatoriosPeriodo === 'dia' ? `<input type="date" id="relatorios-data" value="${relatoriosDia}">` : ''}
         ${relatoriosPeriodo === 'mes' ? `<input type="month" id="relatorios-data" value="${relatoriosMes}">` : ''}
         ${relatoriosPeriodo === 'ano' ? `<input type="number" id="relatorios-data" value="${relatoriosAno}" style="width:90px">` : ''}
-      </div>
+      </div>` : ''}
     </div>
     <div id="relatorios-body" class="mt-14"><div class="text-soft">Carregando...</div></div>
   `;
   document.getElementById('tab-lucro').onclick = () => { relatoriosTab = 'lucro'; renderGerenteRelatorios(); };
   document.getElementById('tab-fluxo').onclick = () => { relatoriosTab = 'fluxo'; renderGerenteRelatorios(); };
   document.getElementById('tab-analitico').onclick = () => { relatoriosTab = 'analitico'; renderGerenteRelatorios(); };
-  document.getElementById('periodo-dia').onclick = () => { relatoriosPeriodo = 'dia'; renderGerenteRelatorios(); };
-  document.getElementById('periodo-mes').onclick = () => { relatoriosPeriodo = 'mes'; renderGerenteRelatorios(); };
-  document.getElementById('periodo-ano').onclick = () => { relatoriosPeriodo = 'ano'; renderGerenteRelatorios(); };
-  document.getElementById('relatorios-data').onchange = (e) => {
-    if (relatoriosPeriodo === 'dia') relatoriosDia = e.target.value;
-    else if (relatoriosPeriodo === 'mes') relatoriosMes = e.target.value;
-    else relatoriosAno = e.target.value;
-    renderGerenteRelatorios();
-  };
+  document.getElementById('tab-futuro').onclick = () => { relatoriosTab = 'futuro'; renderGerenteRelatorios(); };
+  if (relatoriosTab !== 'futuro') {
+    document.getElementById('periodo-dia').onclick = () => { relatoriosPeriodo = 'dia'; renderGerenteRelatorios(); };
+    document.getElementById('periodo-mes').onclick = () => { relatoriosPeriodo = 'mes'; renderGerenteRelatorios(); };
+    document.getElementById('periodo-ano').onclick = () => { relatoriosPeriodo = 'ano'; renderGerenteRelatorios(); };
+    document.getElementById('relatorios-data').onchange = (e) => {
+      if (relatoriosPeriodo === 'dia') relatoriosDia = e.target.value;
+      else if (relatoriosPeriodo === 'mes') relatoriosMes = e.target.value;
+      else relatoriosAno = e.target.value;
+      renderGerenteRelatorios();
+    };
+  }
+
+  if (relatoriosTab === 'futuro') {
+    const [{ data: installments }, { data: cycles }] = await Promise.all([
+      supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(contract_number, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
+      supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(contract_number, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
+    ]);
+    paintLancamentosFuturos(installments || [], cycles || []);
+    return;
+  }
 
   const { start, end, bucket } = periodoRange();
 
@@ -198,6 +214,92 @@ function paintRelatorioAnalitico(payments, contracts) {
     </div>
     <p class="text-sm text-soft mt-14">Metodologia: entradas somam todos os pagamentos recebidos no período (parcelas e renovações); saídas somam o valor bruto de novos contratos criados no período. Lucro líquido considera juros recebidos menos taxas operacionais de saída (desembolso) e de entrada (recebimento).</p>
   `;
+}
+
+function paintLancamentosFuturos(installments, cycles) {
+  const body = document.getElementById('relatorios-body');
+  const today = todayISO();
+
+  let items = [
+    ...installments.map((i) => ({
+      tipo: 'parcela', data: i.due_date, valor: Number(i.amount_due),
+      descricao: ((i.loan_contracts || {}).clients || {}).profiles ? ((i.loan_contracts.clients.profiles.full_name) + ' · Parcela #' + i.sequence_number) : 'Parcela #' + i.sequence_number,
+      contractNumber: (i.loan_contracts || {}).contract_number, contractId: i.contract_id,
+    })),
+    ...cycles.map((c) => ({
+      tipo: 'renovacao', data: c.new_due_date, valor: Number(c.full_debt_amount),
+      descricao: ((c.loan_contracts || {}).clients || {}).profiles ? ((c.loan_contracts.clients.profiles.full_name) + ' · Renovação #' + c.cycle_number) : 'Renovação #' + c.cycle_number,
+      contractNumber: (c.loan_contracts || {}).contract_number, contractId: c.contract_id,
+    })),
+  ];
+
+  if (futurosTipo !== 'todos') items = items.filter((i) => i.tipo === futurosTipo);
+  if (futurosDataLimite) items = items.filter((i) => i.data <= futurosDataLimite);
+  items.sort((a, b) => a.data.localeCompare(b.data));
+
+  const previsaoEntradas = items.reduce((s, i) => s + i.valor, 0);
+  const previsaoSaidas = 0; // este sistema não tem conceito de saída programada (novo crédito é sob demanda, não agendado)
+  const projecaoLiquida = previsaoEntradas - previsaoSaidas;
+
+  const diasRestantes = (dataStr) => Math.round((new Date(dataStr) - new Date(today)) / 86400000);
+
+  body.innerHTML = `
+    <div class="grid grid-3">
+      <div class="card stat-card" style="background:var(--good);color:#fff">
+        <div class="label" style="color:rgba(255,255,255,.85)">Previsão de entradas</div>
+        <div class="text-sm" style="color:rgba(255,255,255,.75)">Parcelas de empréstimos + entradas programadas</div>
+        <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(previsaoEntradas)}</div>
+      </div>
+      <div class="card stat-card" style="background:var(--bad);color:#fff">
+        <div class="label" style="color:rgba(255,255,255,.85)">Previsão de saídas</div>
+        <div class="text-sm" style="color:rgba(255,255,255,.75)">Saídas programadas ainda não debitadas</div>
+        <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(previsaoSaidas)}</div>
+      </div>
+      <div class="card stat-card" style="background:var(--purple, #7C5CFC);color:#fff">
+        <div class="label" style="color:rgba(255,255,255,.85)">Projeção líquida</div>
+        <div class="text-sm" style="color:rgba(255,255,255,.75)">Entradas previstas − saídas previstas</div>
+        <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(projecaoLiquida)}</div>
+      </div>
+    </div>
+
+    <div class="field-row mt-14">
+      <div class="field"><label>Data Limite (Opcional)</label><input type="date" id="futuros-data-limite" value="${futurosDataLimite}"></div>
+      <div class="field">
+        <label>Tipo</label>
+        <select id="futuros-tipo">
+          <option value="todos" ${futurosTipo === 'todos' ? 'selected' : ''}>Todos</option>
+          <option value="parcela" ${futurosTipo === 'parcela' ? 'selected' : ''}>Parcela</option>
+          <option value="renovacao" ${futurosTipo === 'renovacao' ? 'selected' : ''}>Renovação</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card mt-14" style="padding:0">
+      <table class="data-table table-scroll">
+        <thead><tr><th>Tipo</th><th>Data</th><th>Dias Restantes</th><th>Descrição</th><th>Valor</th><th>Referência</th><th></th></tr></thead>
+        <tbody>
+          ${items.length ? items.map((i) => {
+            const dias = diasRestantes(i.data);
+            const diasLabel = dias < 0 ? `${Math.abs(dias)}d atrasado` : dias === 0 ? 'Hoje' : `${dias} dia${dias === 1 ? '' : 's'}`;
+            const diasColor = dias < 0 ? 'badge-bad' : dias <= 3 ? 'badge-warn' : 'badge-neutral';
+            return `
+            <tr>
+              <td data-label="Tipo"><span class="badge badge-brand">${i.tipo === 'parcela' ? 'Parcela' : 'Renovação'}</span></td>
+              <td data-label="Data">${formatDate(i.data)}</td>
+              <td data-label="Dias Restantes"><span class="badge ${diasColor}">${diasLabel}</span></td>
+              <td data-label="Descrição">${escapeHtml(i.descricao)}</td>
+              <td data-label="Valor" class="mono">${formatMoney(i.valor)}</td>
+              <td data-label="Referência">${i.contractNumber ? `<a href="#/gerente/contratos/${i.contractId}" style="color:var(--accent)">Contrato #${i.contractNumber}</a>` : '—'}</td>
+              <td data-label="">${i.contractId ? `<a class="icon-btn" href="#/gerente/contratos/${i.contractId}" title="Ver contrato">${Icons.chevronRight}</a>` : ''}</td>
+            </tr>`;
+          }).join('') : `<tr><td colspan="7" class="text-soft">Nenhum lançamento futuro encontrado.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('futuros-data-limite').onchange = (e) => { futurosDataLimite = e.target.value; renderGerenteRelatorios(); };
+  document.getElementById('futuros-tipo').onchange = (e) => { futurosTipo = e.target.value; renderGerenteRelatorios(); };
 }
 
 registerRoute('gerente/relatorios', { role: 'gerente', screenId: 'gerente-relatorios', title: 'Relatórios Gerenciais', render: renderGerenteRelatorios });

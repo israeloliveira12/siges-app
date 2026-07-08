@@ -12,8 +12,12 @@ function buildFollowupWhatsappUrl(request) {
   const texto = [
     '*Acompanhamento de Solicitação de Empréstimo*',
     '',
-    `Olá! Meu nome é ${userDisplayName()}.`,
-    `Gostaria de acompanhar minha solicitação de empréstimo no valor de ${formatMoney(request.requested_amount)}, com pagamento ${prazo}, enviada em ${formatDate(request.created_at)}.`,
+    `*Nome:* ${userDisplayName()}`,
+    `*Valor:* ${formatMoney(request.requested_amount)}`,
+    `*Prazo desejado:* ${prazo}`,
+    `*Enviada em:* ${formatDate(request.created_at)}`,
+    '',
+    'Gostaria de acompanhar o andamento da minha solicitação, por favor.',
   ].join('\n');
   return `https://wa.me/${withCountry}?text=${encodeURIComponent(texto)}`;
 }
@@ -26,7 +30,7 @@ async function renderClienteSolicitar() {
   let available = 0;
   try {
     const limit = App.client ? Number(App.client.credit_limit) : 0;
-    const { data } = await supa.rpc('client_outstanding_balance', { p_client_id: clientId });
+    const { data } = await supa.rpc('client_outstanding_principal', { p_client_id: clientId });
     available = Math.max(0, limit - (Number(data) || 0));
   } catch (e) { /* segue com 0 */ }
 

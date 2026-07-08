@@ -52,7 +52,7 @@ function paintClientesScreen() {
       ${rows.length ? `
       <table class="data-table table-scroll">
         <thead><tr>
-          <th>Nome</th><th>Contato</th><th>Região / Grupo</th><th>Limite de crédito</th><th>Score</th><th>Ações</th>
+          <th>Nome</th><th>Contato</th><th>Grupo</th><th>Limite de crédito</th><th>Score</th><th>Ações</th>
         </tr></thead>
         <tbody>
           ${rows.map((c) => {
@@ -61,7 +61,7 @@ function paintClientesScreen() {
             <tr>
               <td data-label="Nome"><strong>${escapeHtml(p.full_name || '—')}</strong></td>
               <td data-label="Contato"><div><div>${escapeHtml(p.email || '')}</div><div class="text-sm text-soft">${escapeHtml(p.phone || '')}</div></div></td>
-              <td data-label="Região/Grupo">${escapeHtml(c.region || '—')} ${c.client_group ? '· ' + escapeHtml(c.client_group) : ''}</td>
+              <td data-label="Grupo">${escapeHtml(c.client_group || '—')}</td>
               <td data-label="Limite" class="mono">${formatMoney(c.credit_limit)}</td>
               <td data-label="Score">${c.score} ${scoreTierBadge(c.score_tier)}</td>
               <td data-label="Ações">
@@ -208,10 +208,9 @@ function openClienteModal(client) {
           <div class="field"><label>Renda Mensal</label><select id="m-salary">${incomeBracketOptionsHtml((client && client.salary) || null, true)}</select></div>
           <div class="field"><label>Chave Pix</label><input type="text" id="m-pix-key" value="${escapeHtml((client && client.pix_key) || '')}"></div>
         </div>
-        <div class="field"><label>Limite de crédito (R$)</label><input type="text" id="m-limit" placeholder="0,00"></div>
         <div class="field-row">
-          <div class="field"><label>Região</label><input type="text" id="m-region" value="${escapeHtml((client && client.region) || '')}"></div>
-          <div class="field"><label>Grupo</label><input type="text" id="m-group" placeholder="Ex: Carteira Assinada" value="${escapeHtml((client && client.client_group) || '')}"></div>
+          <div class="field"><label>Limite de crédito (R$)</label><input type="text" id="m-limit" placeholder="0,00"></div>
+          <div class="field"><label>Grupo</label><select id="m-group">${clientGroupOptionsHtml((client && client.client_group) || null, true)}</select></div>
         </div>
         <div class="field"><label>Observações</label><textarea id="m-notes">${escapeHtml((client && client.notes) || '')}</textarea></div>
       </div>
@@ -239,8 +238,7 @@ function openClienteModal(client) {
       cpf: document.getElementById('m-cpf').value.trim() || null,
       phone: document.getElementById('m-phone').value.replace(/\D/g, '') || null,
       credit_limit: getMoneyValue(document.getElementById('m-limit')),
-      region: document.getElementById('m-region').value.trim() || null,
-      client_group: document.getElementById('m-group').value.trim() || null,
+      client_group: document.getElementById('m-group').value || null,
       notes: document.getElementById('m-notes').value.trim() || null,
       company: document.getElementById('m-company').value.trim() || null,
       job_title: document.getElementById('m-job-title').value.trim() || null,
@@ -254,7 +252,7 @@ function openClienteModal(client) {
         const { error } = await supa.rpc('update_client_profile', {
           p_client_id: client.profile_id,
           p_full_name: payload.full_name, p_cpf: payload.cpf, p_phone: payload.phone,
-          p_credit_limit: payload.credit_limit, p_region: payload.region,
+          p_credit_limit: payload.credit_limit,
           p_client_group: payload.client_group, p_notes: payload.notes,
           p_company: payload.company, p_job_title: payload.job_title,
           p_salary: payload.salary, p_pix_key: payload.pix_key,
@@ -275,7 +273,7 @@ function openClienteModal(client) {
         await supa.rpc('update_client_profile', {
           p_client_id: result.user_id,
           p_full_name: payload.full_name, p_cpf: payload.cpf, p_phone: payload.phone,
-          p_credit_limit: payload.credit_limit, p_region: payload.region,
+          p_credit_limit: payload.credit_limit,
           p_client_group: payload.client_group, p_notes: payload.notes,
           p_company: payload.company, p_job_title: payload.job_title,
           p_salary: payload.salary, p_pix_key: payload.pix_key,

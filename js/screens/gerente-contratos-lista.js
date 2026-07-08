@@ -170,7 +170,7 @@ async function renderGerenteContratoDetalhe(params) {
               <td data-label="Capital" class="mono">${formatMoney(i.principal_share)}</td>
               <td data-label="Juros" class="mono">${formatMoney(i.interest_share)}</td>
               <td data-label="Total"><div><div class="mono">${formatMoney(i.amount_due)}</div>${(i.principal_paid_partial > 0 || i.interest_paid_partial > 0) ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
-              <td data-label="Status">${statusBadge(i.status, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[i.status])}</td>
+              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(i.status, i.due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[st]); })()}</td>
               <td data-label="">
                 <div class="flex gap-8">
                   ${(i.status === 'pendente' || i.status === 'atrasada') ? `
@@ -197,7 +197,7 @@ async function renderGerenteContratoDetalhe(params) {
               <td data-label="Juros pago" class="mono">${formatMoney(c.interest_only_amount)}</td>
               <td data-label="Dívida renovada" class="mono">${formatMoney(c.full_debt_amount)}</td>
               <td data-label="Novo vencimento">${formatDate(c.new_due_date)}</td>
-              <td data-label="Status">${statusBadge(c.status, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[c.status])}</td>
+              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(c.status, c.new_due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st]); })()}</td>
               <td data-label="">${(c.status === 'pendente' || c.status === 'atrasada') ? `<button class="btn btn-accent btn-sm receive-cycle-btn" data-id="${c.id}">Receber</button>` : ''}</td>
             </tr>
           `).join('')}
@@ -276,9 +276,9 @@ function openEditContratoModal(contract, onDone) {
         <div class="toggle-row mt-14"><label class="switch"><input type="checkbox" id="ec-renewal" ${contract.allows_renewal ? 'checked' : ''}><span class="track"></span></label><span>Permite renovação</span></div>
         <div class="field-row mt-14">
           <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="ec-late-fee" value="${contract.late_fee_percent}"></div>
-          <div class="field"><label>Juros por atraso (% a.m.)</label><input type="number" min="0" step="0.01" id="ec-late-interest" value="${contract.late_interest_percent}"></div>
+          <div class="field"><label>Juros por atraso (% ao dia)</label><input type="number" min="0" step="0.01" id="ec-late-interest" value="${contract.late_interest_percent}"></div>
         </div>
-        <span class="help">Aplicados no momento do recebimento, proporcionalmente aos dias em atraso (juros) + valor fixo (multa) — ajustável em cada recebimento.</span>
+        <span class="help">Juros compostos diariamente sobre o saldo em atraso (ex: 2% ao dia) + multa fixa uma vez — ajustável em cada recebimento.</span>
         <div class="field"><label>Observações</label><textarea id="ec-observations">${escapeHtml(contract.observations || '')}</textarea></div>
       </div>
       <div class="modal-foot">

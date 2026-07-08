@@ -50,7 +50,6 @@ create table clients (
   credit_limit numeric(12,2) not null default 0 check (credit_limit >= 0),
   address text,
   birth_date date,
-  region text,
   client_group text,
   company text,
   job_title text,
@@ -229,6 +228,9 @@ create table system_settings (
   company_name text not null default 'Siges Serviços Financeiros',
   company_whatsapp text,
   company_pix_key text,
+  backup_auto_enabled boolean not null default false,
+  backup_frequency text not null default 'diario', -- diario | semanal | quinzenal | mensal | personalizado
+  backup_custom_days integer,
   updated_at timestamptz not null default now()
 );
 insert into system_settings (id) values (true);
@@ -280,13 +282,14 @@ begin
   )
   on conflict (id) do nothing;
 
-  insert into public.clients (profile_id, company, job_title, salary, pix_key)
+  insert into public.clients (profile_id, company, job_title, salary, pix_key, client_group)
   values (
     new.id,
     new.raw_user_meta_data->>'company',
     new.raw_user_meta_data->>'job_title',
     nullif(new.raw_user_meta_data->>'salary', ''),
-    new.raw_user_meta_data->>'pix_key'
+    new.raw_user_meta_data->>'pix_key',
+    nullif(new.raw_user_meta_data->>'client_group', '')
   )
   on conflict (profile_id) do nothing;
 
@@ -389,8 +392,41 @@ begin
 end;
 $$;
 
+-- 5.1b Capital ainda em aberto de um cliente (só o principal, sem juros) —
+-- é isso que consome o limite de crédito, não o saldo devedor total (que já
+-- inclui juros a receber). Renovação não abate capital, então conta o
+-- principal_amount inteiro do contrato enquanto houver ciclo em aberto.
+create or replace function client_outstanding_principal(p_client_id uuid)
+returns numeric
+language plpgsql stable
+security definer set search_path = public
+as $$
+begin
+  if not (is_gerente() or auth.uid() = p_client_id) then
+    raise exception 'FORBIDDEN';
+  end if;
+
+  return (select coalesce(sum(
+    case
+      when exists (
+        select 1 from renewal_cycles rc
+        where rc.contract_id = lc.id and rc.status in ('pendente','atrasada')
+      )
+      then lc.principal_amount
+      else (
+        select coalesce(sum(i.principal_share - i.principal_paid_partial), 0) from installments i
+        where i.contract_id = lc.id and i.status in ('pendente','atrasada')
+      )
+    end
+  ), 0)
+  from loan_contracts lc
+  where lc.client_id = p_client_id
+    and lc.status in ('em_aberto', 'atrasado'));
+end;
+$$;
+
 -- 5.2 Checagem de limite de crédito (uso interno/gerente — chamada sempre com
--- p_client_id verificado por quem chama; client_outstanding_balance() já
+-- p_client_id verificado por quem chama; client_outstanding_principal() já
 -- reforça a própria checagem de titularidade/role por baixo)
 create or replace function check_credit_limit(p_client_id uuid, p_new_principal numeric)
 returns boolean
@@ -401,7 +437,7 @@ begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
-  return (client_outstanding_balance(p_client_id) + p_new_principal) <=
+  return (client_outstanding_principal(p_client_id) + p_new_principal) <=
          (select credit_limit from clients where profile_id = p_client_id);
 end;
 $$;
@@ -631,7 +667,8 @@ create or replace function receive_payment(
   p_has_operational_fee boolean,
   p_operational_fee_amount numeric,
   p_notes text default null,
-  p_late_charge_amount numeric default 0
+  p_late_charge_amount numeric default 0,
+  p_received_at date default current_date
 )
 returns uuid
 language plpgsql
@@ -686,11 +723,12 @@ begin
   insert into payments (
     contract_id, installment_id, payment_kind, amount_received,
     principal_component, interest_component, late_charge_amount,
-    has_operational_fee, operational_fee_amount, received_by, notes
+    has_operational_fee, operational_fee_amount, received_by, notes, received_at
   ) values (
     v_contract.id, p_installment_id, 'quitacao_parcela', p_amount_received,
     v_pay_principal, v_pay_interest + v_pay_late, v_pay_late,
-    p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes
+    p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes,
+    coalesce(p_received_at, current_date)
   ) returning id into v_payment_id;
 
   update installments set
@@ -699,7 +737,7 @@ begin
   where id = p_installment_id;
 
   if v_remaining_total - p_amount_received <= 0.01 then
-    update installments set status = 'paga', paid_at = now() where id = p_installment_id;
+    update installments set status = 'paga', paid_at = coalesce(p_received_at, current_date) where id = p_installment_id;
 
     select count(*) into v_remaining_count from installments
       where contract_id = v_contract.id and status in ('pendente', 'atrasada');
@@ -732,7 +770,8 @@ create or replace function renew_installment(
   p_has_operational_fee boolean,
   p_operational_fee_amount numeric,
   p_notes text default null,
-  p_late_charge_amount numeric default 0
+  p_late_charge_amount numeric default 0,
+  p_received_at date default current_date
 )
 returns uuid
 language plpgsql
@@ -782,7 +821,7 @@ begin
     when 'semanal' then interval '7 days'
     when 'personalizado' then (coalesce(v_custom_days, 30) || ' days')::interval
   end;
-  v_new_due_date := current_date + v_step;
+  v_new_due_date := coalesce(p_received_at, current_date) + v_step;
 
   select coalesce(max(cycle_number), 0) + 1 into v_cycle_number
     from renewal_cycles where contract_id = v_contract_id;
@@ -806,11 +845,12 @@ begin
   insert into payments (
     contract_id, renewal_cycle_id, payment_kind, amount_received,
     principal_component, interest_component, late_charge_amount,
-    has_operational_fee, operational_fee_amount, received_by, notes
+    has_operational_fee, operational_fee_amount, received_by, notes, received_at
   ) values (
     v_contract_id, v_new_cycle_id, 'renovacao_juros', p_interest_only_amount + coalesce(p_late_charge_amount, 0),
     0, p_interest_only_amount + coalesce(p_late_charge_amount, 0), coalesce(p_late_charge_amount, 0),
-    p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes
+    p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes,
+    coalesce(p_received_at, current_date)
   ) returning id into v_payment_id;
 
   update loan_contracts set status = 'em_aberto', updated_at = now()
@@ -832,7 +872,8 @@ create or replace function receive_cycle_payment(
   p_has_operational_fee boolean,
   p_operational_fee_amount numeric,
   p_notes text default null,
-  p_late_charge_amount numeric default 0
+  p_late_charge_amount numeric default 0,
+  p_received_at date default current_date
 )
 returns uuid
 language plpgsql
@@ -862,14 +903,15 @@ begin
   insert into payments (
     contract_id, renewal_cycle_id, payment_kind, amount_received,
     principal_component, interest_component, late_charge_amount,
-    has_operational_fee, operational_fee_amount, received_by, notes
+    has_operational_fee, operational_fee_amount, received_by, notes, received_at
   ) values (
     v_contract.id, p_cycle_id, 'quitacao_final', p_amount_received,
     v_principal, v_interest + coalesce(p_late_charge_amount, 0), coalesce(p_late_charge_amount, 0),
-    p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes
+    p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes,
+    coalesce(p_received_at, current_date)
   ) returning id into v_payment_id;
 
-  update renewal_cycles set status = 'paga', paid_at = now() where id = p_cycle_id;
+  update renewal_cycles set status = 'paga', paid_at = coalesce(p_received_at, current_date) where id = p_cycle_id;
 
   select count(*) into v_remaining from installments
     where contract_id = v_contract.id and status in ('pendente', 'atrasada');
@@ -1002,7 +1044,6 @@ create or replace function update_client_profile(
   p_cpf text,
   p_phone text,
   p_credit_limit numeric,
-  p_region text,
   p_client_group text,
   p_notes text,
   p_company text default null,
@@ -1022,7 +1063,7 @@ begin
   update profiles set full_name = p_full_name, cpf = p_cpf, phone = p_phone, updated_at = now()
     where id = p_client_id;
 
-  update clients set credit_limit = p_credit_limit, region = p_region,
+  update clients set credit_limit = p_credit_limit,
     client_group = p_client_group, notes = p_notes,
     company = p_company, job_title = p_job_title, salary = p_salary, pix_key = p_pix_key
     where profile_id = p_client_id;

@@ -61,6 +61,52 @@ async function renderGerenteConfiguracoes() {
     <button class="btn btn-primary mt-8" id="cfg-save">Salvar configurações</button>
 
     <div class="card mt-20">
+      <h3>Backup e exportação de dados</h3>
+      <p class="text-sm text-soft mt-8">O backup baixa um arquivo .json com todos os dados do sistema (clientes, contratos, parcelas, pagamentos, solicitações) direto para este computador.</p>
+      <div class="toggle-row mt-14"><label class="switch"><input type="checkbox" id="cfg-backup-toggle" ${settings.backup_auto_enabled ? 'checked' : ''}><span class="track"></span></label><span>Backup automático ao abrir o sistema</span></div>
+      <div id="cfg-backup-fields" class="mt-14 ${settings.backup_auto_enabled ? '' : 'hidden'}">
+        <div class="field-row">
+          <div class="field">
+            <label>Frequência</label>
+            <select id="cfg-backup-frequency">
+              <option value="diario" ${settings.backup_frequency === 'diario' ? 'selected' : ''}>Diário</option>
+              <option value="semanal" ${settings.backup_frequency === 'semanal' ? 'selected' : ''}>Semanal</option>
+              <option value="quinzenal" ${settings.backup_frequency === 'quinzenal' ? 'selected' : ''}>Quinzenal</option>
+              <option value="mensal" ${settings.backup_frequency === 'mensal' ? 'selected' : ''}>Mensal</option>
+              <option value="personalizado" ${settings.backup_frequency === 'personalizado' ? 'selected' : ''}>Personalizado</option>
+            </select>
+          </div>
+          <div class="field ${settings.backup_frequency === 'personalizado' ? '' : 'hidden'}" id="cfg-backup-custom-field">
+            <label>A cada quantos dias?</label>
+            <input type="number" min="1" step="1" id="cfg-backup-custom-days" value="${settings.backup_custom_days || 7}">
+          </div>
+        </div>
+        <span class="help">Verificado 1x por dia, no primeiro acesso ao sistema — se já tiver rodado no período, não baixa de novo.</span>
+      </div>
+      <button class="btn btn-outline mt-14" id="cfg-backup-now-btn">${Icons.printer} Fazer backup agora (.json)</button>
+
+      <h3 class="mt-20">Exportar dados</h3>
+      <p class="text-sm text-soft mt-8">Exporta clientes, contratos, parcelas e pagamentos nos formatos abaixo.</p>
+      <div class="field-row mt-14">
+        <div class="field">
+          <label>Formato</label>
+          <select id="cfg-export-format">
+            <option value="xlsx">Excel (.xlsx) — todas as tabelas</option>
+            <option value="csv">CSV — uma tabela por vez</option>
+            <option value="pdf">PDF — relatório Siges</option>
+          </select>
+        </div>
+        <div class="field" id="cfg-export-table-field">
+          <label>Tabela</label>
+          <select id="cfg-export-table">
+            ${Object.keys(BACKUP_TABLE_LABELS).map((k) => `<option value="${k}">${BACKUP_TABLE_LABELS[k]}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary mt-8" id="cfg-export-btn">Exportar</button>
+    </div>
+
+    <div class="card mt-20">
       <h3>Tabela de referência de taxas (Tabela VIP)</h3>
       <p class="text-sm text-soft mt-8">Usada só como sugestão visual ao criar contratos — nunca trava o valor digitado pelo administrador.</p>
       <table class="data-table table-scroll mt-14">
@@ -105,11 +151,45 @@ async function renderGerenteConfiguracoes() {
       default_exit_fee_fixed: getMoneyValue(document.getElementById('cfg-exit-fee-fixed')),
       default_entry_fee_percent: Number(document.getElementById('cfg-entry-fee').value || 0),
       default_entry_fee_fixed: getMoneyValue(document.getElementById('cfg-entry-fee-fixed')),
+      backup_auto_enabled: document.getElementById('cfg-backup-toggle').checked,
+      backup_frequency: document.getElementById('cfg-backup-frequency').value,
+      backup_custom_days: parseInt(document.getElementById('cfg-backup-custom-days').value || '7', 10),
     };
     const { error } = await supa.from('system_settings').update(payload).eq('id', true);
     if (error) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
     App.settings = { ...App.settings, ...payload };
     showToast('Configurações salvas.');
+  };
+
+  const backupToggle = document.getElementById('cfg-backup-toggle');
+  backupToggle.onchange = () => document.getElementById('cfg-backup-fields').classList.toggle('hidden', !backupToggle.checked);
+  document.getElementById('cfg-backup-frequency').onchange = (e) => {
+    document.getElementById('cfg-backup-custom-field').classList.toggle('hidden', e.target.value !== 'personalizado');
+  };
+  document.getElementById('cfg-backup-now-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try { await runBackupJSON(false); } finally { btn.disabled = false; }
+  };
+
+  const exportFormatSelect = document.getElementById('cfg-export-format');
+  const toggleExportTableField = () => document.getElementById('cfg-export-table-field').classList.toggle('hidden', exportFormatSelect.value !== 'csv');
+  exportFormatSelect.onchange = toggleExportTableField;
+  toggleExportTableField();
+  document.getElementById('cfg-export-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const format = exportFormatSelect.value;
+      if (format === 'xlsx') await runExportXLSX();
+      else if (format === 'csv') await runExportCSV(document.getElementById('cfg-export-table').value);
+      else await runExportPDF();
+      showToast('Exportação concluída.');
+    } catch (e2) {
+      showToast('Erro ao exportar: ' + (e2.message || String(e2)));
+    } finally {
+      btn.disabled = false;
+    }
   };
 
   const wipeBtn = document.getElementById('wipe-data-btn');

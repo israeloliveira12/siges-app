@@ -42,24 +42,22 @@ async function renderClienteEmprestimos() {
         </div>
       </div>
       <table class="data-table table-scroll mt-14">
-        <thead><tr><th>Parcela</th><th>Vencimento</th><th>Juros aplicado</th><th>Valor</th><th>Status</th></tr></thead>
+        <thead><tr><th>Parcela</th><th>Vencimento</th><th>Valor</th><th>Status</th></tr></thead>
         <tbody>
           ${inst.map((i) => `
             <tr>
               <td data-label="Parcela">${i.sequence_number}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
-              <td data-label="Juros aplicado">${formatNumber(c.interest_rate, 2)}%</td>
-              <td data-label="Valor" class="mono">${formatMoney(i.amount_due)}</td>
-              <td data-label="Status">${statusBadge(i.status, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[i.status])}</td>
+              <td data-label="Valor"><div><div class="mono">${formatMoney(i.amount_due)}</div>${(i.principal_paid_partial > 0 || i.interest_paid_partial > 0) ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
+              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(i.status, i.due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st]); })()}</td>
             </tr>
           `).join('')}
           ${cyc.map((r) => `
             <tr>
               <td data-label="Parcela">Renovação ${r.cycle_number}</td>
               <td data-label="Vencimento">${formatDate(r.new_due_date)}</td>
-              <td data-label="Juros aplicado">${formatNumber(c.interest_rate, 2)}%</td>
               <td data-label="Valor" class="mono">${formatMoney(r.full_debt_amount)}</td>
-              <td data-label="Status">${statusBadge(r.status, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada' }[r.status])}</td>
+              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(r.status, r.new_due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada' }[st]); })()}</td>
             </tr>
           `).join('')}
         </tbody>

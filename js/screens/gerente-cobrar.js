@@ -18,7 +18,7 @@ function buildWhatsappUrl(item) {
     ? `${item.seq} de ${(item.contract || {}).installments_count || '?'}`
     : String(item.seq);
 
-  const atencao = item.status === 'atrasada'
+  const atencao = item.due_date < todayISO()
     ? 'Efetue o pagamento da sua parcela atrasada'
     : 'Sua parcela vence hoje — efetue o pagamento para evitar atraso';
 
@@ -70,8 +70,11 @@ async function renderGerenteCobrar() {
   ];
 
   const vencidosHoje = items.filter((i) => i.due_date === today);
-  const atrasados = items.filter((i) => i.status === 'atrasada').sort((a, b) => a.due_date.localeCompare(b.due_date));
-  const dividaTotal = sum(items, 'amount');
+  // Compara due_date direto (não confia só na coluna status) — o cron que
+  // marca status='atrasada' roda 1x/dia, então uma parcela vencida há poucas
+  // horas ainda pode estar com status 'pendente' até o próximo ciclo do cron.
+  const atrasados = items.filter((i) => i.due_date < today).sort((a, b) => a.due_date.localeCompare(b.due_date));
+  const dividaTotal = sum(atrasados, 'amount');
 
   function listBlock(list, emptyMsg) {
     if (!list.length) return `<div class="empty-state">${Icons.check}<p>${emptyMsg}</p></div>`;
@@ -104,12 +107,12 @@ async function renderGerenteCobrar() {
     <div class="grid grid-4">
       <div class="card stat-card"><div class="label">Recebido hoje</div><div class="value mono">${formatMoney(sum(paymentsToday, 'amount_received'))}</div></div>
       <div class="card stat-card"><div class="label">Recebido no mês</div><div class="value mono">${formatMoney(sum(paymentsMonth, 'amount_received'))}</div></div>
-      <div class="card stat-card"><div class="label">Vencidos hoje</div><div class="value mono">${vencidosHoje.length}</div></div>
-      <div class="card stat-card"><div class="label">Total em atraso</div><div class="value mono" style="color:var(--bad)">${formatMoney(sum(atrasados, 'amount'))}</div></div>
+      <div class="card stat-card"><div class="label">Vence hoje</div><div class="value mono">${vencidosHoje.length}</div></div>
+      <div class="card stat-card"><div class="label">Total em atraso</div><div class="value mono" style="color:var(--bad)">${formatMoney(dividaTotal)}</div></div>
     </div>
 
     <div class="card mt-14">
-      <h3>Vencidos hoje (${vencidosHoje.length})</h3>
+      <h3>Vence hoje (${vencidosHoje.length})</h3>
       <div class="mt-8">${listBlock(vencidosHoje, 'Nenhum vencimento hoje.')}</div>
     </div>
 

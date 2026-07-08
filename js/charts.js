@@ -4,7 +4,7 @@
    e, quando cabe no espaço, um rótulo estático com o valor.
    ============================================================================ */
 
-const CHART_COLORS = { brand: '#0B416B', accent: '#1E9A95', warn: '#B8792B', bad: '#B8433A', good: '#1E8A5F', line: '#DCE2DF' };
+const CHART_COLORS = { brand: '#0B416B', accent: '#1E9A95', warn: '#B8792B', bad: '#B8433A', good: '#1E8A5F', purple: '#7C5CFC', line: '#DCE2DF' };
 
 function lineChartSVG(series, opts = {}) {
   const w = opts.width || 600, h = opts.height || 200, pad = 28;
@@ -42,6 +42,60 @@ function lineChartSVG(series, opts = {}) {
     <path d="${area}" fill="${opts.color || CHART_COLORS.accent}" opacity="0.08"/>
     <path d="${path}" fill="none" stroke="${opts.color || CHART_COLORS.accent}" stroke-width="2.2" stroke-linejoin="round"/>
     ${points}
+    ${labels}
+  </svg>`;
+}
+
+// Curva suave (Q por ponto médio) com área preenchida — usada em projeções
+// (poucos pontos, valores sempre visíveis, sem depender só do tooltip).
+function areaChartSVG(series, opts = {}) {
+  const w = opts.width || 600, h = opts.height || 220, pad = 32;
+  const fmt = opts.valueFormatter || formatMoney;
+  const color = opts.color || CHART_COLORS.purple;
+  const values = series.map((p) => p.value);
+  const max = Math.max(1, ...values) * 1.25;
+  const min = 0;
+  const x = (i) => pad + (i / Math.max(1, series.length - 1)) * (w - pad * 2);
+  const y = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
+  const points = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
+
+  const smoothPath = (pts) => {
+    if (pts.length < 2) return `M ${pts[0].x} ${pts[0].y}`;
+    let d = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const midX = (pts[i].x + pts[i + 1].x) / 2;
+      const midY = (pts[i].y + pts[i + 1].y) / 2;
+      d += ` Q ${pts[i].x} ${pts[i].y} ${midX} ${midY}`;
+    }
+    const last = pts[pts.length - 1];
+    d += ` Q ${last.x} ${last.y} ${last.x} ${last.y}`;
+    return d;
+  };
+
+  const linePath = smoothPath(points);
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${h - pad} L ${points[0].x} ${h - pad} Z`;
+
+  const gridLines = [0, 0.5, 1].map((f) => {
+    const yy = pad + f * (h - pad * 2);
+    return `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${w - pad}" y2="${yy.toFixed(1)}" stroke="${CHART_COLORS.line}" stroke-width="1"/>`;
+  }).join('');
+
+  const labels = series.map((p, i) => `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>`).join('');
+  const valueLabels = series.map((p, i) => `<text x="${x(i).toFixed(1)}" y="${(y(p.value) - 10).toFixed(1)}" font-size="10" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>`).join('');
+  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5" fill="#fff" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
+
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">
+    <defs>
+      <linearGradient id="areaGrad${opts.gradId || ''}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    ${gridLines}
+    <path d="${areaPath}" fill="url(#areaGrad${opts.gradId || ''})"/>
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>
+    ${dots}
+    ${valueLabels}
     ${labels}
   </svg>`;
 }

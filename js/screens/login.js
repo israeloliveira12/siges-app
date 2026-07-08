@@ -51,12 +51,21 @@ function renderLoginScreen() {
               <div class="field"><label>Empresa</label><input type="text" id="f-company" required></div>
               <div class="field"><label>Cargo</label><input type="text" id="f-job-title" required></div>
             </div>
-            <div class="field">
-              <label>Renda Mensal</label>
-              <select id="f-salary" required>
-                <option value="" disabled selected>Selecione...</option>
-                ${incomeBracketOptionsHtml(null, false)}
-              </select>
+            <div class="field-row">
+              <div class="field">
+                <label>Renda Mensal</label>
+                <select id="f-salary" required>
+                  <option value="" disabled selected>Selecione...</option>
+                  ${incomeBracketOptionsHtml(null, false)}
+                </select>
+              </div>
+              <div class="field">
+                <label>Grupo</label>
+                <select id="f-group" required>
+                  <option value="" disabled selected>Selecione...</option>
+                  ${clientGroupOptionsHtml(null, false)}
+                </select>
+              </div>
             </div>
             <div class="field">
               <label>Chave Pix</label>
@@ -125,6 +134,7 @@ function renderLoginScreen() {
           company: document.getElementById('f-company').value.trim(),
           job_title: document.getElementById('f-job-title').value.trim(),
           salary: document.getElementById('f-salary').value || null,
+          client_group: document.getElementById('f-group').value || null,
           pix_key: document.getElementById('f-pix-key').value.trim(),
         };
         await doSignUp(email, password, profileData);

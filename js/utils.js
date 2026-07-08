@@ -14,6 +14,27 @@ function incomeBracketOptionsHtml(selected, includeBlank) {
   return blank + INCOME_BRACKETS.map((b) => `<option value="${b}" ${selected === b ? 'selected' : ''}>${b}</option>`).join('');
 }
 
+const CLIENT_GROUPS = [
+  'Carteira Assinada',
+  'Servidor Público',
+  'Autônomo',
+  'Estudante',
+  'Desempregado',
+];
+
+function clientGroupOptionsHtml(selected, includeBlank) {
+  const blank = includeBlank ? `<option value="" ${!selected ? 'selected' : ''}>Não informado</option>` : '';
+  return blank + CLIENT_GROUPS.map((g) => `<option value="${g}" ${selected === g ? 'selected' : ''}>${g}</option>`).join('');
+}
+
+// O cron que marca status='atrasada' roda 1x/dia — uma parcela vencida há
+// poucas horas ainda pode estar 'pendente' no banco. Isso calcula o status
+// "de verdade" no momento, sem esperar o próximo ciclo do cron.
+function effectiveInstallmentStatus(status, dueDate) {
+  if (status === 'pendente' && dueDate < todayISO()) return 'atrasada';
+  return status;
+}
+
 function formatMoney(value) {
   const n = Number(value || 0);
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

@@ -18,32 +18,62 @@ async function renderGerenteDashboard() {
     { count: clientsCount },
     { count: pendingRequests },
     { data: dueSoon },
+    { data: cyclesSoon },
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received').gte('received_at', monthStart),
-    supa.from('loan_contracts').select('status'),
+    supa.from('loan_contracts').select('status, created_at'),
     supa.from('payments').select('amount_received, received_at').gte('received_at', trend30Start),
     supa.from('clients').select('profile_id', { count: 'exact', head: true }),
     supa.from('loan_requests').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
     supa.from('installments').select('amount_due, due_date, status').in('status', ['pendente', 'atrasada']),
+    supa.from('renewal_cycles').select('full_debt_amount, new_due_date, status').in('status', ['pendente', 'atrasada']),
   ]);
 
   const sum = (rows, field) => (rows || []).reduce((s, r) => s + Number(r[field] || 0), 0);
   const recebidoHoje = sum(paymentsToday, 'amount_received');
   const recebidoMes = sum(paymentsMonth, 'amount_received');
   const vencidosHoje = (dueSoon || []).filter((i) => i.due_date === today);
-  const atrasados = (dueSoon || []).filter((i) => i.status === 'atrasada');
+  // Compara due_date direto (não confia só na coluna status) — o cron que
+  // marca status='atrasada' roda 1x/dia, então uma parcela vencida há poucas
+  // horas ainda pode estar com status 'pendente' até o próximo ciclo do cron.
+  const atrasados = (dueSoon || []).filter((i) => i.due_date < today);
   const aReceberMes = (dueSoon || []).filter((i) => i.due_date && i.due_date.slice(0, 7) === today.slice(0, 7));
 
   const statusCounts = { em_aberto: 0, atrasado: 0, quitado: 0, perda: 0 };
   (contractsStatus || []).forEach((c) => { statusCounts[c.status] = (statusCounts[c.status] || 0) + 1; });
   const openContracts = statusCounts.em_aberto + statusCounts.atrasado;
+  const finishedContracts = statusCounts.quitado + statusCounts.perda;
+  const newThisMonth = (contractsStatus || []).filter((c) => String(c.created_at).slice(0, 7) === today.slice(0, 7)).length;
   const contractStatusSegments = [
     { label: 'Em aberto', value: statusCounts.em_aberto, color: CHART_COLORS.brand },
     { label: 'Atrasado', value: statusCounts.atrasado, color: CHART_COLORS.bad },
     { label: 'Quitado', value: statusCounts.quitado, color: CHART_COLORS.good },
     { label: 'Perda', value: statusCounts.perda, color: CHART_COLORS.warn },
   ];
+
+  // Projeção de recebimentos — soma parcelas + ciclos de renovação em aberto
+  // (pendente/atrasada) nos próximos 6 meses, agrupados por mês.
+  const mesesPt = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const monthKeys = [];
+  for (let m = 0; m < 6; m++) {
+    const d = new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + m, 1);
+    monthKeys.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+  }
+  const projectionByMonth = {};
+  (dueSoon || []).forEach((i) => {
+    const key = String(i.due_date).slice(0, 7);
+    projectionByMonth[key] = (projectionByMonth[key] || 0) + Number(i.amount_due || 0);
+  });
+  (cyclesSoon || []).forEach((c) => {
+    const key = String(c.new_due_date).slice(0, 7);
+    projectionByMonth[key] = (projectionByMonth[key] || 0) + Number(c.full_debt_amount || 0);
+  });
+  const projectionSeries = monthKeys.map((key) => {
+    const [y, m] = key.split('-');
+    return { label: mesesPt[Number(m) - 1] + '/' + y, value: projectionByMonth[key] || 0 };
+  });
+  const receberSeisMeses = monthKeys.reduce((s, key) => s + (projectionByMonth[key] || 0), 0);
 
   const trendByDay = {};
   (paymentsTrend || []).forEach((p) => {
@@ -71,8 +101,30 @@ async function renderGerenteDashboard() {
         <div class="value mono">${formatMoney(sum(aReceberMes, 'amount_due'))}</div>
       </div>
       <div class="card stat-card">
-        <div class="label">Contratos em aberto</div>
+        <div class="label">A receber — 6 meses</div>
+        <div class="value mono">${formatMoney(receberSeisMeses)}</div>
+      </div>
+    </div>
+
+    <h3 class="mt-20">Visão geral dos contratos</h3>
+    <p class="text-sm text-soft">Acompanhe o status e performance dos seus contratos</p>
+    <div class="grid grid-3 mt-14">
+      <div class="card stat-card" style="border-top:3px solid var(--good)">
+        <div class="label">Em andamento</div>
         <div class="value mono">${openContracts || 0}</div>
+        <div class="text-sm text-soft mt-8">Contratos ativos e em execução</div>
+        <a href="#/gerente/contratos" class="text-sm" style="color:var(--accent)">Ver todos →</a>
+      </div>
+      <div class="card stat-card" style="border-top:3px solid var(--brand)">
+        <div class="label">Finalizados</div>
+        <div class="value mono">${finishedContracts || 0}</div>
+        <div class="text-sm text-soft mt-8">Contratos concluídos ou em perda</div>
+        <a href="#/gerente/contratos" class="text-sm" style="color:var(--accent)">Ver todos →</a>
+      </div>
+      <div class="card stat-card" style="border-top:3px solid var(--warn)">
+        <div class="label">Novos do mês</div>
+        <div class="value mono">${newThisMonth || 0}</div>
+        <div class="text-sm text-soft mt-8">Contratos criados este mês</div>
       </div>
     </div>
 
@@ -80,7 +132,7 @@ async function renderGerenteDashboard() {
       <div class="card" style="border-color:var(--bad)">
         <div class="flex justify-between items-center">
           <div>
-            <div class="label text-soft text-sm">Vencidos hoje / atrasados</div>
+            <div class="label text-soft text-sm">Vence hoje / atrasados</div>
             <div class="value mono" style="font-size:20px">${vencidosHoje.length + atrasados.length}</div>
           </div>
           <button class="btn btn-danger btn-sm" onclick="router.navigate('#/gerente/cobrar')">Ir para Cobrar</button>
@@ -95,6 +147,11 @@ async function renderGerenteDashboard() {
           <button class="btn btn-outline btn-sm" onclick="router.navigate('#/gerente/solicitacoes')">Analisar</button>
         </div>
       </div>
+    </div>
+
+    <div class="card mt-14">
+      <h3>Projeção de Recebimentos (6 meses)</h3>
+      <div class="mt-8">${areaChartSVG(projectionSeries, { color: CHART_COLORS.purple })}</div>
     </div>
 
     <div class="grid grid-2 mt-14">

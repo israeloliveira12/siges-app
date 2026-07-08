@@ -65,6 +65,7 @@ async function onAuthenticated(session) {
   renderShellForRole();
   subscribeNotifications();
   registerPushIfSupported();
+  maybeRunAutoBackup();
 
   if (location.hash === '' || location.hash === '#/login' || location.hash === '#/') {
     router.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
