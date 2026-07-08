@@ -269,20 +269,20 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, full_name, email, role)
+  insert into public.profiles (id, full_name, email, role, cpf, phone)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
     lower(new.email),
-    'cliente'
+    'cliente',
+    new.raw_user_meta_data->>'cpf',
+    new.raw_user_meta_data->>'phone'
   )
   on conflict (id) do nothing;
 
-  insert into public.clients (profile_id, cpf, phone, company, job_title, salary, pix_key)
+  insert into public.clients (profile_id, company, job_title, salary, pix_key)
   values (
     new.id,
-    new.raw_user_meta_data->>'cpf',
-    new.raw_user_meta_data->>'phone',
     new.raw_user_meta_data->>'company',
     new.raw_user_meta_data->>'job_title',
     nullif(new.raw_user_meta_data->>'salary', ''),
@@ -1259,11 +1259,16 @@ create policy "push_insert_own" on push_subscriptions for insert with check (pro
 create policy "push_delete_own" on push_subscriptions for delete using (profile_id = auth.uid());
 
 -- system_settings
-create policy "settings_select_all" on system_settings for select using (true);
+-- Só usuários autenticados (cliente ou gerente) leem — antes qualquer
+-- visitante anônimo conseguia ler taxas/percentuais internos direto pela
+-- API REST do Supabase (a anon key é pública, embutida no JS do site).
+create policy "settings_select_authenticated" on system_settings for select using (auth.uid() is not null);
 create policy "settings_gerente_update" on system_settings for update using (is_gerente());
 
 -- loan_rate_reference
-create policy "rate_ref_select_all" on loan_rate_reference for select using (true);
+-- Mesma correção do system_settings: tabela de taxas de juros por faixa é
+-- informação comercial interna, não deve ser legível por visitante anônimo.
+create policy "rate_ref_select_authenticated" on loan_rate_reference for select using (auth.uid() is not null);
 create policy "rate_ref_gerente_write" on loan_rate_reference for all
   using (is_gerente()) with check (is_gerente());
 
