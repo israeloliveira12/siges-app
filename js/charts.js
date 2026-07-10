@@ -81,7 +81,17 @@ function areaChartSVG(series, opts = {}) {
   }).join('');
 
   const labels = series.map((p, i) => `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>`).join('');
-  const valueLabels = series.map((p, i) => `<text x="${x(i).toFixed(1)}" y="${(y(p.value) - 10).toFixed(1)}" font-size="10" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>`).join('');
+  // Rótulo de valor: sempre acima do ponto, com halo branco atrás e cor fixa
+  // (--ink), nunca a mesma cor da linha — testado com valores caindo exatamente
+  // sobre a linha e ficando ilegíveis quando usavam a mesma cor.
+  const valueLabels = series.map((p, i) => {
+    const ly = Math.max(12, y(p.value) - 12).toFixed(1);
+    const txt = escapeHtml(fmt(p.value));
+    return `
+      <text x="${x(i).toFixed(1)}" y="${ly}" font-size="10.5" fill="none" stroke="#fff" stroke-width="3" text-anchor="middle" font-weight="700" paint-order="stroke">${txt}</text>
+      <text x="${x(i).toFixed(1)}" y="${ly}" font-size="10.5" fill="#14212B" text-anchor="middle" font-weight="700">${txt}</text>
+    `;
+  }).join('');
   const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5" fill="#fff" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
 
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">

@@ -20,6 +20,7 @@ const NAV_ITEMS = {
     { route: 'gerente/gerentes', label: 'Administradores', icon: 'userPlus' },
     { route: 'gerente/relatorios', label: 'Relatórios', icon: 'chart' },
     { route: 'gerente/score', label: 'Score de Clientes', icon: 'score' },
+    { route: 'gerente/planejamento', label: 'Planejamento', icon: 'wallet' },
     { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings' },
   ],
 };

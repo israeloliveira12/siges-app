@@ -44,14 +44,17 @@ async function renderClienteEmprestimos() {
       <table class="data-table table-scroll mt-14">
         <thead><tr><th>Parcela</th><th>Vencimento</th><th>Valor</th><th>Status</th></tr></thead>
         <tbody>
-          ${inst.map((i) => `
+          ${inst.map((i) => {
+            const st = effectiveInstallmentStatus(i.status, i.due_date);
+            const isPartial = st !== 'paga' && (i.principal_paid_partial > 0 || i.interest_paid_partial > 0);
+            return `
             <tr>
               <td data-label="Parcela">${i.sequence_number}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
-              <td data-label="Valor"><div><div class="mono">${formatMoney(i.amount_due)}</div>${(i.principal_paid_partial > 0 || i.interest_paid_partial > 0) ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
-              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(i.status, i.due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st]); })()}</td>
+              <td data-label="Valor"><div><div class="mono">${formatMoney(i.amount_due)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
+              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
             </tr>
-          `).join('')}
+          `; }).join('')}
           ${cyc.map((r) => `
             <tr>
               <td data-label="Parcela">Renovação ${r.cycle_number}</td>

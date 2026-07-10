@@ -18,10 +18,35 @@ async function renderGerenteScore() {
   const piores = [...rows].sort((a, b) => a.score - b.score).slice(0, 10);
 
   root.innerHTML = `
-    <div class="flex justify-between items-center">
+    <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:10px">
       <p class="text-sm text-soft">Score de 0 a 100, recalculado a partir do histórico de pagamentos de cada cliente.</p>
       <button class="btn btn-outline btn-sm" id="recalc-all">${Icons.renew} Recalcular todos</button>
     </div>
+
+    <div class="card mt-14">
+      <h3>Como o score é calculado</h3>
+      <p class="text-sm text-soft mt-8">Todo cliente começa neutro e ganha ou perde pontos conforme o histórico real de pagamentos. Reprovação de solicitação de empréstimo <strong>nunca</strong> entra nessa conta.</p>
+      <div class="grid grid-2 mt-14" style="gap:4px 24px">
+        <div>
+          <div class="text-sm" style="font-weight:700;color:var(--good);margin-bottom:6px">Aumenta o score</div>
+          <div class="text-sm text-soft" style="line-height:1.9">
+            <div>Pagar em dia — até <strong>40 pts</strong></div>
+            <div>Pagar antecipado — até <strong>20 pts</strong></div>
+            <div>Contratos quitados — até <strong>+10 pts</strong> (+2 cada, máx. 5)</div>
+            <div>Recuperação após atraso (últimos 90 dias) — <strong>+5 pts</strong></div>
+            <div>Renovações pagas em dia — até <strong>+5 pts</strong> (+1 cada, máx. 5)</div>
+          </div>
+        </div>
+        <div>
+          <div class="text-sm" style="font-weight:700;color:var(--bad);margin-bottom:6px">Reduz o score</div>
+          <div class="text-sm text-soft" style="line-height:1.9">
+            <div>Atraso médio nos pagamentos — até <strong>−20 pts</strong></div>
+            <div>Qualquer contrato em perda — <strong>−30 pts</strong> (penalidade fixa)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Ranking — melhores scores</h3>

@@ -156,6 +156,15 @@ button { cursor: pointer; }
 .stat-card .value { font-family: var(--mono); font-size: 22px; font-weight: 700; margin-top: 4px; }
 .stat-card .hint { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
 
+.overview-card { cursor: pointer; transition: box-shadow .15s, transform .15s; }
+.overview-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.overview-card-link {
+  display: inline-flex; align-items: center; gap: 3px; margin-top: 10px;
+  font-weight: 600; color: var(--ink-soft);
+}
+.overview-card-link svg { width: 13px; height: 13px; }
+.overview-card:hover .overview-card-link { color: var(--ink); }
+
 /* ---------------------------------------------------------------------------
    Formulários
 --------------------------------------------------------------------------- */

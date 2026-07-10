@@ -132,14 +132,6 @@ function paintWizardStep1() {
   };
 }
 
-function rateReferenceTooltip() {
-  const amount = Number(wiz.principal_amount) || 0;
-  if (!amount) return '';
-  const matches = App.rateReference.filter((r) => r.due_type === wiz.due_type && amount >= Number(r.min_amount) && (r.max_amount == null || amount <= Number(r.max_amount)));
-  if (!matches.length) return '<span class="help">Sem sugestão da Tabela VIP para este valor/prazo — defina a taxa livremente.</span>';
-  return '<span class="help">Tabela VIP (referência, não obrigatória): ' + matches.map((m) => `${m.periods}x → ${formatNumber(m.rate_percent, 1)}%`).join(' · ') + '</span>';
-}
-
 function paintWizardStep2() {
   const body = document.getElementById('wizard-body');
   const totalDisbursed = Number(wiz.principal_amount || 0) + (wiz.has_operational_fee ? Number(wiz.operational_fee_amount || 0) : 0);
@@ -168,7 +160,6 @@ function paintWizardStep2() {
         <div class="field">
           <label>Juros (%) do período contratado</label>
           <input type="number" min="0" step="0.01" id="w-rate" value="${wiz.interest_rate}">
-          ${rateReferenceTooltip()}
         </div>
         <div class="field">
           <label>Parcelas</label>
@@ -252,20 +243,11 @@ function paintWizardStep2() {
     }
     recomputeNet();
   };
-  principalInput.oninput = () => { recomputeNet(); refreshRateHint(); };
+  principalInput.oninput = recomputeNet;
   feeAmountInput.oninput = recomputeNet;
   document.getElementById('w-due-type').onchange = (e) => {
     document.getElementById('w-custom-days-field').classList.toggle('hidden', e.target.value !== 'personalizado');
-    refreshRateHint();
   };
-
-  function refreshRateHint() {
-    wiz.principal_amount = getMoneyValue(principalInput);
-    wiz.due_type = document.getElementById('w-due-type').value;
-    const wrap = document.getElementById('w-rate').parentElement;
-    const helpEl = wrap.querySelector('.help');
-    if (helpEl) helpEl.outerHTML = rateReferenceTooltip();
-  }
 
   document.getElementById('w-back').onclick = () => { wiz.step = 1; paintWizard(); };
   document.getElementById('w-next').onclick = async () => {

@@ -106,24 +106,6 @@ async function renderGerenteConfiguracoes() {
       <button class="btn btn-primary mt-8" id="cfg-export-btn">Exportar</button>
     </div>
 
-    <div class="card mt-20">
-      <h3>Tabela de referência de taxas (Tabela VIP)</h3>
-      <p class="text-sm text-soft mt-8">Usada só como sugestão visual ao criar contratos — nunca trava o valor digitado pelo administrador.</p>
-      <table class="data-table table-scroll mt-14">
-        <thead><tr><th>Tipo</th><th>Faixa de valor</th><th>Períodos</th><th>Taxa</th></tr></thead>
-        <tbody>
-          ${App.rateReference.map((r) => `
-            <tr>
-              <td data-label="Tipo">${dueTypeLabel(r.due_type)}</td>
-              <td data-label="Faixa">${formatMoney(r.min_amount)} ${r.max_amount ? '– ' + formatMoney(r.max_amount) : '+'}</td>
-              <td data-label="Períodos">${r.periods}x</td>
-              <td data-label="Taxa" class="mono">${formatNumber(r.rate_percent, 1)}%</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-
     ${App.profile.is_primary_admin ? `
     <div class="card mt-20" style="border-color:var(--bad)">
       <h3 style="color:var(--bad)">Zona de risco</h3>

@@ -32,12 +32,8 @@ async function loadProfileAndClient(userId) {
 }
 
 async function loadGlobalReferenceData() {
-  const [{ data: settings }, { data: rates }] = await Promise.all([
-    supa.from('system_settings').select('*').maybeSingle(),
-    supa.from('loan_rate_reference').select('*').order('due_type').order('min_amount').order('periods'),
-  ]);
+  const { data: settings } = await supa.from('system_settings').select('*').maybeSingle();
   App.settings = settings;
-  App.rateReference = rates || [];
 }
 
 async function onAuthenticated(session) {

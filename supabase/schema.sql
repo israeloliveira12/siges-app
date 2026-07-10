@@ -231,35 +231,21 @@ create table system_settings (
   backup_auto_enabled boolean not null default false,
   backup_frequency text not null default 'diario', -- diario | semanal | quinzenal | mensal | personalizado
   backup_custom_days integer,
+  planning_current_cash numeric(12,2) not null default 0,   -- Planejamento: caixa atual (manual)
+  planning_ltv_percent numeric(6,3) not null default 0,     -- Planejamento: % de LTV aplicado sobre o lucro bruto
   updated_at timestamptz not null default now()
 );
 insert into system_settings (id) values (true);
 
--- 2.11 loan_rate_reference — Tabela VIP 2026 (sugestão visual, nunca trava o campo)
-create table loan_rate_reference (
-  id serial primary key,
-  due_type due_type not null,
-  min_amount numeric(12,2) not null,
-  max_amount numeric(12,2),
-  periods integer not null,
-  rate_percent numeric(6,3) not null,
-  valid_until date not null default '2026-07-31',
-  label text
+-- 2.11 planning_debts — dívidas mensais nomeadas da tela Planejamento
+create table planning_debts (
+  id uuid primary key default gen_random_uuid(),
+  month date not null,              -- sempre o dia 1 do mês (ex: 2026-08-01)
+  name text not null,
+  amount numeric(12,2) not null check (amount > 0),
+  created_by uuid not null references profiles(id),
+  created_at timestamptz not null default now()
 );
-
-insert into loan_rate_reference (due_type, min_amount, max_amount, periods, rate_percent, label) values
-('mensal', 0, 100, 1, 40.0, '≤R$100 · 1 mês'),
-('mensal', 150, 600, 1, 30.0, 'R$150~R$600 · 1 mês'),
-('mensal', 150, 600, 2, 40.0, 'R$150~R$600 · 2 meses'),
-('mensal', 150, 600, 3, 50.0, 'R$150~R$600 · 3 meses'),
-('quinzenal', 0, 100, 1, 25.0, '≤R$100 · 1 quinzena'),
-('quinzenal', 0, 100, 2, 30.0, '≤R$100 · 2 quinzenas'),
-('quinzenal', 150, 600, 1, 20.0, 'R$150~R$600 · 1 quinzena'),
-('quinzenal', 150, 600, 2, 25.0, 'R$150~R$600 · 2 quinzenas'),
-('quinzenal', 150, 600, 3, 30.0, 'R$150~R$600 · 3 quinzenas'),
-('quinzenal', 150, 600, 4, 35.0, 'R$150~R$600 · 4 quinzenas'),
-('quinzenal', 150, 600, 5, 40.0, 'R$150~R$600 · 5 quinzenas'),
-('quinzenal', 150, 600, 6, 45.0, 'R$150~R$600 · 6 quinzenas');
 
 -- ============================================================================
 -- 3. TRIGGER: criar profiles automaticamente ao registrar em auth.users
@@ -980,7 +966,8 @@ security definer set search_path = public
 as $$
 declare
   v_total int; v_on_time int; v_early int; v_avg_delay numeric;
-  v_renewals int; v_rejections int; v_score numeric;
+  v_quitados int; v_recovery boolean; v_renewals_on_time int; v_has_perda boolean;
+  v_score numeric;
 begin
   select count(*) filter (where i.status = 'paga'),
          count(*) filter (where i.status = 'paga' and i.paid_at::date <= i.due_date),
@@ -993,18 +980,39 @@ begin
     from installments i join loan_contracts lc on lc.id = i.contract_id
     where lc.client_id = p_client_id and i.status = 'paga' and i.paid_at::date > i.due_date;
 
-  select count(*) into v_renewals from renewal_cycles rc
-    join loan_contracts lc on lc.id = rc.contract_id where lc.client_id = p_client_id;
+  -- Contratos quitados com sucesso: bônus (item novo, aprovado pelo usuário)
+  select count(*) into v_quitados from loan_contracts
+    where client_id = p_client_id and status = 'quitado';
 
-  select count(*) into v_rejections from loan_requests
-    where client_id = p_client_id and status = 'reprovada';
+  -- Recuperação: pagou uma parcela atrasada (mesmo que com atraso) nos
+  -- últimos 90 dias — sinaliza reação positiva após um período de atraso.
+  select exists(
+    select 1 from installments i join loan_contracts lc on lc.id = i.contract_id
+    where lc.client_id = p_client_id and i.status = 'paga'
+      and i.paid_at::date > i.due_date and i.paid_at > now() - interval '90 days'
+  ) into v_recovery;
 
+  -- Renovações pagas em dia: agora somam pontos (antes subtraíam — corrigido
+  -- porque renovar em dia é comportamento recorrente saudável, não um sinal
+  -- de risco).
+  select count(*) into v_renewals_on_time from renewal_cycles rc
+    join loan_contracts lc on lc.id = rc.contract_id
+    where lc.client_id = p_client_id and rc.status = 'paga' and rc.paid_at::date <= rc.new_due_date;
+
+  select exists(
+    select 1 from loan_contracts where client_id = p_client_id and status = 'perda'
+  ) into v_has_perda;
+
+  -- Reprovações de solicitação NÃO entram mais como critério (decisão
+  -- explícita do usuário — nunca deve ser usado pra avaliar o cliente).
   v_score :=
     40 * coalesce(v_on_time::numeric / nullif(v_total, 0), 0.5) +
     20 * coalesce(v_early::numeric / nullif(v_total, 0), 0.3) +
     greatest(0, 20 - v_avg_delay * 2) +
-    greatest(0, 10 - v_renewals * 2) +
-    greatest(0, 10 - v_rejections * 5);
+    least(10, v_quitados * 2) +
+    (case when v_recovery then 5 else 0 end) +
+    least(5, v_renewals_on_time * 1) +
+    (case when v_has_perda then -30 else 0 end);
 
   v_score := least(100, greatest(0, round(v_score)));
 
@@ -1229,7 +1237,7 @@ alter table payments enable row level security;
 alter table notifications_log enable row level security;
 alter table push_subscriptions enable row level security;
 alter table system_settings enable row level security;
-alter table loan_rate_reference enable row level security;
+alter table planning_debts enable row level security;
 
 -- profiles
 create policy "profiles_select" on profiles for select
@@ -1306,11 +1314,8 @@ create policy "push_delete_own" on push_subscriptions for delete using (profile_
 create policy "settings_select_authenticated" on system_settings for select using (auth.uid() is not null);
 create policy "settings_gerente_update" on system_settings for update using (is_gerente());
 
--- loan_rate_reference
--- Mesma correção do system_settings: tabela de taxas de juros por faixa é
--- informação comercial interna, não deve ser legível por visitante anônimo.
-create policy "rate_ref_select_authenticated" on loan_rate_reference for select using (auth.uid() is not null);
-create policy "rate_ref_gerente_write" on loan_rate_reference for all
+-- planning_debts
+create policy "planning_debts_gerente_all" on planning_debts for all
   using (is_gerente()) with check (is_gerente());
 
 -- ============================================================================

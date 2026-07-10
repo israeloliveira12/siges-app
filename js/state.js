@@ -8,7 +8,6 @@ const App = {
   profile: null,       // linha de profiles do usuário logado
   client: null,        // linha de clients (só populada se profile.role === 'cliente')
   settings: null,       // system_settings (singleton), lido uma vez após login
-  rateReference: [],    // loan_rate_reference (tabela VIP), lido uma vez após login
   unreadCount: 0,
 };
 

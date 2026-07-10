@@ -61,7 +61,7 @@ async function renderClienteSolicitar() {
               </select>
             </div>
             <div class="field hidden" id="s-custom-days-field">
-              <label>A cada quantos dias?</label>
+              <label>Quantos dias?</label>
               <input type="number" min="1" step="1" id="s-custom-days" value="3">
             </div>
           </div>
