@@ -194,7 +194,9 @@ function openClienteModal(client) {
         ${!isEdit ? `
         <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" required></div>
         <div class="field"><label>Senha inicial</label>${passwordFieldHtml('m-password', 'minlength="6" required')}</div>
-        ` : ''}
+        ` : `
+        <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" value="${escapeHtml(p.email || '')}"></div>
+        `}
         <div class="field"><label>Nome completo</label><input type="text" id="m-name" value="${escapeHtml(p.full_name || '')}"></div>
         <div class="field-row">
           <div class="field"><label>CPF</label><input type="text" id="m-cpf" maxlength="14" value="${escapeHtml(formatCpf(p.cpf || ''))}"></div>
@@ -249,6 +251,17 @@ function openClienteModal(client) {
     btn.disabled = true;
     try {
       if (isEdit) {
+        const newEmail = document.getElementById('m-email').value.trim().toLowerCase();
+        if (newEmail && newEmail !== (p.email || '').toLowerCase()) {
+          const { data: { session } } = await supa.auth.getSession();
+          const resp = await fetch('/api/update-user-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+            body: JSON.stringify({ user_id: client.profile_id, new_email: newEmail }),
+          });
+          const result = await resp.json();
+          if (!resp.ok) throw new Error(result.error || 'Falha ao atualizar o e-mail.');
+        }
         const { error } = await supa.rpc('update_client_profile', {
           p_client_id: client.profile_id,
           p_full_name: payload.full_name, p_cpf: payload.cpf, p_phone: payload.phone,

@@ -115,6 +115,11 @@ function initAuth() {
 async function doSignIn(emailOrCpf, password) {
   if (!emailOrCpf || !password) { setAuthError('Preencha e-mail/CPF e senha.'); return; }
 
+  // Limpa qualquer hash de rota deixado por uma sessão anterior (ex: usuário
+  // saiu estando em #/cliente/emprestimos) — sem isso, onAuthenticated() acha
+  // que é pra manter a rota antiga em vez de abrir a tela inicial.
+  location.hash = '';
+
   let email = emailOrCpf.trim();
   const digitsOnly = email.replace(/\D/g, '');
   const looksLikeCpf = !email.includes('@') && digitsOnly.length === 11;
@@ -132,6 +137,7 @@ async function doSignIn(emailOrCpf, password) {
 async function doSignUp(email, password, profileData) {
   if (!email || !password) { setAuthError('Preencha e-mail e senha.'); return; }
   if (password.length < 6) { setAuthError('A senha precisa ter pelo menos 6 caracteres.'); return; }
+  location.hash = '';
   const { data, error } = await supa.auth.signUp({
     email: email.trim().toLowerCase(),
     password,
@@ -158,6 +164,7 @@ async function doPasswordReset(email) {
 
 async function handleSignOut() {
   await supa.auth.signOut();
+  location.hash = '';
   location.reload();
 }
 
