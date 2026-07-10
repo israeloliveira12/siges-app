@@ -82,6 +82,13 @@ button { cursor: pointer; }
   flex-direction: column;
   padding: 20px 14px;
   gap: 4px;
+  /* Trava o sidebar na viewport — sem isso, telas de conteúdo longo (que
+     esticam .app-shell além de 100vh) arrastavam o sidebar inteiro pra baixo
+     junto com o scroll, escondendo os menus e o rodapé (nome/Sair). */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .sidebar-logo {
@@ -362,6 +369,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .google-btn svg { width: 18px; height: 18px; flex: none; }
 .auth-error { background: var(--bad-soft); color: var(--bad); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 12.5px; margin-bottom: 12px; }
 .auth-msg { background: var(--accent-soft); color: var(--accent); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 12.5px; margin-bottom: 12px; }
+.auth-success { background: var(--good-soft); color: var(--good); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 12.5px; margin-bottom: 12px; }
 
 /* ---------------------------------------------------------------------------
    Notificações (sino)
@@ -464,6 +472,9 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .table-scroll td { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border: none; gap: 10px; }
   .table-scroll td::before { content: attr(data-label); font-weight: 600; color: var(--ink-soft); font-size: 12px; }
   .table-scroll td > * { text-align: right; }
+  /* Colunas marcadas como secundárias somem no card mobile — evita poluir a
+     tela pequena com todas as colunas da tabela desktop (contratos, clientes) */
+  .table-scroll td.mobile-hide { display: none; }
 
   .field-row { flex-direction: column; gap: 0; }
 }

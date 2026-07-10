@@ -126,12 +126,19 @@ async function doSignIn(emailOrCpf, password) {
 
   if (looksLikeCpf) {
     const { data, error: cpfError } = await supa.rpc('email_for_cpf', { p_cpf: formatCpf(digitsOnly) });
-    if (cpfError || !data) { setAuthError('Nenhuma conta encontrada para esse CPF.'); return; }
+    if (cpfError || !data) {
+      setAuthError('Nenhuma conta encontrada para esse CPF.');
+      logAudit('login_falho', `Tentativa de login com CPF não encontrado`, { identifier: emailOrCpf.trim() });
+      return;
+    }
     email = data;
   }
 
   const { error } = await supa.auth.signInWithPassword({ email, password });
-  if (error) setAuthError(traduzErroAuth(error));
+  if (error) {
+    setAuthError(traduzErroAuth(error));
+    logAudit('login_falho', `Tentativa de login falhou para ${email}`, { identifier: email, reason: error.message });
+  }
 }
 
 async function doSignUp(email, password, profileData) {

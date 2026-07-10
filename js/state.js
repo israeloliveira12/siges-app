@@ -40,3 +40,11 @@ function userDisplayName() {
   const meta = (App.session && App.session.user.user_metadata) || {};
   return meta.full_name || meta.name || (App.session && App.session.user.email) || 'Usuário';
 }
+
+// Registra um evento na trilha de auditoria (tela "Auditoria" do admin).
+// Nunca deve travar a ação principal — falha de log é silenciosa.
+async function logAudit(action, description, metadata) {
+  try {
+    await supa.rpc('log_audit_event', { p_action: action, p_description: description, p_metadata: metadata || {} });
+  } catch (e) { /* auditoria é best-effort */ }
+}

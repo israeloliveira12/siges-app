@@ -303,6 +303,7 @@ async function openReceberModal(source, onDone) {
           isPartial
             ? `Recebemos ${formatMoney(amount)}. Restam ${formatMoney(totalDue - amount)} desta parcela.`
             : `Recebemos seu pagamento de ${formatMoney(amount)}.`);
+        logAudit('pagamento_recebido', `Pagamento de ${formatMoney(amount)} recebido no contrato #${contract.contract_number}`, { contract_id: contract.id, amount });
         showToast(isPartial ? 'Pagamento parcial registrado.' : 'Pagamento registrado.');
       } else {
         const interestAmount = getMoneyValue(document.getElementById('r-interest-amount'));
@@ -328,6 +329,7 @@ async function openReceberModal(source, onDone) {
         if (error) throw error;
         notifyEvent('renovacao_registrada', contract.client_id, 'Renovação registrada',
           `Recebemos os juros de ${formatMoney(interestAmount)}. Sua dívida foi renovada por mais um período.`);
+        logAudit('renovacao_registrada', `Renovação registrada no contrato #${contract.contract_number} (juros ${formatMoney(interestAmount)})`, { contract_id: contract.id, interest_amount: interestAmount });
         showToast('Renovação registrada. Dívida renovada por mais um período.');
       }
       overlay.remove();

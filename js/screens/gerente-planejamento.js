@@ -9,6 +9,10 @@
 
 const mesesPtPlanejamento = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
+// Meses expandidos no acordeão de "Dívidas planejadas" — mantido fora do
+// paint pra sobreviver a repaints (senão fechava tudo de novo a cada clique).
+let plExpandedMonths = new Set();
+
 function planningMonthKeys() {
   const today = todayISO();
   const keys = [];
@@ -65,14 +69,17 @@ function calcPlanejamento({ settings, debtsList, pendingInst, pendingCycles }) {
   const faturamentoFinal = faturamentoBase - taxaEntrada;
 
   const lucroBruto = faturamentoFinal - dividaTotal;
+  // LTV agora é uma MULTIPLICAÇÃO direta sobre o lucro bruto (decisão do
+  // usuário, 2026-07-10): informar 80% de LTV significa "meu lucro líquido é
+  // 80% do bruto", não mais "descontar 80% do bruto". Antes era
+  // lucroBruto - (lucroBruto*LTV/100); agora é lucroBruto*LTV/100 direto.
   const ltvPercent = Number((settings && settings.planning_ltv_percent) || 0);
-  const descontoLtv = lucroBruto * ltvPercent / 100;
-  const lucroLiquido = lucroBruto - descontoLtv;
+  const lucroLiquido = lucroBruto * ltvPercent / 100;
 
   return {
     dividaBase, exitPct, exitFixed, taxaSaida, dividaTotal,
     caixaAtual, recebiveis, faturamentoBase, entryPct, entryFixed, qtdRecebiveis, taxaEntrada, faturamentoFinal,
-    lucroBruto, ltvPercent, descontoLtv, lucroLiquido,
+    lucroBruto, ltvPercent, lucroLiquido,
   };
 }
 
@@ -100,7 +107,7 @@ function paintPlanejamento(root, state) {
       </div>
       <div class="card">
         <h3>LTV aplicado</h3>
-        <p class="text-sm text-soft mt-8">Percentual descontado do lucro bruto para chegar ao lucro líquido projetado.</p>
+        <p class="text-sm text-soft mt-8">Percentual do lucro bruto que vira lucro líquido projetado (ex: 80% significa que 80% do lucro bruto é considerado líquido).</p>
         <div class="field mt-14">
           <label>LTV (%)</label>
           <input type="number" min="0" max="100" step="0.01" id="pl-ltv" value="${Number((settings && settings.planning_ltv_percent) || 0)}">
@@ -134,9 +141,9 @@ function paintPlanejamento(root, state) {
           <div class="value mono" style="font-size:22px;color:${calc.lucroBruto >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroBruto)}</div>
         </div>
         <div class="stat-card" style="background:var(--brand-soft)">
-          <div class="label">Lucro Líquido (Bruto − LTV ${formatNumber(calc.ltvPercent, 2)}%)</div>
+          <div class="label">Lucro Líquido (Bruto × LTV ${formatNumber(calc.ltvPercent, 2)}%)</div>
           <div class="value mono" style="font-size:22px;color:${calc.lucroLiquido >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroLiquido)}</div>
-          <div class="hint">Desconto de LTV: ${formatMoney(calc.descontoLtv)}</div>
+          <div class="hint">${formatMoney(calc.lucroBruto)} × ${formatNumber(calc.ltvPercent, 2)}%</div>
         </div>
       </div>
     </div>
@@ -151,32 +158,40 @@ function paintPlanejamento(root, state) {
       </div>
       ${!monthsWithDebts.length ? `<p class="text-soft text-sm mt-14">Nenhuma dívida lançada ainda.</p>` : `
       <div class="mt-14">
+        <div class="flex justify-between text-sm text-soft" style="padding:0 2px 6px;border-bottom:1px solid var(--line)"><span>Mês</span><span>Total</span></div>
         ${monthsWithDebts.map((key) => {
           const rows = debtsByMonth[key];
           const subtotal = rows.reduce((s, d) => s + Number(d.amount || 0), 0);
+          const expanded = plExpandedMonths.has(key);
           return `
-          <div class="mt-14">
-            <div class="flex justify-between items-center" style="border-bottom:1px solid var(--line);padding-bottom:6px">
-              <strong style="font-size:13.5px">${planningMonthLabel(key)}</strong>
-              <span class="text-sm mono text-soft">${formatMoney(subtotal)}</span>
+          <div class="pl-month-block" style="border-bottom:1px solid var(--line)">
+            <button type="button" class="pl-month-header flex justify-between items-center" data-month="${key}" style="width:100%;background:none;border:none;padding:10px 2px;cursor:pointer;text-align:left">
+              <span class="flex items-center gap-8">
+                <span style="display:inline-flex;transition:transform .15s;transform:rotate(${expanded ? '90deg' : '0deg'})">${Icons.chevronRight}</span>
+                <strong style="font-size:13.5px">${planningMonthLabel(key)}</strong>
+                <span class="text-sm text-soft">(${rows.length} dívida${rows.length === 1 ? '' : 's'})</span>
+              </span>
+              <span class="text-sm mono" style="font-weight:700">${formatMoney(subtotal)}</span>
+            </button>
+            <div class="${expanded ? '' : 'hidden'}" style="padding:0 2px 12px 30px">
+              <table class="data-table table-scroll">
+                <thead><tr><th>Nome</th><th>Valor</th><th></th></tr></thead>
+                <tbody>
+                  ${rows.map((d) => `
+                    <tr>
+                      <td data-label="Nome">${escapeHtml(d.name)}</td>
+                      <td data-label="Valor" class="mono">${formatMoney(d.amount)}</td>
+                      <td>
+                        <div class="flex items-center gap-6">
+                          <button class="icon-btn edit-debt-btn" data-id="${d.id}" title="Editar">${Icons.edit}</button>
+                          <button class="icon-btn del-debt-btn" data-id="${d.id}" title="Excluir">${Icons.trash}</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
             </div>
-            <table class="data-table table-scroll mt-8">
-              <thead><tr><th>Nome</th><th>Valor</th><th></th></tr></thead>
-              <tbody>
-                ${rows.map((d) => `
-                  <tr>
-                    <td data-label="Nome">${escapeHtml(d.name)}</td>
-                    <td data-label="Valor" class="mono">${formatMoney(d.amount)}</td>
-                    <td>
-                      <div class="flex items-center gap-6">
-                        <button class="icon-btn edit-debt-btn" data-id="${d.id}" title="Editar">${Icons.edit}</button>
-                        <button class="icon-btn del-debt-btn" data-id="${d.id}" title="Excluir">${Icons.trash}</button>
-                      </div>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
           </div>`;
         }).join('')}
       </div>`}
@@ -207,12 +222,21 @@ function paintPlanejamento(root, state) {
 
   document.getElementById('pl-add-debt').onclick = () => openDebtModal(monthKeys);
 
+  root.querySelectorAll('.pl-month-header').forEach((btn) => {
+    btn.onclick = () => {
+      const key = btn.dataset.month;
+      if (plExpandedMonths.has(key)) plExpandedMonths.delete(key); else plExpandedMonths.add(key);
+      paintPlanejamento(root, state);
+    };
+  });
+
   root.querySelectorAll('.edit-debt-btn').forEach((btn) => {
-    btn.onclick = () => openDebtModal(monthKeys, debtsList.find((d) => d.id === btn.dataset.id));
+    btn.onclick = (e) => { e.stopPropagation(); openDebtModal(monthKeys, debtsList.find((d) => d.id === btn.dataset.id)); };
   });
 
   root.querySelectorAll('.del-debt-btn').forEach((btn) => {
-    btn.onclick = async () => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
       if (!confirm('Excluir esta dívida planejada?')) return;
       const { error } = await supa.from('planning_debts').delete().eq('id', btn.dataset.id);
       if (error) { showToast('Erro ao excluir: ' + error.message); return; }

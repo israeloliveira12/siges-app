@@ -21,6 +21,7 @@ const NAV_ITEMS = {
     { route: 'gerente/relatorios', label: 'Relatórios', icon: 'chart' },
     { route: 'gerente/score', label: 'Score de Clientes', icon: 'score' },
     { route: 'gerente/planejamento', label: 'Planejamento', icon: 'wallet' },
+    { route: 'gerente/auditoria', label: 'Auditoria', icon: 'audit' },
     { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings' },
   ],
 };
@@ -81,6 +82,18 @@ function renderShellForRole() {
 
   renderBell();
 }
+
+// Captura erros JS não tratados e promises rejeitadas sem catch — alimenta a
+// tela de Auditoria com "falhas do sistema" sem precisar instrumentar cada
+// try/catch manualmente. Best-effort: nunca deve gerar loop (logAudit já
+// engole a própria falha).
+window.addEventListener('error', (e) => {
+  logAudit('erro_sistema', `Erro não tratado: ${e.message}`, { source: e.filename, line: e.lineno });
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = (e.reason && e.reason.message) || String(e.reason);
+  logAudit('erro_sistema', `Promise rejeitada sem tratamento: ${msg}`, {});
+});
 
 router.init();
 initAuth();

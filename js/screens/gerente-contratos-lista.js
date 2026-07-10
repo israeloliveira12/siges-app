@@ -77,11 +77,11 @@ async function renderGerenteContratosLista() {
             <tr class="contract-row" data-id="${c.id}" style="cursor:pointer">
               <td data-label="Contrato">#${c.contract_number}</td>
               <td data-label="Cliente">${escapeHtml((c.clients.profiles || {}).full_name || '—')}</td>
-              <td data-label="Aporte" class="mono">${formatMoney(c.principal_amount)}</td>
+              <td data-label="Aporte" class="mono mobile-hide">${formatMoney(c.principal_amount)}</td>
               <td data-label="Dívida atual" class="mono">${formatMoney(outstanding)}</td>
-              <td data-label="Juros">${formatNumber(c.interest_rate, 2)}%</td>
-              <td data-label="Pago" class="mono">${formatMoney(paid)}</td>
-              <td data-label="Status">${statusBadge(c.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[c.status])}</td>
+              <td data-label="Juros" class="mobile-hide">${formatNumber(c.interest_rate, 2)}%</td>
+              <td data-label="Pago" class="mono mobile-hide">${formatMoney(paid)}</td>
+              <td data-label="Status" class="mobile-hide">${statusBadge(c.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[c.status])}</td>
               <td data-label=""><button class="icon-btn view-contract-btn" data-id="${c.id}">${Icons.chevronRight}</button></td>
             </tr>`;
           }).join('')}
@@ -325,6 +325,7 @@ function openEditContratoModal(contract, onDone) {
       btn.disabled = false;
       return;
     }
+    logAudit('contrato_editado', `Contrato #${contract.contract_number} editado`, { contract_id: contract.id });
     close();
     showToast('Contrato atualizado.');
     if (typeof onDone === 'function') onDone();
@@ -359,6 +360,7 @@ function openDeleteContratoConfirm(contract) {
       btn.disabled = false;
       return;
     }
+    logAudit('contrato_excluido', `Contrato #${contract.contract_number} excluído`, { contract_id: contract.id });
     close();
     showToast('Contrato excluído.');
     router.navigate('#/gerente/contratos');
@@ -416,6 +418,7 @@ function openEditInstallmentModal(installment, onDone) {
       btn.disabled = false;
       return;
     }
+    logAudit('parcela_editada', `Parcela ${installment.sequence_number} reagendada/editada`, { installment_id: installment.id });
     close();
     showToast('Parcela atualizada.');
     if (typeof onDone === 'function') onDone();

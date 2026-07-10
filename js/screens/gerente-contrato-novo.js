@@ -392,6 +392,7 @@ function paintWizardStep3() {
       if (error) throw error;
       notifyEvent('contrato_criado', wiz.client_id, 'Novo contrato criado',
         `Seu contrato no valor de ${formatMoney(wiz.principal_amount)} foi aprovado e criado.`);
+      logAudit('contrato_criado', `Contrato de ${formatMoney(wiz.principal_amount)} criado para ${wiz.client_name}`, { client_id: wiz.client_id, principal_amount: wiz.principal_amount });
       showToast('Contrato criado com sucesso!');
       wiz = null;
       wizClientSearch = '';

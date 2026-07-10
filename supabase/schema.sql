@@ -247,6 +247,25 @@ create table planning_debts (
   created_at timestamptz not null default now()
 );
 
+-- 2.12 audit_log — trilha de auditoria (tela "Auditoria" do admin). Escrita
+-- só via log_audit_event() (security definer, ver seção 5) — nunca insert
+-- direto da tabela, pra permitir registrar até eventos sem sessão (ex: login
+-- falho, onde ainda não existe auth.uid()). actor_name/actor_role são uma
+-- FOTO do momento do evento (não um join), pra sobreviver mesmo se o
+-- profile referenciado for excluído depois.
+create table audit_log (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid references profiles(id) on delete set null,
+  actor_name text,
+  actor_role text,
+  action text not null,
+  description text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index audit_log_created_at_idx on audit_log(created_at desc);
+create index audit_log_actor_id_idx on audit_log(actor_id);
+
 -- ============================================================================
 -- 3. TRIGGER: criar profiles automaticamente ao registrar em auth.users
 -- ============================================================================
@@ -1248,6 +1267,32 @@ begin
 end;
 $$;
 
+-- 5.12a Registrar evento na trilha de auditoria. Callable por anon E
+-- authenticated (grant padrão do Supabase já cobre) — precisa funcionar até
+-- SEM sessão (ex: tentativa de login falha, onde auth.uid() ainda é null).
+-- actor_name/actor_role são resolvidos e congelados no momento do evento.
+create or replace function log_audit_event(
+  p_action text,
+  p_description text,
+  p_metadata jsonb default '{}'::jsonb
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_actor_name text;
+  v_actor_role text;
+begin
+  if v_actor_id is not null then
+    select full_name, role::text into v_actor_name, v_actor_role from profiles where id = v_actor_id;
+  end if;
+  insert into audit_log (actor_id, actor_name, actor_role, action, description, metadata)
+  values (v_actor_id, coalesce(v_actor_name, 'Anônimo'), v_actor_role, p_action, p_description, coalesce(p_metadata, '{}'::jsonb));
+end;
+$$;
+
 -- 5.13 Apagar todos os dados de negócio — só o admin primário. Chamada pela
 -- serverless function /api/wipe-all-data.js, que também remove as contas de
 -- auth.users dos clientes via service_role (SQL puro não alcança auth.users).
@@ -1288,6 +1333,7 @@ alter table notifications_log enable row level security;
 alter table push_subscriptions enable row level security;
 alter table system_settings enable row level security;
 alter table planning_debts enable row level security;
+alter table audit_log enable row level security;
 
 -- profiles
 create policy "profiles_select" on profiles for select
@@ -1367,6 +1413,11 @@ create policy "settings_gerente_update" on system_settings for update using (is_
 -- planning_debts
 create policy "planning_debts_gerente_all" on planning_debts for all
   using (is_gerente()) with check (is_gerente());
+
+-- audit_log — só leitura, e só gerente. Escrita é exclusivamente via
+-- log_audit_event() (security definer, bypassa RLS), inclusive pra registrar
+-- eventos sem sessão (login falho) — por isso não existe policy de insert.
+create policy "audit_log_select_gerente" on audit_log for select using (is_gerente());
 
 -- ============================================================================
 -- 7. ÍNDICES DE APOIO

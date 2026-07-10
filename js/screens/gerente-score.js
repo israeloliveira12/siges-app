@@ -21,34 +21,12 @@ async function renderGerenteScore() {
   const melhores = rows.filter((c) => c.score >= 70).slice(0, 10);
   const piores = rows.filter((c) => c.score < 70).sort((a, b) => a.score - b.score).slice(0, 10);
 
+  injectScoreHelpButton();
+
   root.innerHTML = `
     <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:10px">
       <p class="text-sm text-soft">Score de 0 a 100, recalculado a partir do histórico de pagamentos de cada cliente.</p>
       <button class="btn btn-outline btn-sm" id="recalc-all">${Icons.renew} Recalcular todos</button>
-    </div>
-
-    <div class="card mt-14">
-      <h3>Como o score é calculado</h3>
-      <p class="text-sm text-soft mt-8">Cliente novo começa com score-base <strong>50</strong>. Os <strong>bônus</strong> de comportamento só passam a valer depois que ele quita o primeiro contrato ou faz a primeira renovação — nesse marco o score pula pra <strong>70</strong> e passa a subir com o comportamento real. Já as <strong>penalidades</strong> de risco (atraso e perda) valem sempre, mesmo antes disso. Reprovação de solicitação de empréstimo <strong>nunca</strong> entra nessa conta.</p>
-      <p class="text-sm text-soft mt-8">Depois da graduação, o bônus (até <strong>+30 pts</strong>) é o produto de dois fatores: <strong>qualidade</strong> (consistência de pagamento — em dia/adiantado) × <strong>maturidade</strong> (volume de histórico acumulado — parcelas pagas, contratos quitados e renovações em dia, com retornos decrescentes). Isso torna cada ponto progressivamente mais difícil: 1-2 contratos bons já chegam a 80, mas encostar em 90-100 exige um histórico bem mais longo e consistente — impossível de forçar rápido.</p>
-      <div class="grid grid-2 mt-14" style="gap:4px 24px">
-        <div>
-          <div class="text-sm" style="font-weight:700;color:var(--good);margin-bottom:6px">Aumenta o score (só depois da graduação)</div>
-          <div class="text-sm text-soft" style="line-height:1.9">
-            <div>Qualidade × maturidade do histórico — até <strong>30 pts</strong></div>
-            <div>Recuperação após atraso (últimos 90 dias) — <strong>+2 pts</strong></div>
-          </div>
-        </div>
-        <div>
-          <div class="text-sm" style="font-weight:700;color:var(--bad);margin-bottom:6px">Reduz o score (sempre, graduado ou não)</div>
-          <div class="text-sm text-soft" style="line-height:1.9">
-            <div>Atraso médio histórico nos pagamentos — até <strong>−20 pts</strong></div>
-            <div>Parcela ou ciclo vencido e não pago agora — <strong>−15 pts</strong></div>
-            <div>Qualquer contrato em perda — <strong>−30 pts</strong> (penalidade fixa)</div>
-          </div>
-        </div>
-      </div>
-      <p class="text-sm text-soft mt-14">De 70 a 100 o cliente aparece em "Ranking — melhores scores"; abaixo de 70, em "Atenção — menores scores" — nunca nas duas.</p>
     </div>
 
     <div class="grid grid-2 mt-14">
@@ -74,6 +52,54 @@ async function renderGerenteScore() {
   root.querySelectorAll('.score-row').forEach((el) => {
     el.onclick = () => renderClienteScoreDetalheGerente(el.dataset.id);
   });
+}
+
+// Ícone "?" ao lado do título "Score de Clientes" na topbar — abre em modal o
+// texto que antes ficava fixo no topo da tela, poluindo o visual.
+function injectScoreHelpButton() {
+  const titleEl = document.getElementById('topbar-title');
+  if (!titleEl) return;
+  titleEl.innerHTML = `<span style="vertical-align:middle">Score de Clientes</span> <button class="icon-btn" id="score-help-btn" title="Como o score é calculado" style="vertical-align:middle">${Icons.help}</button>`;
+  document.getElementById('score-help-btn').onclick = openScoreHelpModal;
+}
+
+function openScoreHelpModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-head"><h3>Como o score é calculado</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-body">
+        <p class="text-sm text-soft">Cliente novo começa com score-base <strong>50</strong>. Os <strong>bônus</strong> de comportamento só passam a valer depois que ele quita o primeiro contrato ou faz a primeira renovação — nesse marco o score pula pra <strong>70</strong> e passa a subir com o comportamento real. Já as <strong>penalidades</strong> de risco (atraso e perda) valem sempre, mesmo antes disso. Reprovação de solicitação de empréstimo <strong>nunca</strong> entra nessa conta.</p>
+        <p class="text-sm text-soft mt-8">Depois da graduação, o bônus (até <strong>+30 pts</strong>) é o produto de dois fatores: <strong>qualidade</strong> (consistência de pagamento — em dia/adiantado) × <strong>maturidade</strong> (volume de histórico acumulado — parcelas pagas, contratos quitados e renovações em dia, com retornos decrescentes). Isso torna cada ponto progressivamente mais difícil: 1-2 contratos bons já chegam a 80, mas encostar em 90-100 exige um histórico bem mais longo e consistente — impossível de forçar rápido.</p>
+        <div class="grid grid-2 mt-14" style="gap:4px 24px">
+          <div>
+            <div class="text-sm" style="font-weight:700;color:var(--good);margin-bottom:6px">Aumenta o score (só depois da graduação)</div>
+            <div class="text-sm text-soft" style="line-height:1.9">
+              <div>Qualidade × maturidade do histórico — até <strong>30 pts</strong></div>
+              <div>Recuperação após atraso (últimos 90 dias) — <strong>+2 pts</strong></div>
+            </div>
+          </div>
+          <div>
+            <div class="text-sm" style="font-weight:700;color:var(--bad);margin-bottom:6px">Reduz o score (sempre, graduado ou não)</div>
+            <div class="text-sm text-soft" style="line-height:1.9">
+              <div>Atraso médio histórico nos pagamentos — até <strong>−20 pts</strong></div>
+              <div>Parcela ou ciclo vencido e não pago agora — <strong>−15 pts</strong></div>
+              <div>Qualquer contrato em perda — <strong>−30 pts</strong> (penalidade fixa)</div>
+            </div>
+          </div>
+        </div>
+        <p class="text-sm text-soft mt-14">De 70 a 100 o cliente aparece em "Ranking — melhores scores"; abaixo de 70, em "Atenção — menores scores" — nunca nas duas.</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-primary" id="close-modal-2">Entendi</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  document.getElementById('close-modal').onclick = close;
+  document.getElementById('close-modal-2').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
 }
 
 function scoreListHtml(rows) {

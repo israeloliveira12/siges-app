@@ -78,12 +78,6 @@ async function renderGerenteDashboard() {
   const openContracts = statusCounts.em_aberto + statusCounts.atrasado;
   const finishedContracts = statusCounts.quitado + statusCounts.perda;
   const newThisMonth = (contractsStatus || []).filter((c) => String(c.created_at).slice(0, 7) === today.slice(0, 7)).length;
-  const contractStatusSegments = [
-    { label: 'Em aberto', value: statusCounts.em_aberto, color: CHART_COLORS.brand },
-    { label: 'Atrasado', value: statusCounts.atrasado, color: CHART_COLORS.bad },
-    { label: 'Quitado', value: statusCounts.quitado, color: CHART_COLORS.good },
-    { label: 'Perda', value: statusCounts.perda, color: CHART_COLORS.warn },
-  ];
 
   // Projeção de recebimentos — soma parcelas + ciclos de renovação em aberto
   // (pendente/atrasada) nos próximos 6 meses, agrupados por mês.
@@ -289,27 +283,10 @@ async function renderGerenteDashboard() {
       </div>
     </div>
 
-    <div class="grid grid-2 mt-14">
-      <div class="card">
-        <h3>Recebido — últimos 30 dias</h3>
-        <p class="text-sm text-soft mt-8">Agrupado em blocos de 6 dias</p>
-        <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
-      </div>
-      <div class="card">
-        <h3>Contratos por status</h3>
-        <div class="flex items-center gap-14 mt-14" style="flex-wrap:wrap">
-          ${donutChartSVG(contractStatusSegments, { valueFormatter: (v) => String(v) })}
-          <div style="flex:1;min-width:160px" class="flex flex-col gap-8">
-            ${contractStatusSegments.map((s) => `
-              <div class="flex items-center gap-8" style="font-size:12.5px">
-                <span style="width:10px;height:10px;border-radius:50%;background:${s.color};display:inline-block;flex:none"></span>
-                <span>${escapeHtml(s.label)}</span>
-                <span class="text-soft mono" style="margin-left:auto">${s.value}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>
+    <div class="card mt-14">
+      <h3>Recebido — últimos 30 dias</h3>
+      <p class="text-sm text-soft mt-8">Agrupado em blocos de 6 dias</p>
+      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
     </div>
 
     <div class="card mt-14">

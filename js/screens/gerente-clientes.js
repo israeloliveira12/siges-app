@@ -44,8 +44,8 @@ function paintClientesScreen() {
   root.innerHTML = `
     <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
       <div class="flex gap-8">
-        <button class="btn btn-sm ${clientesTab === 'pendente' ? 'btn-primary' : 'btn-outline'}" id="tab-pendente">Pendentes ${pendingCount ? `(${pendingCount})` : ''}</button>
         <button class="btn btn-sm ${clientesTab === 'aprovado' ? 'btn-primary' : 'btn-outline'}" id="tab-aprovado">Aprovados</button>
+        <button class="btn btn-sm ${clientesTab === 'pendente' ? 'btn-primary' : 'btn-outline'}" id="tab-pendente">Pendentes ${pendingCount ? `(${pendingCount})` : ''}</button>
         <button class="btn btn-sm ${clientesTab === 'rejeitado' ? 'btn-primary' : 'btn-outline'}" id="tab-rejeitado">Rejeitados</button>
       </div>
       <button class="btn btn-primary" id="novo-cliente-btn">${Icons.plus} Novo Cliente</button>
@@ -59,7 +59,7 @@ function paintClientesScreen() {
       ${rows.length ? `
       <table class="data-table table-scroll">
         <thead><tr>
-          <th>Nome</th><th>Contato</th><th>Grupo</th><th>Limite de crédito</th><th>Score</th><th>Ações</th>
+          <th>Nome</th><th>CPF</th><th>Contato</th><th>Grupo</th><th>Limite de crédito</th><th>Score</th><th>Ações</th>
         </tr></thead>
         <tbody>
           ${rows.map((c) => {
@@ -67,9 +67,10 @@ function paintClientesScreen() {
             return `
             <tr>
               <td data-label="Nome"><strong>${escapeHtml(p.full_name || '—')}</strong></td>
-              <td data-label="Contato"><div><div>${escapeHtml(p.email || '')}</div><div class="text-sm text-soft">${escapeHtml(p.phone || '')}</div></div></td>
-              <td data-label="Grupo">${escapeHtml(c.client_group || '—')}</td>
-              <td data-label="Limite" class="mono">${formatMoney(c.credit_limit)}</td>
+              <td data-label="CPF" class="mono">${escapeHtml(formatCpf(p.cpf || '') || '—')}</td>
+              <td data-label="Contato" class="mobile-hide"><div><div>${escapeHtml(p.email || '')}</div><div class="text-sm text-soft">${escapeHtml(p.phone || '')}</div></div></td>
+              <td data-label="Grupo" class="mobile-hide">${escapeHtml(c.client_group || '—')}</td>
+              <td data-label="Limite" class="mono mobile-hide">${formatMoney(c.credit_limit)}</td>
               <td data-label="Score">${c.score} ${scoreTierBadge(c.score_tier)}</td>
               <td data-label="Ações">
                 <div class="flex gap-8">
@@ -101,9 +102,11 @@ function paintClientesScreen() {
   });
   root.querySelectorAll('.approve-client-btn').forEach((btn) => {
     btn.onclick = async () => {
+      const client = clientesCache.find((c) => c.profile_id === btn.dataset.id);
       const { error } = await supa.rpc('approve_client', { p_client_id: btn.dataset.id });
       if (error) { showToast('Erro: ' + error.message); return; }
       notifyEvent('solicitacao_aprovada', btn.dataset.id, 'Cadastro aprovado', 'Sua conta foi aprovada. Você já pode usar o SIGES normalmente.');
+      logAudit('cliente_aprovado', `Cadastro de ${((client || {}).profiles || {}).full_name || btn.dataset.id} aprovado`, { client_id: btn.dataset.id });
       showToast('Cliente aprovado.');
       renderGerenteClientes();
     };
@@ -140,6 +143,7 @@ function openRejectClientModal(clientId) {
     const { error } = await supa.rpc('reject_client', { p_client_id: clientId, p_reason: reason || null });
     if (error) { document.getElementById('reject-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
     notifyEvent('solicitacao_reprovada', clientId, 'Cadastro não aprovado', reason ? `Motivo: ${reason}` : 'Seu cadastro não foi aprovado.');
+    logAudit('cliente_rejeitado', `Cadastro de cliente rejeitado`, { client_id: clientId, reason: reason || null });
     close();
     showToast('Cadastro rejeitado.');
     renderGerenteClientes();
@@ -178,6 +182,7 @@ function openDeleteClienteConfirm(client) {
       });
       const result = await resp.json();
       if (!resp.ok) throw new Error(result.error || 'Falha ao excluir cliente.');
+      logAudit('cliente_excluido', `Cliente ${p.full_name || ''} excluído`, { client_id: client.profile_id });
       close();
       showToast('Cliente excluído.');
       renderGerenteClientes();
@@ -207,6 +212,15 @@ function openClienteModal(client) {
         <div class="field"><label>Nome completo</label><input type="text" id="m-name" value="${escapeHtml(p.full_name || '')}"></div>
         ${isEdit ? `
         <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" value="${escapeHtml(p.email || '')}"></div>
+        <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
+          <label>Redefinir senha do cliente</label>
+          <span class="help">A senha do próprio cliente não pode ser exibida aqui (o Supabase guarda só um hash irreversível) — mas você pode definir uma nova senha e repassar a ele.</span>
+          <div class="flex gap-8 mt-8" style="align-items:flex-start">
+            <div style="flex:1">${passwordFieldHtml('m-reset-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
+            <button type="button" class="btn btn-outline btn-sm" id="reset-password-btn" style="flex:none">Redefinir</button>
+          </div>
+          <div id="reset-password-feedback" class="mt-8"></div>
+        </div>
         ` : ''}
         <div class="field-row">
           <div class="field"><label>CPF</label><input type="text" id="m-cpf" maxlength="14" value="${escapeHtml(formatCpf(p.cpf || ''))}"></div>
@@ -241,6 +255,36 @@ function openClienteModal(client) {
   attachPhoneMask(document.getElementById('m-phone'));
   attachMoneyMask(document.getElementById('m-limit'));
   setMoneyValue(document.getElementById('m-limit'), client ? client.credit_limit : 0);
+
+  if (isEdit) {
+    document.getElementById('reset-password-btn').onclick = async () => {
+      const feedback = document.getElementById('reset-password-feedback');
+      const input = document.getElementById('m-reset-password');
+      const newPassword = input.value;
+      feedback.innerHTML = '';
+      if (newPassword.length < 6) { feedback.innerHTML = `<div class="auth-error">A senha precisa ter pelo menos 6 caracteres.</div>`; return; }
+      const btn = document.getElementById('reset-password-btn');
+      btn.disabled = true;
+      try {
+        const { data: { session } } = await supa.auth.getSession();
+        const resp = await fetch('/api/reset-client-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+          body: JSON.stringify({ user_id: client.profile_id, new_password: newPassword }),
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.error || 'Falha ao redefinir a senha.');
+        logAudit('senha_redefinida', `Senha redefinida para o cliente ${p.full_name || ''}`, { client_id: client.profile_id });
+        input.value = '';
+        feedback.innerHTML = `<div class="auth-success">Senha redefinida com sucesso.</div>`;
+        showToast('Senha do cliente redefinida.');
+      } catch (e) {
+        feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
 
   document.getElementById('save-modal').onclick = async () => {
     const feedback = document.getElementById('modal-feedback');
@@ -304,6 +348,7 @@ function openClienteModal(client) {
         // Cliente criado diretamente pelo gerente já nasce aprovado (não precisa de aprovação retroativa).
         await supa.rpc('approve_client', { p_client_id: result.user_id });
       }
+      logAudit(isEdit ? 'cliente_editado' : 'cliente_criado', `Cliente ${payload.full_name} ${isEdit ? 'editado' : 'criado'}`, { client_id: isEdit ? client.profile_id : undefined });
       close();
       showToast(isEdit ? 'Cliente atualizado.' : 'Cliente criado com sucesso.');
       await renderGerenteClientes();
