@@ -969,7 +969,7 @@ declare
   v_quitados int; v_recovery boolean; v_renewals_on_time int; v_has_perda boolean;
   v_any_renewal_paid boolean; v_graduated boolean;
   v_overdue_now boolean; v_delay_penalty numeric; v_overdue_penalty numeric; v_perda_penalty numeric;
-  v_raw numeric; v_score numeric;
+  v_qualidade numeric; v_volume numeric; v_maturidade numeric; v_score numeric;
 begin
   select count(*) filter (where i.status = 'paga'),
          count(*) filter (where i.status = 'paga' and i.paid_at::date <= i.due_date),
@@ -1040,19 +1040,28 @@ begin
   else
     -- Reprovações de solicitação NÃO entram mais como critério (decisão
     -- explícita do usuário — nunca deve ser usado pra avaliar o cliente).
-    v_raw :=
-      40 * coalesce(v_on_time::numeric / nullif(v_total, 0), 0.5) +
-      20 * coalesce(v_early::numeric / nullif(v_total, 0), 0.3) +
-      (20 - v_delay_penalty) +
-      least(10, v_quitados * 2) +
-      (case when v_recovery then 5 else 0 end) +
-      least(5, v_renewals_on_time * 1) -
-      v_overdue_penalty - v_perda_penalty;
+    --
+    -- Regra revisada em 2026-07-10 (aprovada pelo usuário): chegar a 100 não
+    -- pode ser fácil, e cada ponto acima de 80 deve custar progressivamente
+    -- mais. Separamos QUALIDADE (consistência de pagamento, 0 a 1) de
+    -- MATURIDADE (volume de histórico acumulado, 0 a 1, com retornos
+    -- decrescentes via 1 - e^(-volume/8)) — o bônus é o produto dos dois, não
+    -- a soma. Isso faz um único contrato quitado adiantado valer só ~7 pts
+    -- de bônus (score ~77), enquanto encostar em 100 exige dezenas de
+    -- eventos positivos sustentados (parcelas pagas, contratos quitados,
+    -- renovações em dia) — impossível de forçar rápido, porque cada evento
+    -- extra rende cada vez menos.
+    v_qualidade := least(1,
+      0.6 * coalesce(v_on_time::numeric / nullif(v_total, 0), 0.5) +
+      0.4 * coalesce(v_early::numeric / nullif(v_total, 0), 0.3)
+    );
+    v_volume := v_total + v_quitados + v_renewals_on_time;
+    v_maturidade := 1 - exp(-v_volume / 8.0);
 
-    -- v_raw sem nenhum evento extra vale 46 (20+6+20) — deslocamos +24 pra
-    -- recentralizar em 70 no momento da graduação, preservando os mesmos
-    -- incrementos/penalidades de comportamento daí pra frente.
-    v_score := v_raw + 24;
+    v_score := 70
+      + 30 * v_qualidade * v_maturidade
+      + (case when v_recovery then 2 else 0 end)
+      - v_delay_penalty - v_overdue_penalty - v_perda_penalty;
   end if;
 
   v_score := least(100, greatest(0, round(v_score)));

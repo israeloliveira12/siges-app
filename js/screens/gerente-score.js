@@ -30,15 +30,13 @@ async function renderGerenteScore() {
     <div class="card mt-14">
       <h3>Como o score é calculado</h3>
       <p class="text-sm text-soft mt-8">Cliente novo começa com score-base <strong>50</strong>. Os <strong>bônus</strong> de comportamento só passam a valer depois que ele quita o primeiro contrato ou faz a primeira renovação — nesse marco o score pula pra <strong>70</strong> e passa a subir com o comportamento real. Já as <strong>penalidades</strong> de risco (atraso e perda) valem sempre, mesmo antes disso. Reprovação de solicitação de empréstimo <strong>nunca</strong> entra nessa conta.</p>
+      <p class="text-sm text-soft mt-8">Depois da graduação, o bônus (até <strong>+30 pts</strong>) é o produto de dois fatores: <strong>qualidade</strong> (consistência de pagamento — em dia/adiantado) × <strong>maturidade</strong> (volume de histórico acumulado — parcelas pagas, contratos quitados e renovações em dia, com retornos decrescentes). Isso torna cada ponto progressivamente mais difícil: 1-2 contratos bons já chegam a 80, mas encostar em 90-100 exige um histórico bem mais longo e consistente — impossível de forçar rápido.</p>
       <div class="grid grid-2 mt-14" style="gap:4px 24px">
         <div>
           <div class="text-sm" style="font-weight:700;color:var(--good);margin-bottom:6px">Aumenta o score (só depois da graduação)</div>
           <div class="text-sm text-soft" style="line-height:1.9">
-            <div>Pagar em dia — até <strong>40 pts</strong></div>
-            <div>Pagar antecipado — até <strong>20 pts</strong></div>
-            <div>Contratos quitados — até <strong>+10 pts</strong> (+2 cada, máx. 5)</div>
-            <div>Recuperação após atraso (últimos 90 dias) — <strong>+5 pts</strong></div>
-            <div>Renovações pagas em dia — até <strong>+5 pts</strong> (+1 cada, máx. 5)</div>
+            <div>Qualidade × maturidade do histórico — até <strong>30 pts</strong></div>
+            <div>Recuperação após atraso (últimos 90 dias) — <strong>+2 pts</strong></div>
           </div>
         </div>
         <div>
