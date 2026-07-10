@@ -9,9 +9,13 @@ async function renderClienteDashboard() {
   const clientId = App.session.user.id;
   const limit = App.client ? Number(App.client.credit_limit) : 0;
 
+  // Limite de crédito consome CAPITAL emprestado, não o saldo devedor total
+  // (que inclui juros) — mesma regra usada em cliente-solicitar.js. Usar
+  // outstanding_balance aqui fazia o "Limite disponível" do Início divergir
+  // do "Limite disponível" da tela Solicitar pro mesmo cliente.
   let used = 0;
   try {
-    const { data, error } = await supa.rpc('client_outstanding_balance', { p_client_id: clientId });
+    const { data, error } = await supa.rpc('client_outstanding_principal', { p_client_id: clientId });
     if (!error) used = Number(data) || 0;
   } catch (e) { /* segue com 0 */ }
 
