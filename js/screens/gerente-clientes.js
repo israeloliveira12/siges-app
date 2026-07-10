@@ -194,10 +194,11 @@ function openClienteModal(client) {
         ${!isEdit ? `
         <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" required></div>
         <div class="field"><label>Senha inicial</label>${passwordFieldHtml('m-password', 'minlength="6" required')}</div>
-        ` : `
-        <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" value="${escapeHtml(p.email || '')}"></div>
-        `}
+        ` : ''}
         <div class="field"><label>Nome completo</label><input type="text" id="m-name" value="${escapeHtml(p.full_name || '')}"></div>
+        ${isEdit ? `
+        <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" value="${escapeHtml(p.email || '')}"></div>
+        ` : ''}
         <div class="field-row">
           <div class="field"><label>CPF</label><input type="text" id="m-cpf" maxlength="14" value="${escapeHtml(formatCpf(p.cpf || ''))}"></div>
           <div class="field"><label>Telefone</label><input type="tel" id="m-phone" placeholder="(00) 00000-0000" value="${escapeHtml(formatPhoneBR(p.phone || ''))}"></div>
