@@ -25,13 +25,26 @@ const NAV_ITEMS = {
   ],
 };
 
+// Só as rotas mais usadas viram aba direta na tabbar mobile (a tabbar só
+// cabe uns 5 itens legíveis) — o resto (se sobrar item) vai pra aba "Mais",
+// que abre uma folha com o restante do menu. Cliente tem exatamente 5 itens
+// e cabe inteiro sem "Mais"; gerente tem mais itens que isso.
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/score', 'cliente/notificacoes'],
-  gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/contratos', 'gerente/relatorios', 'gerente/configuracoes'],
+  gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/contratos', 'gerente/relatorios'],
 };
 
 function navLinkHtml(item, mobile) {
   return `<a href="#/${item.route}" class="nav-link" data-route="${item.route}">${Icons[item.icon] || ''}<span>${item.label}</span></a>`;
+}
+
+function toggleMobileMoreMenu(forceOpen) {
+  const menu = document.getElementById('mobile-more-menu');
+  const backdrop = document.getElementById('mobile-more-backdrop');
+  if (!menu || !backdrop) return;
+  const open = forceOpen != null ? forceOpen : menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', !open);
+  backdrop.classList.toggle('hidden', !open);
 }
 
 function renderShellForRole() {
@@ -44,13 +57,23 @@ function renderShellForRole() {
   });
 
   const mobileRoutes = MOBILE_TAB_ROUTES[role];
-  document.getElementById('tabbar-mobile').innerHTML = items
-    .filter((i) => mobileRoutes.includes(i.route))
-    .map((i) => navLinkHtml(i))
-    .join('');
+  const primaryItems = items.filter((i) => mobileRoutes.includes(i.route));
+  const moreItems = items.filter((i) => !mobileRoutes.includes(i.route));
+
+  document.getElementById('tabbar-mobile').innerHTML =
+    primaryItems.map((i) => navLinkHtml(i)).join('') +
+    (moreItems.length ? `<button class="nav-link" id="mobile-more-btn">${Icons.more}<span>Mais</span></button>` : '');
   document.getElementById('tabbar-mobile').querySelectorAll('a').forEach((a) => {
     a.onclick = (e) => { e.preventDefault(); router.navigate(a.getAttribute('href')); };
   });
+  const moreBtn = document.getElementById('mobile-more-btn');
+  if (moreBtn) moreBtn.onclick = () => toggleMobileMoreMenu();
+
+  document.getElementById('mobile-more-menu').innerHTML = moreItems.map((i) => navLinkHtml(i)).join('');
+  document.getElementById('mobile-more-menu').querySelectorAll('a').forEach((a) => {
+    a.onclick = (e) => { e.preventDefault(); router.navigate(a.getAttribute('href')); };
+  });
+  document.getElementById('mobile-more-backdrop').onclick = () => toggleMobileMoreMenu(false);
 
   document.getElementById('sidebar-user-name').textContent = userDisplayName();
   document.getElementById('sidebar-user-role').textContent = role === 'gerente' ? 'Administrador' : 'Cliente';

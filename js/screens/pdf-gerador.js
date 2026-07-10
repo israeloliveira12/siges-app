@@ -209,7 +209,7 @@ async function gerarExtratoPDF({ contract, installments, clientProfile, score, c
     const statusLabel = { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[inst.status];
     doc.text(String(inst.sequence_number), cols[0], y);
     doc.text(formatDate(inst.due_date), cols[1], y);
-    doc.text(inst.paid_at ? formatDate(inst.paid_at) : '—', cols[2], y);
+    doc.text(inst.paid_at ? formatDateUTC(inst.paid_at) : '—', cols[2], y);
     doc.text(formatMoney(inst.amount_due), cols[3], y);
     doc.text(statusLabel, cols[4], y);
     doc.setDrawColor(240, 242, 240);

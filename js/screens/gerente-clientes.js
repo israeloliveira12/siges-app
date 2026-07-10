@@ -24,6 +24,13 @@ async function loadClientesCache() {
 
 function paintClientesScreen() {
   const root = document.getElementById('screen-gerente-clientes');
+  // Preserva foco/cursor da busca entre repaints — sem isso, cada tecla
+  // digitada recria o <input> do zero e o cursor "some" até o usuário
+  // clicar de novo no campo.
+  const searchElBefore = document.getElementById('clientes-search');
+  const hadFocus = !!searchElBefore && document.activeElement === searchElBefore;
+  const cursorPos = hadFocus ? searchElBefore.selectionStart : null;
+
   const term = clientesSearch.trim().toLowerCase();
   const pendingCount = clientesCache.filter((c) => c.approval_status === 'pendente').length;
 
@@ -32,7 +39,7 @@ function paintClientesScreen() {
     if (!term) return true;
     const p = c.profiles || {};
     return (p.full_name || '').toLowerCase().includes(term) || (p.email || '').toLowerCase().includes(term) || (p.cpf || '').includes(term);
-  });
+  }).sort((a, b) => (a.profiles || {}).full_name?.localeCompare((b.profiles || {}).full_name || '', 'pt-BR') || 0);
 
   root.innerHTML = `
     <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
@@ -84,7 +91,9 @@ function paintClientesScreen() {
   document.getElementById('tab-pendente').onclick = () => { clientesTab = 'pendente'; paintClientesScreen(); };
   document.getElementById('tab-aprovado').onclick = () => { clientesTab = 'aprovado'; paintClientesScreen(); };
   document.getElementById('tab-rejeitado').onclick = () => { clientesTab = 'rejeitado'; paintClientesScreen(); };
-  document.getElementById('clientes-search').oninput = debounce((e) => { clientesSearch = e.target.value; paintClientesScreen(); }, 250);
+  const searchEl = document.getElementById('clientes-search');
+  searchEl.oninput = debounce((e) => { clientesSearch = e.target.value; paintClientesScreen(); }, 250);
+  if (hadFocus) { searchEl.focus(); if (cursorPos != null) searchEl.setSelectionRange(cursorPos, cursorPos); }
   document.getElementById('novo-cliente-btn').onclick = () => openClienteModal(null);
 
   root.querySelectorAll('.edit-client-btn').forEach((btn) => {

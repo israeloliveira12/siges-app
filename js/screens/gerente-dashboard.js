@@ -106,7 +106,9 @@ async function renderGerenteDashboard() {
     const [y, m] = key.split('-');
     return { label: mesesPt[Number(m) - 1] + '/' + y, value: projectionByMonth[key] || 0 };
   });
-  const receberSeisMeses = monthKeys.reduce((s, key) => s + (projectionByMonth[key] || 0), 0);
+  // Total geral a receber — TODAS as parcelas/ciclos pendentes/atrasados do
+  // sistema, sem limite de data (não só os próximos 6 meses).
+  const receberTotal = sum(dueSoon, 'amount_due') + sum(cyclesSoon, 'full_debt_amount');
 
   // Projeção de lucro — juros esperados (não o valor bruto da parcela/ciclo)
   // menos a taxa operacional de entrada estimada (% + fixo, config atual),
@@ -128,9 +130,16 @@ async function renderGerenteDashboard() {
     const lucro = Number(c.interest_only_amount || 0) - estEntryFee(Number(c.full_debt_amount || 0));
     profitByMonth[key] = (profitByMonth[key] || 0) + lucro;
   });
-  const profitSeries = monthKeys.map((key) => {
+  // No mês corrente, a projeção soma o que já foi efetivamente recebido
+  // (lucroMes) + o que ainda falta receber das parcelas/ciclos em aberto —
+  // senão o card de destaque mostra 200 recebidos enquanto o gráfico mostra
+  // só os 800 futuros, dando a impressão de que o mês vai render menos do
+  // que já rendeu.
+  const profitSeries = monthKeys.map((key, idx) => {
     const [y, m] = key.split('-');
-    return { label: mesesPt[Number(m) - 1] + '/' + y, value: Math.max(0, profitByMonth[key] || 0) };
+    let value = profitByMonth[key] || 0;
+    if (idx === 0) value += lucroMes;
+    return { label: mesesPt[Number(m) - 1] + '/' + y, value: Math.max(0, value) };
   });
 
   // Taxas operacionais efetivamente cobradas no mês corrente — entrada (a
@@ -167,11 +176,17 @@ async function renderGerenteDashboard() {
     const day = String(p.received_at).slice(0, 10);
     trendByDay[day] = (trendByDay[day] || 0) + Number(p.amount_received || 0);
   });
-  const trendSeries = [];
+  // Agrupa os 30 dias em 5 blocos de 6 dias — 30 pontos diários não cabiam
+  // rótulo nenhum (lineChartSVG só mostra número estático até 14 pontos),
+  // então o gráfico aparecia "vazio" mesmo com dados.
+  const trendBuckets = Array.from({ length: 5 }, () => ({ value: 0, lastDay: null }));
   for (let i = 29; i >= 0; i--) {
     const day = addDaysISO(today, -i);
-    trendSeries.push({ label: day.slice(8, 10) + '/' + day.slice(5, 7), value: trendByDay[day] || 0 });
+    const bucketIdx = Math.floor((29 - i) / 6);
+    trendBuckets[bucketIdx].value += trendByDay[day] || 0;
+    trendBuckets[bucketIdx].lastDay = day;
   }
+  const trendSeries = trendBuckets.map((b) => ({ label: 'até ' + formatDate(b.lastDay).slice(0, 5), value: b.value }));
 
   root.innerHTML = `
     <div class="card" style="background:var(--brand);color:#fff;border:none;padding:22px 24px">
@@ -195,8 +210,8 @@ async function renderGerenteDashboard() {
         <div class="value mono">${formatMoney(sum(aReceberMes, 'amount_due'))}</div>
       </div>
       <div class="card stat-card">
-        <div class="label">A receber — 6 meses</div>
-        <div class="value mono">${formatMoney(receberSeisMeses)}</div>
+        <div class="label">A receber</div>
+        <div class="value mono">${formatMoney(receberTotal)}</div>
       </div>
     </div>
 
@@ -277,7 +292,8 @@ async function renderGerenteDashboard() {
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Recebido — últimos 30 dias</h3>
-        <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? lineChartSVG(trendSeries, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
+        <p class="text-sm text-soft mt-8">Agrupado em blocos de 6 dias</p>
+        <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
       </div>
       <div class="card">
         <h3>Contratos por status</h3>

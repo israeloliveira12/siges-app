@@ -82,5 +82,7 @@ function updateActiveNavLinks(currentPath) {
 
 function closeMobileMoreMenu() {
   const menu = document.getElementById('mobile-more-menu');
+  const backdrop = document.getElementById('mobile-more-backdrop');
   if (menu) menu.classList.add('hidden');
+  if (backdrop) backdrop.classList.add('hidden');
 }

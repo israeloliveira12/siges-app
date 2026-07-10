@@ -3,7 +3,7 @@
    ============================================================================ */
 
 let relatoriosTab = 'lucro';
-let relatoriosPeriodo = 'mes'; // 'dia' | 'mes' | 'ano'
+let relatoriosPeriodo = 'ano'; // 'dia' | 'mes' | 'ano'
 let relatoriosDia = todayISO();
 let relatoriosMes = todayISO().slice(0, 7);
 let relatoriosAno = todayISO().slice(0, 4);
@@ -153,7 +153,6 @@ function paintFluxoCaixa(payments, contracts, bucket) {
   const exitFees = contracts.reduce((s, c) => s + Number(c.operational_fee_amount), 0);
   const entryFees = payments.reduce((s, p) => s + Number(p.operational_fee_amount), 0);
   const lucroLiquido = payments.reduce((s, p) => s + Number(p.interest_component), 0) - exitFees - entryFees;
-  const saldoLiquido = recebido - aporte;
 
   const byBucketIn = groupByBucket(payments, 'received_at', ['amount_received'], bucket);
   const byBucketOut = groupByBucket(contracts, 'contract_date', ['total_disbursed_amount'], bucket);
@@ -162,11 +161,10 @@ function paintFluxoCaixa(payments, contracts, bucket) {
   const seriesOut = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketOut[k] || { total_disbursed_amount: 0 }).total_disbursed_amount }));
 
   body.innerHTML = `
-    <div class="grid grid-4">
+    <div class="grid grid-3">
       <div class="card stat-card"><div class="label">Aporte no período (contrato + taxa de saída)</div><div class="value mono">${formatMoney(aporte)}</div></div>
       <div class="card stat-card"><div class="label">Recebido no período</div><div class="value mono">${formatMoney(recebido)}</div></div>
       <div class="card stat-card"><div class="label">Lucro líquido (juros − taxas)</div><div class="value mono">${formatMoney(lucroLiquido)}</div></div>
-      <div class="card stat-card"><div class="label">Saldo líquido (recebido − aporte)</div><div class="value mono" style="color:${saldoLiquido >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(saldoLiquido)}</div></div>
     </div>
     <div class="grid grid-2 mt-14">
       <div class="card">
@@ -276,7 +274,7 @@ function paintLancamentosFuturos(installments, cycles) {
 
     <div class="card mt-14" style="padding:0">
       <table class="data-table table-scroll">
-        <thead><tr><th>Tipo</th><th>Data</th><th>Dias Restantes</th><th>Descrição</th><th>Valor</th><th>Referência</th><th></th></tr></thead>
+        <thead><tr><th>Tipo</th><th>Data</th><th>Dias Restantes</th><th>Descrição</th><th>Valor</th><th>Referência</th></tr></thead>
         <tbody>
           ${items.length ? items.map((i) => {
             const dias = diasRestantes(i.data);
@@ -289,10 +287,9 @@ function paintLancamentosFuturos(installments, cycles) {
               <td data-label="Dias Restantes"><span class="badge ${diasColor}">${diasLabel}</span></td>
               <td data-label="Descrição">${escapeHtml(i.descricao)}</td>
               <td data-label="Valor" class="mono">${formatMoney(i.valor)}</td>
-              <td data-label="Referência">${i.contractNumber ? `<a href="#/gerente/contratos/${i.contractId}" style="color:var(--accent)">Contrato #${i.contractNumber}</a>` : '—'}</td>
-              <td data-label="">${i.contractId ? `<a class="icon-btn" href="#/gerente/contratos/${i.contractId}" title="Ver contrato">${Icons.chevronRight}</a>` : ''}</td>
+              <td data-label="Referência">${i.contractNumber ? `<a href="#/gerente/contratos/${i.contractId}" class="reference-link">Contrato #${i.contractNumber} ${Icons.chevronRight}</a>` : '—'}</td>
             </tr>`;
-          }).join('') : `<tr><td colspan="7" class="text-soft">Nenhum lançamento futuro encontrado.</td></tr>`}
+          }).join('') : `<tr><td colspan="6" class="text-soft">Nenhum lançamento futuro encontrado.</td></tr>`}
         </tbody>
       </table>
     </div>

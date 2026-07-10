@@ -165,6 +165,14 @@ button { cursor: pointer; }
 .overview-card-link svg { width: 13px; height: 13px; }
 .overview-card:hover .overview-card-link { color: var(--ink); }
 
+.reference-link {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: var(--ink); text-decoration: none; font-weight: 600;
+}
+.reference-link svg { width: 13px; height: 13px; color: var(--ink-soft); }
+.reference-link:hover { color: var(--accent); }
+.reference-link:hover svg { color: var(--accent); }
+
 /* ---------------------------------------------------------------------------
    Formulários
 --------------------------------------------------------------------------- */
@@ -427,6 +435,25 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   }
   .tabbar-mobile .nav-link svg { width: 19px; height: 19px; }
   .tabbar-mobile .nav-link.active { background: none; color: var(--accent); }
+  .tabbar-mobile button.nav-link { background: none; border: none; cursor: pointer; font-family: inherit; }
+
+  .mobile-more-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 35;
+    background: rgba(20, 33, 43, .45);
+  }
+  .mobile-more-menu {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    position: fixed; left: 8px; right: 8px;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    z-index: 36; background: #fff; border-radius: 14px; padding: 10px;
+    box-shadow: 0 -6px 24px rgba(20, 33, 43, .18);
+  }
+  .mobile-more-menu .nav-link {
+    flex-direction: column; gap: 6px; padding: 12px 4px; font-size: 11px;
+    text-align: center; color: var(--ink); border-radius: 10px;
+  }
+  .mobile-more-menu .nav-link svg { width: 21px; height: 21px; color: var(--brand); }
+  .mobile-more-menu .nav-link.active { background: var(--brand-soft); color: var(--brand); }
 }
 
 @media (max-width: 640px) {

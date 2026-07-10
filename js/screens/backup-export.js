@@ -186,34 +186,119 @@ async function runExportPDF() {
     }
   }
 
+  function checkPageBreak(y, needed) {
+    if (y + needed > 278) { doc.addPage(); drawHeader('Exportação de Dados'); return 40; }
+    return y;
+  }
+
+  function drawClientHeader(client, y) {
+    y = checkPageBreak(y, 15);
+    const p = client.profiles || {};
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...NAVY);
+    doc.text(p.full_name || '—', 20, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...INK_SOFT);
+    doc.text(`CPF ${p.cpf || '—'} · Score ${client.score ?? '—'} · Limite ${formatMoney(client.credit_limit)} · ${client.approval_status || ''}`, 20, y + 5);
+    doc.setDrawColor(...NAVY);
+    doc.setLineWidth(0.4);
+    doc.line(20, y + 8, 190, y + 8);
+    return y + 13;
+  }
+
+  function drawContractSubheader(contract, y) {
+    y = checkPageBreak(y, 10);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(20, 33, 43);
+    doc.text(`Contrato #${contract.contract_number} — ${formatMoney(contract.principal_amount)} — ${contract.status} — criado em ${formatDate(contract.contract_date)}`, 24, y);
+    return y + 6;
+  }
+
+  function drawOpenInstallments(rows, y) {
+    if (!rows.length) {
+      y = checkPageBreak(y, 7);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7.5);
+      doc.setTextColor(...INK_SOFT);
+      doc.text('Nenhuma parcela em aberto.', 28, y);
+      return y + 8;
+    }
+    const cols = [{ label: 'Nº', w: 12, get: (r) => String(r.sequence_number) },
+      { label: 'Vencimento', w: 26, get: (r) => formatDate(r.due_date) },
+      { label: 'Valor', w: 26, get: (r) => formatMoney(r.amount_due) },
+      { label: 'Status', w: 26, get: (r) => r.status }];
+    y = checkPageBreak(y, 10);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...INK_SOFT);
+    let x = 28;
+    cols.forEach((c) => { doc.text(c.label, x, y); x += c.w; });
+    y += 4.5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(20, 33, 43);
+    rows.forEach((r) => {
+      y = checkPageBreak(y, 6);
+      x = 28;
+      cols.forEach((c) => { doc.text(c.get(r), x, y); x += c.w; });
+      y += 5;
+    });
+    return y + 4;
+  }
+
   drawHeader('Exportação de Dados');
   let y = 40;
 
-  y = drawTableSection('Clientes', [
-    { label: 'Nome', value: (r) => (r.profiles || {}).full_name },
-    { label: 'CPF', value: (r) => (r.profiles || {}).cpf },
-    { label: 'Score', value: (r) => r.score },
-    { label: 'Limite', value: (r) => formatMoney(r.credit_limit) },
-    { label: 'Status', value: (r) => r.approval_status },
-  ], data.clientes, y);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(...NAVY);
+  y = checkPageBreak(y, 10);
+  doc.text('Clientes, contratos e parcelas em aberto', 20, y);
+  y += 9;
 
-  y = drawTableSection('Contratos', [
-    { label: 'Nº', value: (r) => r.contract_number },
-    { label: 'Valor', value: (r) => formatMoney(r.principal_amount) },
-    { label: 'Parcelas', value: (r) => r.installments_count },
-    { label: 'Status', value: (r) => r.status },
-    { label: 'Criado em', value: (r) => formatDate(r.contract_date) },
-  ], data.contratos, y);
+  const contractsByClient = {};
+  (data.contratos || []).forEach((c) => { (contractsByClient[c.client_id] = contractsByClient[c.client_id] || []).push(c); });
+  const openInstallmentsByContract = {};
+  (data.parcelas || []).forEach((i) => {
+    if (i.status !== 'pendente' && i.status !== 'atrasada') return;
+    (openInstallmentsByContract[i.contract_id] = openInstallmentsByContract[i.contract_id] || []).push(i);
+  });
+  const clientsSorted = [...(data.clientes || [])].sort((a, b) =>
+    ((a.profiles || {}).full_name || '').localeCompare((b.profiles || {}).full_name || '', 'pt-BR'));
 
-  y = drawTableSection('Parcelas', [
-    { label: 'Nº', value: (r) => r.sequence_number },
-    { label: 'Vencimento', value: (r) => formatDate(r.due_date) },
-    { label: 'Valor', value: (r) => formatMoney(r.amount_due) },
-    { label: 'Status', value: (r) => r.status },
-  ], data.parcelas, y);
+  if (!clientsSorted.length) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...INK_SOFT);
+    doc.text('Nenhum cliente cadastrado.', 20, y);
+    y += 8;
+  }
+
+  clientsSorted.forEach((client) => {
+    y = drawClientHeader(client, y);
+    const contracts = (contractsByClient[client.profile_id] || []).sort((a, b) => (a.contract_number || 0) - (b.contract_number || 0));
+    if (!contracts.length) {
+      y = checkPageBreak(y, 7);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.setTextColor(...INK_SOFT);
+      doc.text('Nenhum contrato.', 24, y);
+      y += 8;
+    } else {
+      contracts.forEach((contract) => {
+        y = drawContractSubheader(contract, y);
+        const openInst = (openInstallmentsByContract[contract.id] || []).sort((a, b) => a.sequence_number - b.sequence_number);
+        y = drawOpenInstallments(openInst, y);
+      });
+    }
+    y += 4;
+  });
 
   y = drawTableSection('Pagamentos', [
-    { label: 'Data', value: (r) => formatDate(r.received_at) },
+    { label: 'Data', value: (r) => formatDateUTC(r.received_at) },
     { label: 'Tipo', value: (r) => r.payment_kind },
     { label: 'Valor', value: (r) => formatMoney(r.amount_received) },
     { label: 'Lucro líquido', value: (r) => formatMoney(r.net_profit) },

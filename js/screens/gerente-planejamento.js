@@ -56,7 +56,12 @@ function calcPlanejamento({ settings, debtsList, pendingInst, pendingCycles }) {
   const faturamentoBase = caixaAtual + recebiveis;
   const entryPct = Number((settings && settings.default_entry_fee_percent) || 0);
   const entryFixed = Number((settings && settings.default_entry_fee_fixed) || 0);
-  const taxaEntrada = faturamentoBase > 0 ? (faturamentoBase * entryPct / 100 + entryFixed) : 0;
+  // O valor FIXO da taxa de entrada é cobrado por recebimento (uma parcela
+  // ou ciclo de cada vez), então na agregação ele precisa ser multiplicado
+  // pela quantidade de parcelas/ciclos em aberto — só a % incide sobre o
+  // faturamento total de uma vez.
+  const qtdRecebiveis = (pendingInst || []).length + (pendingCycles || []).length;
+  const taxaEntrada = faturamentoBase > 0 ? (faturamentoBase * entryPct / 100 + entryFixed * qtdRecebiveis) : 0;
   const faturamentoFinal = faturamentoBase - taxaEntrada;
 
   const lucroBruto = faturamentoFinal - dividaTotal;
@@ -66,7 +71,7 @@ function calcPlanejamento({ settings, debtsList, pendingInst, pendingCycles }) {
 
   return {
     dividaBase, exitPct, exitFixed, taxaSaida, dividaTotal,
-    caixaAtual, recebiveis, faturamentoBase, entryPct, entryFixed, taxaEntrada, faturamentoFinal,
+    caixaAtual, recebiveis, faturamentoBase, entryPct, entryFixed, qtdRecebiveis, taxaEntrada, faturamentoFinal,
     lucroBruto, ltvPercent, descontoLtv, lucroLiquido,
   };
 }
@@ -104,11 +109,43 @@ function paintPlanejamento(root, state) {
       </div>
     </div>
 
+    <div class="card mt-14" style="border-color:var(--brand)">
+      <h3>Resumo do planejamento</h3>
+      <div class="grid grid-2 mt-14" style="gap:24px">
+        <div>
+          <div class="form-section-title" style="margin-top:0">Dívida</div>
+          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">Dívida base (soma das dívidas)</span><span class="mono">${formatMoney(calc.dividaBase)}</span></div>
+          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">(+) Taxa de saída (${formatNumber(calc.exitPct, 2)}% + ${formatMoney(calc.exitFixed)})</span><span class="mono">${formatMoney(calc.taxaSaida)}</span></div>
+          <div class="flex justify-between" style="padding:8px 0;border-top:1px solid var(--line);font-weight:700"><span>Dívida Total</span><span class="mono">${formatMoney(calc.dividaTotal)}</span></div>
+        </div>
+        <div>
+          <div class="form-section-title" style="margin-top:0">Faturamento</div>
+          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">Caixa atual</span><span class="mono">${formatMoney(calc.caixaAtual)}</span></div>
+          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">(+) Recebíveis em aberto (parcelas + ciclos)</span><span class="mono">${formatMoney(calc.recebiveis)}</span></div>
+          <div class="flex justify-between text-sm" style="padding:6px 0;border-top:1px solid var(--line)"><span class="text-soft">= Faturamento base</span><span class="mono">${formatMoney(calc.faturamentoBase)}</span></div>
+          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">(−) Taxa de entrada (${formatNumber(calc.entryPct, 2)}% + ${formatMoney(calc.entryFixed)} × ${calc.qtdRecebiveis} parcela${calc.qtdRecebiveis === 1 ? '' : 's'})</span><span class="mono">${formatMoney(calc.taxaEntrada)}</span></div>
+          <div class="flex justify-between" style="padding:8px 0;border-top:1px solid var(--line);font-weight:700"><span>Faturamento Final</span><span class="mono">${formatMoney(calc.faturamentoFinal)}</span></div>
+        </div>
+      </div>
+
+      <div class="grid grid-2 mt-20" style="gap:14px">
+        <div class="stat-card" style="background:var(--bg)">
+          <div class="label">Lucro Bruto (Faturamento Final − Dívida Total)</div>
+          <div class="value mono" style="font-size:22px;color:${calc.lucroBruto >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroBruto)}</div>
+        </div>
+        <div class="stat-card" style="background:var(--brand-soft)">
+          <div class="label">Lucro Líquido (Bruto − LTV ${formatNumber(calc.ltvPercent, 2)}%)</div>
+          <div class="value mono" style="font-size:22px;color:${calc.lucroLiquido >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroLiquido)}</div>
+          <div class="hint">Desconto de LTV: ${formatMoney(calc.descontoLtv)}</div>
+        </div>
+      </div>
+    </div>
+
     <div class="card mt-14">
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:10px">
         <div>
           <h3>Dívidas planejadas — próximos 12 meses</h3>
-          <p class="text-sm text-soft mt-8">Lançamentos manuais de dívidas futuras (uma ou várias por mês). A soma vira a Dívida base do resumo abaixo.</p>
+          <p class="text-sm text-soft mt-8">Lançamentos manuais de dívidas futuras (uma ou várias por mês). A soma vira a Dívida base do resumo acima.</p>
         </div>
         <button class="btn btn-primary btn-sm" id="pl-add-debt">${Icons.plus} Nova dívida</button>
       </div>
@@ -143,38 +180,6 @@ function paintPlanejamento(root, state) {
           </div>`;
         }).join('')}
       </div>`}
-    </div>
-
-    <div class="card mt-14" style="border-color:var(--brand)">
-      <h3>Resumo do planejamento</h3>
-      <div class="grid grid-2 mt-14" style="gap:24px">
-        <div>
-          <div class="form-section-title" style="margin-top:0">Dívida</div>
-          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">Dívida base (soma das dívidas)</span><span class="mono">${formatMoney(calc.dividaBase)}</span></div>
-          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">(+) Taxa de saída (${formatNumber(calc.exitPct, 2)}% + ${formatMoney(calc.exitFixed)})</span><span class="mono">${formatMoney(calc.taxaSaida)}</span></div>
-          <div class="flex justify-between" style="padding:8px 0;border-top:1px solid var(--line);font-weight:700"><span>Dívida Total</span><span class="mono">${formatMoney(calc.dividaTotal)}</span></div>
-        </div>
-        <div>
-          <div class="form-section-title" style="margin-top:0">Faturamento</div>
-          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">Caixa atual</span><span class="mono">${formatMoney(calc.caixaAtual)}</span></div>
-          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">(+) Recebíveis em aberto (parcelas + ciclos)</span><span class="mono">${formatMoney(calc.recebiveis)}</span></div>
-          <div class="flex justify-between text-sm" style="padding:6px 0;border-top:1px solid var(--line)"><span class="text-soft">= Faturamento base</span><span class="mono">${formatMoney(calc.faturamentoBase)}</span></div>
-          <div class="flex justify-between text-sm" style="padding:6px 0"><span class="text-soft">(−) Taxa de entrada (${formatNumber(calc.entryPct, 2)}% + ${formatMoney(calc.entryFixed)})</span><span class="mono">${formatMoney(calc.taxaEntrada)}</span></div>
-          <div class="flex justify-between" style="padding:8px 0;border-top:1px solid var(--line);font-weight:700"><span>Faturamento Final</span><span class="mono">${formatMoney(calc.faturamentoFinal)}</span></div>
-        </div>
-      </div>
-
-      <div class="grid grid-2 mt-20" style="gap:14px">
-        <div class="stat-card" style="background:var(--bg)">
-          <div class="label">Lucro Bruto (Faturamento Final − Dívida Total)</div>
-          <div class="value mono" style="font-size:22px;color:${calc.lucroBruto >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroBruto)}</div>
-        </div>
-        <div class="stat-card" style="background:var(--brand-soft)">
-          <div class="label">Lucro Líquido (Bruto − LTV ${formatNumber(calc.ltvPercent, 2)}%)</div>
-          <div class="value mono" style="font-size:22px;color:${calc.lucroLiquido >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroLiquido)}</div>
-          <div class="hint">Desconto de LTV: ${formatMoney(calc.descontoLtv)}</div>
-        </div>
-      </div>
     </div>
   `;
 

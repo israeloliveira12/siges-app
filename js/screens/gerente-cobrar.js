@@ -18,8 +18,20 @@ function buildWhatsappUrl(item) {
     ? `${item.seq} de ${(item.contract || {}).installments_count || '?'}`
     : String(item.seq);
 
-  const atencao = item.due_date < todayISO()
-    ? 'Efetue o pagamento da sua parcela atrasada'
+  // Mesma fórmula sugerida no modal de recebimento (juros compostos diários
+  // + multa fixa) — só uma sugestão pro texto de cobrança, o valor final
+  // cobrado continua sendo ajustável pelo gerente na hora de receber.
+  const today = todayISO();
+  const diasAtraso = item.due_date < today ? daysBetween(item.due_date, today) : 0;
+  const lateInterestPercent = Number((item.contract || {}).late_interest_percent || 0);
+  const lateFeePercent = Number((item.contract || {}).late_fee_percent || 0);
+  const jurosAtraso = diasAtraso > 0 ? Math.round(item.amount * (Math.pow(1 + lateInterestPercent / 100, diasAtraso) - 1) * 100) / 100 : 0;
+  const multaAtraso = diasAtraso > 0 ? Math.round(item.amount * (lateFeePercent / 100) * 100) / 100 : 0;
+  const encargoAtraso = jurosAtraso + multaAtraso;
+  const valorAtualizado = item.amount + encargoAtraso;
+
+  const atencao = diasAtraso > 0
+    ? `Efetue o pagamento da sua parcela atrasada (${diasAtraso} dia${diasAtraso > 1 ? 's' : ''} de atraso)`
     : 'Sua parcela vence hoje — efetue o pagamento para evitar atraso';
 
   const texto = [
@@ -30,11 +42,13 @@ function buildWhatsappUrl(item) {
     `*Contrato:* ${(item.contract || {}).contract_number || ''}`,
     `*Parcela* ${parcelaLabel}`,
     `*Valor da Parcela:* ${formatMoney(item.amount)}`,
+    diasAtraso > 0 && encargoAtraso > 0 ? `*Juros + multa por atraso:* ${formatMoney(encargoAtraso)}` : '',
+    diasAtraso > 0 && encargoAtraso > 0 ? `*Valor atualizado a pagar:* ${formatMoney(valorAtualizado)}` : '',
     `*Data Vencimento:* ${formatDateShortYear(item.due_date)}`,
     `*Chave Pix:* ${(App.settings && App.settings.company_pix_key) || '—'}`,
     '',
     `*Atenção:* ${atencao}`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   return `https://wa.me/${withCountry}?text=${encodeURIComponent(texto)}`;
 }

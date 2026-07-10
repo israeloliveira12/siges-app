@@ -394,6 +394,8 @@ function paintWizardStep3() {
         `Seu contrato no valor de ${formatMoney(wiz.principal_amount)} foi aprovado e criado.`);
       showToast('Contrato criado com sucesso!');
       wiz = null;
+      wizClientSearch = '';
+      wizSelectedClientId = null;
       router.navigate('#/gerente/contratos');
     } catch (e) {
       const msg = (e.message || '').includes('CREDIT_LIMIT_EXCEEDED')

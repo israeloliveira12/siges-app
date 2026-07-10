@@ -58,6 +58,18 @@ function formatDateTime(value) {
   return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
+// payments.received_at é timestamptz, mas sempre guarda só uma DATA (meia-
+// noite UTC — nenhuma RPC de recebimento grava hora real). Formatar com o
+// fuso local (como formatDateTime faz) desloca pro dia anterior em qualquer
+// fuso negativo (ex: 00:00 UTC vira 20:00 do dia anterior em UTC-4). Usar
+// timeZone:'UTC' recupera a data exatamente como foi selecionada.
+function formatDateUTC(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+}
+
 function todayISO() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');

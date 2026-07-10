@@ -7,7 +7,12 @@ let contratosSearch = '';
 
 async function renderGerenteContratosLista() {
   const root = document.getElementById('screen-gerente-contratos');
-  root.innerHTML = `<div class="text-soft">Carregando...</div>`;
+  // Preserva foco/cursor da busca entre repaints (a busca é debounced e
+  // recarrega a lista do banco, o que recria o <input> do zero).
+  const searchElBefore = document.getElementById('contratos-search');
+  const hadFocus = !!searchElBefore && document.activeElement === searchElBefore;
+  const cursorPos = hadFocus ? searchElBefore.selectionStart : null;
+  if (!hadFocus) root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
   const statuses = contratosTab === 'aberto' ? ['em_aberto', 'atrasado'] : ['quitado', 'perda'];
   const { data, error } = await supa
@@ -61,7 +66,7 @@ async function renderGerenteContratosLista() {
       ${rows.length ? `
       <table class="data-table table-scroll">
         <thead><tr>
-          <th>Código</th><th>Cliente</th><th>Aporte</th><th>Dívida atual</th><th>Juros (%)</th><th>Pago total</th><th>Status</th><th></th>
+          <th>Contrato</th><th>Cliente</th><th>Aporte</th><th>Dívida atual</th><th>Juros (%)</th><th>Pago total</th><th>Status</th><th></th>
         </tr></thead>
         <tbody>
           ${rows.map((c) => {
@@ -70,7 +75,7 @@ async function renderGerenteContratosLista() {
             const paid = (paymentsByContract[c.id] || { total: 0 }).total;
             return `
             <tr class="contract-row" data-id="${c.id}" style="cursor:pointer">
-              <td data-label="Código">#${c.contract_number}</td>
+              <td data-label="Contrato">#${c.contract_number}</td>
               <td data-label="Cliente">${escapeHtml((c.clients.profiles || {}).full_name || '—')}</td>
               <td data-label="Aporte" class="mono">${formatMoney(c.principal_amount)}</td>
               <td data-label="Dívida atual" class="mono">${formatMoney(outstanding)}</td>
@@ -87,7 +92,9 @@ async function renderGerenteContratosLista() {
 
   document.getElementById('tab-aberto').onclick = () => { contratosTab = 'aberto'; renderGerenteContratosLista(); };
   document.getElementById('tab-finalizados').onclick = () => { contratosTab = 'finalizados'; renderGerenteContratosLista(); };
-  document.getElementById('contratos-search').oninput = debounce((e) => { contratosSearch = e.target.value; renderGerenteContratosLista(); }, 250);
+  const searchEl = document.getElementById('contratos-search');
+  searchEl.oninput = debounce((e) => { contratosSearch = e.target.value; renderGerenteContratosLista(); }, 250);
+  if (hadFocus) { searchEl.focus(); if (cursorPos != null) searchEl.setSelectionRange(cursorPos, cursorPos); }
   root.querySelectorAll('.contract-row, .view-contract-btn').forEach((el) => {
     el.onclick = (e) => { e.stopPropagation(); router.navigate('#/gerente/contratos/' + (el.dataset.id)); };
   });
@@ -163,14 +170,17 @@ async function renderGerenteContratoDetalhe(params) {
       <table class="data-table table-scroll mt-8">
         <thead><tr><th>Nº</th><th>Vencimento</th><th>Capital</th><th>Juros</th><th>Total</th><th>Status</th><th></th></tr></thead>
         <tbody>
-          ${(installments || []).map((i) => `
+          ${(installments || []).map((i) => {
+            const st = effectiveInstallmentStatus(i.status, i.due_date);
+            const isPartial = st !== 'paga' && (i.principal_paid_partial > 0 || i.interest_paid_partial > 0);
+            return `
             <tr>
               <td data-label="Nº">${i.sequence_number}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
               <td data-label="Capital" class="mono">${formatMoney(i.principal_share)}</td>
               <td data-label="Juros" class="mono">${formatMoney(i.interest_share)}</td>
-              <td data-label="Total"><div><div class="mono">${formatMoney(i.amount_due)}</div>${(i.principal_paid_partial > 0 || i.interest_paid_partial > 0) ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
-              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(i.status, i.due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[st]); })()}</td>
+              <td data-label="Total"><div><div class="mono">${formatMoney(i.amount_due)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
+              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[st])}</td>
               <td data-label="">
                 <div class="flex gap-8">
                   ${(i.status === 'pendente' || i.status === 'atrasada') ? `
@@ -180,7 +190,7 @@ async function renderGerenteContratoDetalhe(params) {
                 </div>
               </td>
             </tr>
-          `).join('')}
+          `; }).join('')}
         </tbody>
       </table>
     </div>
@@ -213,7 +223,7 @@ async function renderGerenteContratoDetalhe(params) {
         <tbody>
           ${payments.map((pay) => `
             <tr>
-              <td data-label="Data">${formatDateTime(pay.received_at)}</td>
+              <td data-label="Data">${formatDateUTC(pay.received_at)}</td>
               <td data-label="Tipo">${{ quitacao_parcela: 'Quitação', renovacao_juros: 'Renovação (juros)', quitacao_final: 'Quitação final' }[pay.payment_kind]}</td>
               <td data-label="Valor" class="mono">${formatMoney(pay.amount_received)}</td>
               <td data-label="Lucro líquido" class="mono">${formatMoney(pay.net_profit)}</td>
