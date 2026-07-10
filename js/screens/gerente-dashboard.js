@@ -200,23 +200,23 @@ async function renderGerenteDashboard() {
       </div>
     </div>
 
-    <h3 class="mt-20">Taxas operacionais — mês</h3>
-    <p class="text-sm text-soft">Taxas de entrada (recebimentos) e saída (novos contratos) efetivamente cobradas este mês</p>
+    <h3 class="mt-20">Taxas operacionais pagas — mês</h3>
+    <p class="text-sm text-soft">Custo que já está descontado do lucro líquido acima — taxa de entrada (recebimentos) e de saída (novos contratos) pagas este mês</p>
     <div class="grid grid-3 mt-14">
       <div class="card stat-card">
         <div class="label">Taxa de entrada</div>
         <div class="value mono">${formatMoney(taxaEntradaMes)}</div>
-        <div class="text-sm text-soft mt-8">Cobrada nos recebimentos do mês</div>
+        <div class="text-sm text-soft mt-8">Paga nos recebimentos do mês</div>
       </div>
       <div class="card stat-card">
         <div class="label">Taxa de saída</div>
         <div class="value mono">${formatMoney(taxaSaidaMes)}</div>
-        <div class="text-sm text-soft mt-8">Cobrada em contratos novos do mês</div>
+        <div class="text-sm text-soft mt-8">Paga em contratos novos do mês</div>
       </div>
-      <div class="card stat-card" style="border-top:3px solid var(--accent)">
-        <div class="label">Total de taxas — mês</div>
+      <div class="card stat-card" style="border-top:3px solid var(--warn)">
+        <div class="label">Total pago em taxas — mês</div>
         <div class="value mono">${formatMoney(taxaEntradaMes + taxaSaidaMes)}</div>
-        <div class="text-sm text-soft mt-8">Receita operacional (fora dos juros)</div>
+        <div class="text-sm text-soft mt-8">Reduz o lucro líquido (juros − taxas)</div>
       </div>
     </div>
 
