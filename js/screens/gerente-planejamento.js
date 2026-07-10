@@ -130,7 +130,12 @@ function paintPlanejamento(root, state) {
                   <tr>
                     <td data-label="Nome">${escapeHtml(d.name)}</td>
                     <td data-label="Valor" class="mono">${formatMoney(d.amount)}</td>
-                    <td><button class="icon-btn del-debt-btn" data-id="${d.id}" title="Excluir">${Icons.trash}</button></td>
+                    <td>
+                      <div class="flex items-center gap-6">
+                        <button class="icon-btn edit-debt-btn" data-id="${d.id}" title="Editar">${Icons.edit}</button>
+                        <button class="icon-btn del-debt-btn" data-id="${d.id}" title="Excluir">${Icons.trash}</button>
+                      </div>
+                    </td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -195,7 +200,11 @@ function paintPlanejamento(root, state) {
     renderGerentePlanejamento();
   };
 
-  document.getElementById('pl-add-debt').onclick = () => openAddDebtModal(monthKeys);
+  document.getElementById('pl-add-debt').onclick = () => openDebtModal(monthKeys);
+
+  root.querySelectorAll('.edit-debt-btn').forEach((btn) => {
+    btn.onclick = () => openDebtModal(monthKeys, debtsList.find((d) => d.id === btn.dataset.id));
+  });
 
   root.querySelectorAll('.del-debt-btn').forEach((btn) => {
     btn.onclick = async () => {
@@ -207,31 +216,33 @@ function paintPlanejamento(root, state) {
   });
 }
 
-function openAddDebtModal(monthKeys) {
+function openDebtModal(monthKeys, existingDebt) {
+  const isEdit = !!existingDebt;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal" style="max-width:420px">
-      <div class="modal-head"><h3>Nova dívida planejada</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-head"><h3>${isEdit ? 'Editar dívida planejada' : 'Nova dívida planejada'}</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
       <div class="modal-body">
         <div id="debt-feedback"></div>
         <div class="field">
           <label>Mês</label>
           <select id="debt-month">
-            ${monthKeys.map((k) => `<option value="${k}">${planningMonthLabel(k)}</option>`).join('')}
+            ${monthKeys.map((k) => `<option value="${k}" ${isEdit && String(existingDebt.month).slice(0, 10) === k ? 'selected' : ''}>${planningMonthLabel(k)}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Nome da dívida</label><input type="text" id="debt-name" placeholder="Ex: Aluguel, fornecedor, empréstimo bancário"></div>
+        <div class="field"><label>Nome da dívida</label><input type="text" id="debt-name" placeholder="Ex: Aluguel, fornecedor, empréstimo bancário" value="${isEdit ? escapeHtml(existingDebt.name) : ''}"></div>
         <div class="field"><label>Valor (R$)</label><input type="text" id="debt-amount"></div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
-        <button class="btn btn-primary" id="confirm-debt">Adicionar</button>
+        <button class="btn btn-primary" id="confirm-debt">${isEdit ? 'Salvar' : 'Adicionar'}</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   const amountInput = document.getElementById('debt-amount');
   attachMoneyMask(amountInput);
+  if (isEdit) setMoneyValue(amountInput, existingDebt.amount);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
@@ -242,10 +253,12 @@ function openAddDebtModal(monthKeys) {
     const feedback = document.getElementById('debt-feedback');
     if (!name) { feedback.innerHTML = `<div class="auth-error">Informe o nome da dívida.</div>`; return; }
     if (!amount || amount <= 0) { feedback.innerHTML = `<div class="auth-error">Informe um valor válido.</div>`; return; }
-    const { error } = await supa.from('planning_debts').insert({ month, name, amount, created_by: App.session.user.id });
+    const { error } = isEdit
+      ? await supa.from('planning_debts').update({ month, name, amount }).eq('id', existingDebt.id)
+      : await supa.from('planning_debts').insert({ month, name, amount, created_by: App.session.user.id });
     if (error) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
     close();
-    showToast('Dívida adicionada.');
+    showToast(isEdit ? 'Dívida atualizada.' : 'Dívida adicionada.');
     renderGerentePlanejamento();
   };
 }
