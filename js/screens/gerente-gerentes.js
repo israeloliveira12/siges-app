@@ -1,6 +1,7 @@
 /* ============================================================================
-   Administradores — gestão de contas (sem cadastro público; só um
-   administrador já existente pode criar outro, de dentro do painel)
+   Administradores — gestão de contas. Só o admin primário ("Administrador")
+   pode criar/editar contas de gerente — os demais só visualizam a lista
+   (2026-07-11, decisão explícita do usuário).
    ============================================================================ */
 
 let gerentesCache = [];
@@ -8,6 +9,7 @@ let gerentesCache = [];
 async function renderGerenteGerentes() {
   const root = document.getElementById('screen-gerente-gerentes');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
+  const isPrimary = !!(App.profile && App.profile.is_primary_admin);
 
   const { data, error } = await supa.from('profiles').select('*').eq('role', 'gerente').order('created_at');
   if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
@@ -15,21 +17,21 @@ async function renderGerenteGerentes() {
 
   root.innerHTML = `
     <div class="flex justify-between items-center">
-      <p class="text-sm text-soft">Contas de administrador têm acesso total ao sistema. Só crie para pessoas de confiança da equipe.</p>
-      <button class="btn btn-primary" id="novo-gerente-btn">${Icons.userPlus} Novo Administrador</button>
+      <p class="text-sm text-soft">${isPrimary ? 'Contas de gerente têm acesso operacional ao sistema (sem Planejamento/Configurações). Só crie para pessoas de confiança da equipe.' : 'Só o Administrador pode criar, editar ou excluir contas desta lista.'}</p>
+      ${isPrimary ? `<button class="btn btn-primary" id="novo-gerente-btn">${Icons.userPlus} Novo Gerente</button>` : ''}
     </div>
     <div class="card mt-14" style="padding:0">
       <table class="data-table table-scroll">
-        <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Status</th><th>Criado em</th><th></th></tr></thead>
+        <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Status</th><th>Criado em</th>${isPrimary ? '<th></th>' : ''}</tr></thead>
         <tbody>
           ${gerentesCache.map((g) => `
             <tr>
               <td data-label="Nome">${escapeHtml(g.full_name || '—')}</td>
               <td data-label="E-mail">${escapeHtml(g.email)}</td>
-              <td data-label="Papel">${g.is_primary_admin ? '<span class="badge badge-brand">Admin primário</span>' : '<span class="badge badge-neutral">Administrador</span>'}</td>
+              <td data-label="Papel">${g.is_primary_admin ? '<span class="badge badge-brand">Administrador</span>' : '<span class="badge badge-neutral">Gerente</span>'}</td>
               <td data-label="Status">${g.active ? statusBadge('quitado', 'Ativo') : statusBadge('reprovada', 'Inativo')}</td>
               <td data-label="Criado em">${formatDate(g.created_at)}</td>
-              <td data-label=""><button class="icon-btn edit-gerente-btn" data-id="${g.id}">${Icons.edit}</button></td>
+              ${isPrimary ? `<td data-label=""><button class="icon-btn edit-gerente-btn" data-id="${g.id}">${Icons.edit}</button></td>` : ''}
             </tr>
           `).join('')}
         </tbody>
@@ -37,10 +39,12 @@ async function renderGerenteGerentes() {
     </div>
   `;
 
-  document.getElementById('novo-gerente-btn').onclick = openNovoGerenteModal;
-  root.querySelectorAll('.edit-gerente-btn').forEach((btn) => {
-    btn.onclick = () => openEditGerenteModal(gerentesCache.find((g) => g.id === btn.dataset.id));
-  });
+  if (isPrimary) {
+    document.getElementById('novo-gerente-btn').onclick = openNovoGerenteModal;
+    root.querySelectorAll('.edit-gerente-btn').forEach((btn) => {
+      btn.onclick = () => openEditGerenteModal(gerentesCache.find((g) => g.id === btn.dataset.id));
+    });
+  }
 }
 
 function openEditGerenteModal(gerente) {
@@ -48,14 +52,14 @@ function openEditGerenteModal(gerente) {
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal" style="max-width:420px">
-      <div class="modal-head"><h3>Editar administrador</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-head"><h3>Editar gerente</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
       <div class="modal-body">
         <div id="eg-feedback"></div>
         <div class="field"><label>Nome completo</label><input type="text" id="eg-name" value="${escapeHtml(gerente.full_name || '')}"></div>
         <div class="field"><label>Telefone</label><input type="tel" id="eg-phone" placeholder="(00) 00000-0000" value="${escapeHtml(formatPhoneBR(gerente.phone || ''))}"></div>
         <div class="toggle-row">
           <label class="switch"><input type="checkbox" id="eg-active" ${gerente.active ? 'checked' : ''} ${gerente.is_primary_admin ? 'disabled' : ''}><span class="track"></span></label>
-          <span>Conta ativa${gerente.is_primary_admin ? ' (admin primário não pode ser desativado por aqui)' : ''}</span>
+          <span>Conta ativa${gerente.is_primary_admin ? ' (o Administrador não pode ser desativado por aqui)' : ''}</span>
         </div>
       </div>
       <div class="modal-foot">
@@ -82,8 +86,9 @@ function openEditGerenteModal(gerente) {
       btn.disabled = false;
       return;
     }
+    logAudit('gerente_editado', `Gerente ${gerente.full_name || gerente.email} editado`, { gerente_id: gerente.id });
     close();
-    showToast('Administrador atualizado.');
+    showToast('Gerente atualizado.');
     renderGerenteGerentes();
   };
 }
@@ -93,17 +98,17 @@ function openNovoGerenteModal() {
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal" style="max-width:420px">
-      <div class="modal-head"><h3>Novo administrador</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-head"><h3>Novo gerente</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
       <div class="modal-body">
         <div id="ng-feedback"></div>
         <div class="field"><label>Nome completo</label><input type="text" id="ng-name"></div>
         <div class="field"><label>E-mail</label><input type="email" id="ng-email"></div>
         <div class="field"><label>Senha inicial</label>${passwordFieldHtml('ng-password', 'minlength="6"')}</div>
-        <p class="text-sm text-soft">Este novo administrador terá acesso total ao sistema, exceto a opção de apagar todos os dados (exclusiva do admin primário).</p>
+        <p class="text-sm text-soft">Este gerente terá acesso operacional ao sistema (Contratos, Clientes, Cobrar, Score etc.), mas não a Planejamento nem Configurações — exclusivas do Administrador.</p>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
-        <button class="btn btn-primary" id="save-modal">Criar administrador</button>
+        <button class="btn btn-primary" id="save-modal">Criar gerente</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -128,9 +133,10 @@ function openNovoGerenteModal() {
         body: JSON.stringify({ email, password, full_name: fullName, role: 'gerente' }),
       });
       const result = await resp.json();
-      if (!resp.ok) throw new Error(result.error || 'Falha ao criar administrador.');
+      if (!resp.ok) throw new Error(result.error || 'Falha ao criar gerente.');
+      logAudit('gerente_criado', `Gerente ${fullName || email} criado`, { gerente_id: result.user_id });
       close();
-      showToast('Administrador criado com sucesso.');
+      showToast('Gerente criado com sucesso.');
       renderGerenteGerentes();
     } catch (e) {
       feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message)}</div>`;

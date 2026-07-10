@@ -83,7 +83,11 @@ async function renderGerenteConfiguracoes() {
         </div>
         <span class="help">Verificado 1x por dia, no primeiro acesso ao sistema — se já tiver rodado no período, não baixa de novo.</span>
       </div>
-      <button class="btn btn-outline mt-14" id="cfg-backup-now-btn">${Icons.printer} Fazer backup agora (.json)</button>
+      <div id="cfg-backup-feedback" class="mt-8"></div>
+      <div class="flex gap-8 mt-14" style="flex-wrap:wrap">
+        <button class="btn btn-primary" id="cfg-backup-save">Salvar backup automático</button>
+        <button class="btn btn-outline" id="cfg-backup-now-btn">${Icons.printer} Fazer backup agora (.json)</button>
+      </div>
 
       <h3 class="mt-20">Exportar dados</h3>
       <p class="text-sm text-soft mt-8">Exporta clientes, contratos, parcelas e pagamentos nos formatos abaixo.</p>
@@ -147,6 +151,22 @@ async function renderGerenteConfiguracoes() {
   backupToggle.onchange = () => document.getElementById('cfg-backup-fields').classList.toggle('hidden', !backupToggle.checked);
   document.getElementById('cfg-backup-frequency').onchange = (e) => {
     document.getElementById('cfg-backup-custom-field').classList.toggle('hidden', e.target.value !== 'personalizado');
+  };
+  document.getElementById('cfg-backup-save').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const feedback = document.getElementById('cfg-backup-feedback');
+    feedback.innerHTML = '';
+    btn.disabled = true;
+    const payload = {
+      backup_auto_enabled: backupToggle.checked,
+      backup_frequency: document.getElementById('cfg-backup-frequency').value,
+      backup_custom_days: parseInt(document.getElementById('cfg-backup-custom-days').value || '7', 10),
+    };
+    const { error } = await supa.from('system_settings').update(payload).eq('id', true);
+    btn.disabled = false;
+    if (error) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
+    App.settings = { ...App.settings, ...payload };
+    showToast('Backup automático salvo.');
   };
   document.getElementById('cfg-backup-now-btn').onclick = async (e) => {
     const btn = e.currentTarget;
@@ -224,4 +244,4 @@ function openWipeDataModal() {
   };
 }
 
-registerRoute('gerente/configuracoes', { role: 'gerente', screenId: 'gerente-configuracoes', title: 'Configurações', render: renderGerenteConfiguracoes });
+registerRoute('gerente/configuracoes', { role: 'gerente', primaryOnly: true, screenId: 'gerente-configuracoes', title: 'Configurações', render: renderGerenteConfiguracoes });

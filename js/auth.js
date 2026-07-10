@@ -99,6 +99,11 @@ function initAuth() {
   supa.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') { location.reload(); return; }
     if (event === 'PASSWORD_RECOVERY') { renderResetPasswordModal(); return; }
+    // 'SIGNED_IN' só dispara em login de verdade (senha ou Google) — não em
+    // restauração de sessão ao recarregar a página (isso é 'INITIAL_SESSION').
+    if (event === 'SIGNED_IN' && session) {
+      logAudit('login_sucesso', `Login realizado por ${session.user.email || session.user.id}`, { user_id: session.user.id });
+    }
     handleAuthEvent(session);
   });
 

@@ -214,7 +214,6 @@ function openClienteModal(client) {
         <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" value="${escapeHtml(p.email || '')}"></div>
         <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
           <label>Redefinir senha do cliente</label>
-          <span class="help">A senha do próprio cliente não pode ser exibida aqui (o Supabase guarda só um hash irreversível) — mas você pode definir uma nova senha e repassar a ele.</span>
           <div class="flex gap-8 mt-8" style="align-items:flex-start">
             <div style="flex:1">${passwordFieldHtml('m-reset-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
             <button type="button" class="btn btn-outline btn-sm" id="reset-password-btn" style="flex:none">Redefinir</button>

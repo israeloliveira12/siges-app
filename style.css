@@ -265,6 +265,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 }
 .icon-btn svg { width: 17px; height: 17px; }
 
+/* Ícone "?" discreto ao lado de um título (ex: "Score de Clientes") — bem
+   menor e sem o "chip" de fundo/borda do .icon-btn normal, que ficava
+   grande e chamativo demais colado num texto de topbar. */
+.title-help-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0; border: none; background: none;
+  cursor: pointer; color: var(--ink-soft); vertical-align: middle;
+}
+.title-help-btn svg { width: 14px; height: 14px; }
+.title-help-btn:hover { color: var(--accent); }
+
 /* ---------------------------------------------------------------------------
    Badges
 --------------------------------------------------------------------------- */

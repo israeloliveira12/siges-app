@@ -131,7 +131,11 @@ function barChartSVG(series, opts = {}) {
     `;
   }).join('');
 
+  // Com muitas barras (ex: 30 dias), mostrar rótulo em toda barra vira uma
+  // faixa ilegível de texto sobreposto — mesmo padrão de espaçamento do
+  // lineChartSVG: só mostra 1 a cada N rótulos quando série é longa.
   const labels = series.map((p, i) => {
+    if (series.length > 10 && i % Math.ceil(series.length / 8) !== 0) return '';
     const bx = pad + i * gap + gap / 2;
     return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
   }).join('');

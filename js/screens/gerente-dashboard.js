@@ -170,17 +170,11 @@ async function renderGerenteDashboard() {
     const day = String(p.received_at).slice(0, 10);
     trendByDay[day] = (trendByDay[day] || 0) + Number(p.amount_received || 0);
   });
-  // Agrupa os 30 dias em 5 blocos de 6 dias — 30 pontos diários não cabiam
-  // rótulo nenhum (lineChartSVG só mostra número estático até 14 pontos),
-  // então o gráfico aparecia "vazio" mesmo com dados.
-  const trendBuckets = Array.from({ length: 5 }, () => ({ value: 0, lastDay: null }));
+  const trendSeries = [];
   for (let i = 29; i >= 0; i--) {
     const day = addDaysISO(today, -i);
-    const bucketIdx = Math.floor((29 - i) / 6);
-    trendBuckets[bucketIdx].value += trendByDay[day] || 0;
-    trendBuckets[bucketIdx].lastDay = day;
+    trendSeries.push({ label: formatDate(day).slice(0, 5), value: trendByDay[day] || 0 });
   }
-  const trendSeries = trendBuckets.map((b) => ({ label: 'até ' + formatDate(b.lastDay).slice(0, 5), value: b.value }));
 
   root.innerHTML = `
     <div class="card" style="background:var(--brand);color:#fff;border:none;padding:22px 24px">
@@ -285,7 +279,6 @@ async function renderGerenteDashboard() {
 
     <div class="card mt-14">
       <h3>Recebido — últimos 30 dias</h3>
-      <p class="text-sm text-soft mt-8">Agrupado em blocos de 6 dias</p>
       <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
     </div>
 

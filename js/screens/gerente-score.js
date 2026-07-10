@@ -59,7 +59,7 @@ async function renderGerenteScore() {
 function injectScoreHelpButton() {
   const titleEl = document.getElementById('topbar-title');
   if (!titleEl) return;
-  titleEl.innerHTML = `<span style="vertical-align:middle">Score de Clientes</span> <button class="icon-btn" id="score-help-btn" title="Como o score é calculado" style="vertical-align:middle">${Icons.help}</button>`;
+  titleEl.innerHTML = `<span style="vertical-align:middle">Score de Clientes</span> <button class="title-help-btn" id="score-help-btn" title="Como o score é calculado">${Icons.help}</button>`;
   document.getElementById('score-help-btn').onclick = openScoreHelpModal;
 }
 

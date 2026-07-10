@@ -20,9 +20,9 @@ const NAV_ITEMS = {
     { route: 'gerente/gerentes', label: 'Administradores', icon: 'userPlus' },
     { route: 'gerente/relatorios', label: 'Relatórios', icon: 'chart' },
     { route: 'gerente/score', label: 'Score de Clientes', icon: 'score' },
-    { route: 'gerente/planejamento', label: 'Planejamento', icon: 'wallet' },
+    { route: 'gerente/planejamento', label: 'Planejamento', icon: 'wallet', primaryOnly: true },
     { route: 'gerente/auditoria', label: 'Auditoria', icon: 'audit' },
-    { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings' },
+    { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings', primaryOnly: true },
   ],
 };
 
@@ -50,7 +50,8 @@ function toggleMobileMoreMenu(forceOpen) {
 
 function renderShellForRole() {
   const role = isGerente() ? 'gerente' : 'cliente';
-  const items = NAV_ITEMS[role];
+  const isPrimary = !!(App.profile && App.profile.is_primary_admin);
+  const items = NAV_ITEMS[role].filter((i) => !i.primaryOnly || isPrimary);
 
   document.getElementById('sidebar-nav').innerHTML = items.map((i) => navLinkHtml(i)).join('');
   document.getElementById('sidebar-nav').querySelectorAll('a').forEach((a) => {
@@ -77,7 +78,7 @@ function renderShellForRole() {
   document.getElementById('mobile-more-backdrop').onclick = () => toggleMobileMoreMenu(false);
 
   document.getElementById('sidebar-user-name').textContent = userDisplayName();
-  document.getElementById('sidebar-user-role').textContent = role === 'gerente' ? 'Administrador' : 'Cliente';
+  document.getElementById('sidebar-user-role').textContent = role === 'gerente' ? (isPrimary ? 'Administrador' : 'Gerente') : 'Cliente';
   document.getElementById('topbar-signout').onclick = handleSignOut;
 
   renderBell();

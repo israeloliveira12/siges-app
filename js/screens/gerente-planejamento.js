@@ -292,4 +292,4 @@ function openDebtModal(monthKeys, existingDebt) {
   };
 }
 
-registerRoute('gerente/planejamento', { role: 'gerente', screenId: 'gerente-planejamento', title: 'Planejamento', render: renderGerentePlanejamento });
+registerRoute('gerente/planejamento', { role: 'gerente', primaryOnly: true, screenId: 'gerente-planejamento', title: 'Planejamento', render: renderGerentePlanejamento });

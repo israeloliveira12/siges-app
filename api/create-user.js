@@ -27,6 +27,13 @@ export default async function handler(req, res) {
   }
   if (password.length < 6) { res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' }); return; }
 
+  // Só o admin primário pode criar novas contas de gerente — qualquer
+  // gerente comum ainda pode criar clientes normalmente.
+  if (role === 'gerente' && !caller.is_primary_admin) {
+    res.status(403).json({ error: 'Apenas o administrador primário pode criar novas contas de gerente.' });
+    return;
+  }
+
   const createRes = await supabaseAdminFetch('/auth/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify({

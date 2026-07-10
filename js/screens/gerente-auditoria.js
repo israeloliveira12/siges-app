@@ -15,6 +15,10 @@ const AUDIT_ACTION_LABELS = {
   cliente_excluido: 'Cliente excluído',
   cliente_aprovado: 'Cadastro aprovado',
   cliente_rejeitado: 'Cadastro rejeitado',
+  senha_redefinida: 'Senha redefinida',
+  gerente_criado: 'Gerente criado',
+  gerente_editado: 'Gerente editado',
+  login_sucesso: 'Login realizado',
   login_falho: 'Login falhou',
   erro_sistema: 'Erro do sistema',
 };
@@ -25,7 +29,7 @@ function auditActionLabel(action) {
 
 function auditActionBadgeColor(action) {
   if (action === 'erro_sistema' || action === 'login_falho' || action.includes('excluido') || action === 'cliente_rejeitado') return 'var(--bad)';
-  if (action.includes('criado') || action === 'cliente_aprovado' || action === 'pagamento_recebido' || action === 'renovacao_registrada') return 'var(--good)';
+  if (action.includes('criado') || action === 'cliente_aprovado' || action === 'pagamento_recebido' || action === 'renovacao_registrada' || action === 'login_sucesso') return 'var(--good)';
   return 'var(--ink-soft)';
 }
 

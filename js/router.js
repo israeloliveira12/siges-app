@@ -51,6 +51,12 @@ const router = {
       this.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
       return;
     }
+    // Algumas telas de gerente (Planejamento, Configurações) são exclusivas
+    // do admin primário — os demais gerentes nem chegam a ver a tela.
+    if (config.primaryOnly && !(App.profile && App.profile.is_primary_admin)) {
+      this.navigate('#/gerente/dashboard');
+      return;
+    }
 
     this.currentPath = segments.join('/');
     this.currentParams = params;

@@ -358,6 +358,31 @@ as $$
   select exists (select 1 from profiles where id = p_id and role = 'gerente' and active);
 $$;
 
+-- Trava de segurança: só o admin primário (ou uma chamada com service_role,
+-- usada pelas serverless functions de /api ao criar/promover conta) pode
+-- mudar `role`/`is_primary_admin` de qualquer linha de profiles — protege
+-- contra um gerente secundário se auto-promover chamando a REST API direto
+-- (fora das RPCs/telas do app, que já checam is_primary_admin() por conta
+-- própria, mas RLS sozinha não bastava pra fechar esse buraco).
+create or replace function prevent_profile_privilege_escalation()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if (new.role is distinct from old.role or new.is_primary_admin is distinct from old.is_primary_admin)
+     and not is_primary_admin()
+     and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'FORBIDDEN: só o administrador primário pode alterar papel/privilégio de uma conta';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_prevent_profile_privilege_escalation
+  before update of role, is_primary_admin on profiles
+  for each row execute function prevent_profile_privilege_escalation();
+
 -- ============================================================================
 -- 5. FUNÇÕES DE NEGÓCIO
 -- ============================================================================
@@ -1227,7 +1252,10 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  -- Só o admin primário edita conta de gerente (2026-07-11, decisão
+  -- explícita do usuário) — antes qualquer gerente conseguia editar
+  -- qualquer outro, inclusive reativar/desativar contas.
+  if not is_primary_admin() then raise exception 'FORBIDDEN'; end if;
   update profiles set full_name = p_full_name, phone = p_phone, active = p_active, updated_at = now()
     where id = p_gerente_id and role = 'gerente';
 end;
@@ -1340,8 +1368,13 @@ create policy "profiles_select" on profiles for select
   using (id = auth.uid() or is_gerente());
 create policy "profiles_update_self" on profiles for update
   using (id = auth.uid()) with check (id = auth.uid());
-create policy "profiles_gerente_all" on profiles for all
-  using (is_gerente()) with check (is_gerente());
+-- NENHUMA policy de UPDATE/INSERT/DELETE "genérica pra qualquer gerente"
+-- (removida a antiga "profiles_gerente_all" — dava a QUALQUER gerente, mesmo
+-- secundário, permissão de escrever direto na tabela via REST, contornando
+-- os controles de is_primary_admin() das RPCs). Toda escrita legítima já
+-- passa por função security definer (update_client_profile,
+-- update_gerente_profile, handle_new_user), que bypassa RLS por ser dona da
+-- tabela — não precisa de policy nenhuma aqui.
 
 -- clients
 create policy "clients_select" on clients for select
