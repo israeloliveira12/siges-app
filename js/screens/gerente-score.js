@@ -29,10 +29,10 @@ async function renderGerenteScore() {
 
     <div class="card mt-14">
       <h3>Como o score é calculado</h3>
-      <p class="text-sm text-soft mt-8">Cliente novo começa e permanece com score <strong>50</strong> até quitar o primeiro contrato ou fazer a primeira renovação — só a partir desse marco o score pula pra <strong>70</strong> e passa a subir ou descer conforme o comportamento financeiro real. Reprovação de solicitação de empréstimo <strong>nunca</strong> entra nessa conta.</p>
+      <p class="text-sm text-soft mt-8">Cliente novo começa com score-base <strong>50</strong>. Os <strong>bônus</strong> de comportamento só passam a valer depois que ele quita o primeiro contrato ou faz a primeira renovação — nesse marco o score pula pra <strong>70</strong> e passa a subir com o comportamento real. Já as <strong>penalidades</strong> de risco (atraso e perda) valem sempre, mesmo antes disso. Reprovação de solicitação de empréstimo <strong>nunca</strong> entra nessa conta.</p>
       <div class="grid grid-2 mt-14" style="gap:4px 24px">
         <div>
-          <div class="text-sm" style="font-weight:700;color:var(--good);margin-bottom:6px">Aumenta o score (depois da graduação)</div>
+          <div class="text-sm" style="font-weight:700;color:var(--good);margin-bottom:6px">Aumenta o score (só depois da graduação)</div>
           <div class="text-sm text-soft" style="line-height:1.9">
             <div>Pagar em dia — até <strong>40 pts</strong></div>
             <div>Pagar antecipado — até <strong>20 pts</strong></div>
@@ -42,9 +42,10 @@ async function renderGerenteScore() {
           </div>
         </div>
         <div>
-          <div class="text-sm" style="font-weight:700;color:var(--bad);margin-bottom:6px">Reduz o score (depois da graduação)</div>
+          <div class="text-sm" style="font-weight:700;color:var(--bad);margin-bottom:6px">Reduz o score (sempre, graduado ou não)</div>
           <div class="text-sm text-soft" style="line-height:1.9">
-            <div>Atraso médio nos pagamentos — até <strong>−20 pts</strong></div>
+            <div>Atraso médio histórico nos pagamentos — até <strong>−20 pts</strong></div>
+            <div>Parcela ou ciclo vencido e não pago agora — <strong>−15 pts</strong></div>
             <div>Qualquer contrato em perda — <strong>−30 pts</strong> (penalidade fixa)</div>
           </div>
         </div>
