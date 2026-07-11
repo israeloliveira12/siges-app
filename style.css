@@ -224,17 +224,6 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 }
 .form-section-title:first-child { border-top: none; padding-top: 0; margin-top: 0; }
 
-/* Cabeçalho de seção recolhível (<details>/<summary>) — usado pra seções
-   menos prioritárias começarem fechadas no mobile sem mudar nada no
-   desktop (o JS decide o atributo `open` na hora de montar o HTML). */
-.dash-section-summary {
-  cursor: pointer; list-style: none; font-size: 14.5px; font-weight: 700;
-  padding: 4px 0; display: flex; align-items: center; gap: 6px; user-select: none;
-}
-.dash-section-summary::-webkit-details-marker { display: none; }
-.dash-section-summary::before { content: '\203A'; display: inline-block; transition: transform .15s; font-size: 18px; line-height: 1; }
-details[open] > .dash-section-summary::before { transform: rotate(90deg); }
-
 .toggle-row { display: flex; align-items: center; gap: 10px; }
 .switch { position: relative; width: 42px; height: 24px; flex: none; }
 .switch input { opacity: 0; width: 0; height: 0; }

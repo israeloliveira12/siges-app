@@ -101,13 +101,27 @@ function areaChartSVG(series, opts = {}) {
   // Rótulo de valor: sempre acima do ponto, com halo branco atrás e cor fixa
   // (--ink), nunca a mesma cor da linha — testado com valores caindo exatamente
   // sobre a linha e ficando ilegíveis quando usavam a mesma cor.
+  //
+  // Critério diferente do esparsamento por índice usado no eixo X: aqui o
+  // rótulo aparece em TODO ponto com valor > 0 (ex: dia com recebimento),
+  // pulando só pontos zerados (sem informação nenhuma pra mostrar) — e só
+  // deixa de mostrar um ponto não-zero se ele cair perto demais do último
+  // rótulo já desenhado (evita sobrepor texto quando há muitos dias
+  // seguidos com valor). Antes disso o critério era "1 a cada N pontos"
+  // fixo, que podia pular exatamente os dias com pico de valor e mostrar
+  // só zeros — motivo real da reclamação "muitos picos sem número".
+  const valueLabelMinGap = 46;
+  let lastValueLabelX = -Infinity;
   const valueLabels = series.map((p, i) => {
-    if (!shouldShowLabel(i)) return '';
+    if (p.value <= 0) return '';
+    const xi = x(i);
+    if (xi - lastValueLabelX < valueLabelMinGap) return '';
+    lastValueLabelX = xi;
     const ly = Math.max(12, y(p.value) - 12).toFixed(1);
     const txt = escapeHtml(fmt(p.value));
     return `
-      <text x="${x(i).toFixed(1)}" y="${ly}" font-size="10.5" fill="none" stroke="#fff" stroke-width="3" text-anchor="middle" font-weight="700" paint-order="stroke">${txt}</text>
-      <text x="${x(i).toFixed(1)}" y="${ly}" font-size="10.5" fill="#14212B" text-anchor="middle" font-weight="700">${txt}</text>
+      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="none" stroke="#fff" stroke-width="3" text-anchor="middle" font-weight="700" paint-order="stroke">${txt}</text>
+      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="#14212B" text-anchor="middle" font-weight="700">${txt}</text>
     `;
   }).join('');
   const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${series.length > 15 ? 2.2 : 3.5}" fill="#fff" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
