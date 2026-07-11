@@ -6,6 +6,17 @@
 
 const CHART_COLORS = { brand: '#0B416B', accent: '#1E9A95', warn: '#B8792B', bad: '#B8433A', good: '#1E8A5F', purple: '#7C5CFC', line: '#DCE2DF' };
 
+// SVG usa viewBox fixo + width:100% — isso ESCALA o texto junto quando o
+// container encolhe. Um viewBox pensado pra desktop (ex: 1180) fica com
+// rótulo ilegível quando o CSS aperta ele num card de celular de ~320px.
+// A correção é usar um viewBox MENOR em telas pequenas (perto de 1:1 com o
+// container real), não só deixar o CSS encolher o mesmo desenho. Chame isso
+// antes de montar `opts` de qualquer chart que apareça num card full-width.
+function chartSize(desktopW, desktopH, mobileW, mobileH) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+  return isMobile ? { width: mobileW, height: mobileH } : { width: desktopW, height: desktopH };
+}
+
 function lineChartSVG(series, opts = {}) {
   const w = opts.width || 600, h = opts.height || 200, pad = 28;
   const fmt = opts.valueFormatter || formatMoney;

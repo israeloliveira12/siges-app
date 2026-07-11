@@ -224,6 +224,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 }
 .form-section-title:first-child { border-top: none; padding-top: 0; margin-top: 0; }
 
+/* Cabeçalho de seção recolhível (<details>/<summary>) — usado pra seções
+   menos prioritárias começarem fechadas no mobile sem mudar nada no
+   desktop (o JS decide o atributo `open` na hora de montar o HTML). */
+.dash-section-summary {
+  cursor: pointer; list-style: none; font-size: 14.5px; font-weight: 700;
+  padding: 4px 0; display: flex; align-items: center; gap: 6px; user-select: none;
+}
+.dash-section-summary::-webkit-details-marker { display: none; }
+.dash-section-summary::before { content: '\203A'; display: inline-block; transition: transform .15s; font-size: 18px; line-height: 1; }
+details[open] > .dash-section-summary::before { transform: rotate(90deg); }
+
 .toggle-row { display: flex; align-items: center; gap: 10px; }
 .switch { position: relative; width: 42px; height: 24px; flex: none; }
 .switch input { opacity: 0; width: 0; height: 0; }
@@ -486,6 +497,19 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   /* Colunas marcadas como secundárias somem no card mobile — evita poluir a
      tela pequena com todas as colunas da tabela desktop (contratos, clientes) */
   .table-scroll td.mobile-hide { display: none; }
+  /* Colunas de texto livre (ex: Descrição da Auditoria) ficam ilegíveis
+     alinhadas à direita quando o texto é longo o bastante pra quebrar linha
+     — aqui o rótulo sobe pra cima do valor e tudo alinha à esquerda, como
+     um parágrafo normal em vez de um par label:valor de uma linha só. */
+  .table-scroll td.wrap-text { flex-direction: column; align-items: flex-start; gap: 3px; }
+  .table-scroll td.wrap-text > * { text-align: left; }
 
   .field-row { flex-direction: column; gap: 0; }
+
+  /* Modal em tela cheia no celular — o respiro/borda arredondada de um
+     modal "flutuante" desktop só rouba espaço útil numa tela pequena,
+     principalmente com o teclado aberto pra preencher formulário. */
+  .modal-overlay { padding: 0; align-items: stretch; }
+  .modal { max-width: 100%; width: 100%; min-height: 100%; border-radius: 0; display: flex; flex-direction: column; }
+  .modal-body { flex: 1 1 auto; overflow-y: auto; }
 }

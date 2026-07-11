@@ -133,7 +133,7 @@ function paintLucroAnalitico(payments, contracts, bucket) {
     </div>
     <div class="card mt-14">
       <h3>Lucro por período (juros − taxa de saída dos contratos − taxas de entrada dos pagamentos)</h3>
-      <div class="mt-8">${series.length ? barChartSVG(series, { color: CHART_COLORS.accent }) : '<p class="text-soft text-sm">Sem movimento neste período.</p>'}</div>
+      <div class="mt-8">${series.length ? barChartSVG(series, { color: CHART_COLORS.accent, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem movimento neste período.</p>'}</div>
     </div>
     <div class="card mt-14" style="padding:0">
       <table class="data-table table-scroll">
@@ -169,11 +169,11 @@ function paintFluxoCaixa(payments, contracts, bucket) {
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Recebido por período</h3>
-        <div class="mt-8">${seriesIn.length ? lineChartSVG(seriesIn, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
+        <div class="mt-8">${seriesIn.length ? lineChartSVG(seriesIn, { color: CHART_COLORS.good, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
       </div>
       <div class="card">
         <h3>Novo capital emprestado por período</h3>
-        <div class="mt-8">${seriesOut.length ? lineChartSVG(seriesOut, { color: CHART_COLORS.brand }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
+        <div class="mt-8">${seriesOut.length ? lineChartSVG(seriesOut, { color: CHART_COLORS.brand, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
       </div>
     </div>
   `;
@@ -285,7 +285,7 @@ function paintLancamentosFuturos(installments, cycles) {
               <td data-label="Tipo"><span class="badge badge-brand">${i.tipo === 'parcela' ? 'Parcela' : 'Renovação'}</span></td>
               <td data-label="Data">${formatDate(i.data)}</td>
               <td data-label="Dias Restantes"><span class="badge ${diasColor}">${diasLabel}</span></td>
-              <td data-label="Descrição">${escapeHtml(i.descricao)}</td>
+              <td data-label="Descrição" class="wrap-text">${escapeHtml(i.descricao)}</td>
               <td data-label="Valor" class="mono">${formatMoney(i.valor)}</td>
               <td data-label="Referência">${i.contractNumber ? `<a href="#/gerente/contratos/${i.contractId}" class="reference-link">Contrato #${i.contractNumber} ${Icons.chevronRight}</a>` : '—'}</td>
             </tr>`;

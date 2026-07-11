@@ -205,6 +205,12 @@ async function renderGerenteDashboard() {
     trendSeries.push({ label: formatDate(day).slice(0, 5), value: trendByDay[day] || 0 });
   }
 
+  // No mobile a tela já fica longa (carteira, KPIs, ação do dia, visão
+  // geral, 3 gráficos, top clientes) — a seção de Projeção (menos usada no
+  // dia a dia que o resto) começa recolhida só em telas pequenas. Desktop
+  // continua sempre aberto, sem mudança visual nenhuma.
+  const dashProjectionsOpen = window.innerWidth > 640;
+
   root.innerHTML = `
     <div class="card" style="background:var(--brand);color:#fff;border:none;padding:22px 24px">
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>
@@ -291,19 +297,22 @@ async function renderGerenteDashboard() {
 
     <div class="card mt-14">
       <h3>Recebido — últimos 30 dias</h3>
-      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? areaChartSVG(trendSeries, { color: CHART_COLORS.good, gradId: 'recebido30', width: 1180, height: 260 }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
+      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? areaChartSVG(trendSeries, { color: CHART_COLORS.good, gradId: 'recebido30', ...chartSize(1180, 260, 320, 200) }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
     </div>
 
-    <div class="grid grid-2 mt-14">
-      <div class="card">
-        <h3>Projeção de Recebimentos (6 meses)</h3>
-        <div class="mt-8">${areaChartSVG(projectionSeries, { color: CHART_COLORS.purple, gradId: 'receb' })}</div>
+    <details class="mt-14" ${dashProjectionsOpen ? 'open' : ''}>
+      <summary class="dash-section-summary">Projeção (6 meses)</summary>
+      <div class="grid grid-2 mt-14">
+        <div class="card">
+          <h3>Projeção de Recebimentos (6 meses)</h3>
+          <div class="mt-8">${areaChartSVG(projectionSeries, { color: CHART_COLORS.purple, gradId: 'receb', ...chartSize(600, 220, 320, 200) })}</div>
+        </div>
+        <div class="card">
+          <h3>Projeção de Lucro (6 meses)</h3>
+          <div class="mt-8">${areaChartSVG(profitSeries, { color: CHART_COLORS.good, gradId: 'lucro', ...chartSize(600, 220, 320, 200) })}</div>
+        </div>
       </div>
-      <div class="card">
-        <h3>Projeção de Lucro (6 meses)</h3>
-        <div class="mt-8">${areaChartSVG(profitSeries, { color: CHART_COLORS.good, gradId: 'lucro' })}</div>
-      </div>
-    </div>
+    </details>
 
     <div class="card mt-14">
       <h3>Top clientes por saldo em aberto</h3>
