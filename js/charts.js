@@ -80,11 +80,18 @@ function areaChartSVG(series, opts = {}) {
     return `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${w - pad}" y2="${yy.toFixed(1)}" stroke="${CHART_COLORS.line}" stroke-width="1"/>`;
   }).join('');
 
-  const labels = series.map((p, i) => `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>`).join('');
+  // Mesmo critério de esparsamento do barChartSVG/lineChartSVG — com séries
+  // longas (ex: 30 dias) mostrar rótulo em todo ponto vira poluição visual
+  // ilegível, então só 1 a cada N pontos ganha rótulo estático (o valor
+  // continua acessível via <title> no ponto, ao passar o mouse).
+  const shouldShowLabel = (i) => series.length <= 10 || i % Math.ceil(series.length / 8) === 0;
+
+  const labels = series.map((p, i) => shouldShowLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>` : '').join('');
   // Rótulo de valor: sempre acima do ponto, com halo branco atrás e cor fixa
   // (--ink), nunca a mesma cor da linha — testado com valores caindo exatamente
   // sobre a linha e ficando ilegíveis quando usavam a mesma cor.
   const valueLabels = series.map((p, i) => {
+    if (!shouldShowLabel(i)) return '';
     const ly = Math.max(12, y(p.value) - 12).toFixed(1);
     const txt = escapeHtml(fmt(p.value));
     return `
@@ -92,7 +99,7 @@ function areaChartSVG(series, opts = {}) {
       <text x="${x(i).toFixed(1)}" y="${ly}" font-size="10.5" fill="#14212B" text-anchor="middle" font-weight="700">${txt}</text>
     `;
   }).join('');
-  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5" fill="#fff" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
+  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${series.length > 15 ? 2.2 : 3.5}" fill="#fff" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
 
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">
     <defs>

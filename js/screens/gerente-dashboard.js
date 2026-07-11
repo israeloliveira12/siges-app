@@ -47,6 +47,7 @@ async function renderGerenteDashboard() {
     { data: cyclesSoon },
     { data: entryFeesMonth },
     { data: exitFeesMonth },
+    { data: exitFeesPrevPeriod },
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received, net_profit').gte('received_at', monthStart),
@@ -58,14 +59,27 @@ async function renderGerenteDashboard() {
     supa.from('renewal_cycles').select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
     supa.from('payments').select('operational_fee_amount').eq('has_operational_fee', true).gte('received_at', monthStart),
     supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('created_at', monthStart),
+    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('created_at', prevMonthStart).lte('created_at', prevMonthEnd),
   ]);
 
   const sum = (rows, field) => (rows || []).reduce((s, r) => s + Number(r[field] || 0), 0);
   const recebidoHoje = sum(paymentsToday, 'amount_received');
   const recebidoMes = sum(paymentsMonth, 'amount_received');
-  const lucroMes = sum(paymentsMonth, 'net_profit');
   const recebidoPrevPeriod = sum(paymentsPrevPeriod, 'amount_received');
-  const lucroPrevPeriod = sum(paymentsPrevPeriod, 'net_profit');
+  // Lucro líquido = payments.net_profit (juros − taxa de ENTRADA, já embutido
+  // na coluna gerada) MENOS a taxa de SAÍDA dos contratos criados no período
+  // — essa segunda parte NÃO está em net_profit (é cobrada uma vez, na
+  // criação do contrato, tabela loan_contracts, não payments). Sem essa
+  // subtração o card de lucro líquido do dashboard divergia do que
+  // Relatórios (Lucro Analítico/Fluxo de Caixa/Analítico) mostrava pro MESMO
+  // mês — os três já subtraem taxa de saída corretamente, só o dashboard
+  // esquecia (bug real reportado pelo usuário, 2026-07-11). O ajuste do
+  // período anterior (`taxaSaidaPrevPeriod`) existe pra comparação ▲/▼ do
+  // trend badge não ficar comparando "ajustado" com "não ajustado".
+  const taxaSaidaMes = sum(exitFeesMonth, 'operational_fee_amount');
+  const taxaSaidaPrevPeriod = sum(exitFeesPrevPeriod, 'operational_fee_amount');
+  const lucroMes = sum(paymentsMonth, 'net_profit') - taxaSaidaMes;
+  const lucroPrevPeriod = sum(paymentsPrevPeriod, 'net_profit') - taxaSaidaPrevPeriod;
   const vencidosHoje = (dueSoon || []).filter((i) => i.due_date === today);
   // Compara due_date direto (não confia só na coluna status) — o cron que
   // marca status='atrasada' roda 1x/dia, então uma parcela vencida há poucas
@@ -152,12 +166,11 @@ async function renderGerenteDashboard() {
     return { label: mesesPt[Number(m) - 1] + '/' + y, value: Math.max(0, value) };
   });
 
-  // Taxas operacionais efetivamente cobradas no mês corrente — entrada (a
-  // cada recebimento que optou por cobrar) + saída (contratos criados este
-  // mês que optaram por cobrar). Ambas já compõem o lucro líquido registrado
-  // em cada operação; aqui só somamos pra dar visibilidade agregada mensal.
+  // Taxa de entrada efetivamente cobrada no mês corrente (a cada recebimento
+  // que optou por cobrar) — já compõe o net_profit de cada payment; aqui só
+  // soma pra dar visibilidade agregada mensal na nota do card de lucro
+  // (taxaSaidaMes já foi calculada mais acima, usada no próprio lucroMes).
   const taxaEntradaMes = sum(entryFeesMonth, 'operational_fee_amount');
-  const taxaSaidaMes = sum(exitFeesMonth, 'operational_fee_amount');
 
   // Top clientes por saldo em aberto — soma o que falta de cada parcela
   // (amount_due menos o que já foi pago parcialmente) + ciclos de renovação
@@ -278,7 +291,7 @@ async function renderGerenteDashboard() {
 
     <div class="card mt-14">
       <h3>Recebido — últimos 30 dias</h3>
-      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good, width: 1180, height: 260 }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
+      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? areaChartSVG(trendSeries, { color: CHART_COLORS.good, gradId: 'recebido30', width: 1180, height: 260 }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
     </div>
 
     <div class="grid grid-2 mt-14">
