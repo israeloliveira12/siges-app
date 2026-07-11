@@ -102,10 +102,6 @@ button { cursor: pointer; }
 .sidebar-logo .sub { font-size: 10.5px; color: rgba(255,255,255,.55); letter-spacing: .08em; text-transform: uppercase; }
 
 .nav-group { margin-bottom: 14px; }
-.nav-group-label {
-  font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
-  color: rgba(255,255,255,.4); padding: 10px 12px 6px;
-}
 
 .nav-link {
   display: flex; align-items: center; gap: 10px;
@@ -139,19 +135,13 @@ button { cursor: pointer; }
    Cards / painéis
 --------------------------------------------------------------------------- */
 
-.card, .panel {
+.card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  padding: 16px 18px;
 }
-.card { padding: 16px 18px; }
-.panel-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid var(--line);
-}
-.panel-head h3 { font-size: 14.5px; }
-.panel-body { padding: 16px 18px; }
 
 .grid { display: grid; gap: 14px; }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
@@ -426,7 +416,6 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .text-soft { color: var(--ink-soft); }
 .text-sm { font-size: 12.5px; }
 .text-center { text-align: center; }
-.w-full { width: 100%; }
 .hidden { display: none !important; }
 
 .screen { display: none; }

@@ -1,6 +1,7 @@
 /* ============================================================================
    Web Push — registro do service worker + inscrição via VAPID
-   (o envio de verdade, assinado com a chave privada, acontece em /api/send-push.js)
+   (o envio de verdade, assinado com a chave privada, acontece em
+   api/_lib/webpush.js, chamado direto por notify-event.js e cron-daily-check.js)
    ============================================================================ */
 
 // Chave pública VAPID (gerada uma vez para este projeto — é pública por design,

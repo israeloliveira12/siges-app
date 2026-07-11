@@ -11,22 +11,6 @@ const App = {
   unreadCount: 0,
 };
 
-function localKey(suffix) {
-  const uidPart = App.session ? App.session.user.id : 'anon';
-  return 'siges_v1_' + uidPart + '_' + suffix;
-}
-
-function cacheSet(key, value) {
-  try { localStorage.setItem(localKey(key), JSON.stringify(value)); } catch (e) { /* storage indisponível, segue sem cache */ }
-}
-
-function cacheGet(key) {
-  try {
-    const raw = localStorage.getItem(localKey(key));
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) { return null; }
-}
-
 function isGerente() {
   return !!App.profile && App.profile.role === 'gerente';
 }

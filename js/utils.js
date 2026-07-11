@@ -104,10 +104,6 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-function uid() {
-  return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
 function statusBadge(kind, label) {
   const map = {
     pendente: 'badge-warn', em_aberto: 'badge-brand', atrasado: 'badge-bad', atrasada: 'badge-bad',
