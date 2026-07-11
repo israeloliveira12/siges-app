@@ -56,10 +56,19 @@ function openEditGerenteModal(gerente) {
       <div class="modal-body">
         <div id="eg-feedback"></div>
         <div class="field"><label>Nome completo</label><input type="text" id="eg-name" value="${escapeHtml(gerente.full_name || '')}"></div>
+        <div class="field"><label>E-mail (login)</label><input type="email" id="eg-email" value="${escapeHtml(gerente.email || '')}"></div>
         <div class="field"><label>Telefone</label><input type="tel" id="eg-phone" placeholder="(00) 00000-0000" value="${escapeHtml(formatPhoneBR(gerente.phone || ''))}"></div>
         <div class="toggle-row">
           <label class="switch"><input type="checkbox" id="eg-active" ${gerente.active ? 'checked' : ''} ${gerente.is_primary_admin ? 'disabled' : ''}><span class="track"></span></label>
           <span>Conta ativa${gerente.is_primary_admin ? ' (o Administrador não pode ser desativado por aqui)' : ''}</span>
+        </div>
+        <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
+          <label>Redefinir senha</label>
+          <div class="flex gap-8 mt-8" style="align-items:flex-start">
+            <div style="flex:1">${passwordFieldHtml('eg-reset-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
+            <button type="button" class="btn btn-outline btn-sm" id="eg-reset-password-btn" style="flex:none">Redefinir</button>
+          </div>
+          <div id="eg-reset-password-feedback" class="mt-8"></div>
         </div>
       </div>
       <div class="modal-foot">
@@ -72,24 +81,66 @@ function openEditGerenteModal(gerente) {
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   attachPhoneMask(document.getElementById('eg-phone'));
+  wirePasswordToggles(overlay);
+
+  document.getElementById('eg-reset-password-btn').onclick = async () => {
+    const feedback = document.getElementById('eg-reset-password-feedback');
+    const input = document.getElementById('eg-reset-password');
+    const newPassword = input.value;
+    feedback.innerHTML = '';
+    if (newPassword.length < 6) { feedback.innerHTML = `<div class="auth-error">A senha precisa ter pelo menos 6 caracteres.</div>`; return; }
+    const btn = document.getElementById('eg-reset-password-btn');
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/reset-client-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + App.session.access_token },
+        body: JSON.stringify({ user_id: gerente.id, new_password: newPassword }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || 'Falha ao redefinir a senha.');
+      logAudit('senha_redefinida', `Senha redefinida para o gerente ${gerente.full_name || gerente.email}`, { gerente_id: gerente.id });
+      input.value = '';
+      feedback.innerHTML = `<div class="auth-success">Senha redefinida com sucesso.</div>`;
+      showToast('Senha do gerente redefinida.');
+    } catch (e) {
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
   document.getElementById('save-modal').onclick = async () => {
+    const feedback = document.getElementById('eg-feedback');
+    feedback.innerHTML = '';
     const btn = document.getElementById('save-modal');
     btn.disabled = true;
-    const { error } = await supa.rpc('update_gerente_profile', {
-      p_gerente_id: gerente.id,
-      p_full_name: document.getElementById('eg-name').value.trim(),
-      p_phone: document.getElementById('eg-phone').value.replace(/\D/g, '') || null,
-      p_active: gerente.is_primary_admin ? true : document.getElementById('eg-active').checked,
-    });
-    if (error) {
-      document.getElementById('eg-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+    try {
+      const newEmail = document.getElementById('eg-email').value.trim().toLowerCase();
+      if (newEmail && newEmail !== (gerente.email || '').toLowerCase()) {
+        const resp = await fetch('/api/update-user-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + App.session.access_token },
+          body: JSON.stringify({ user_id: gerente.id, new_email: newEmail }),
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.error || 'Falha ao atualizar o e-mail.');
+      }
+      const { error } = await supa.rpc('update_gerente_profile', {
+        p_gerente_id: gerente.id,
+        p_full_name: document.getElementById('eg-name').value.trim(),
+        p_phone: document.getElementById('eg-phone').value.replace(/\D/g, '') || null,
+        p_active: gerente.is_primary_admin ? true : document.getElementById('eg-active').checked,
+      });
+      if (error) throw error;
+      logAudit('gerente_editado', `Gerente ${gerente.full_name || gerente.email} editado`, { gerente_id: gerente.id });
+      close();
+      showToast('Gerente atualizado.');
+      renderGerenteGerentes();
+    } catch (e) {
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
       btn.disabled = false;
-      return;
     }
-    logAudit('gerente_editado', `Gerente ${gerente.full_name || gerente.email} editado`, { gerente_id: gerente.id });
-    close();
-    showToast('Gerente atualizado.');
-    renderGerenteGerentes();
   };
 }
 

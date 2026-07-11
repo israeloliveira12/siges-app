@@ -34,21 +34,25 @@ function buildWhatsappUrl(item) {
     ? `Efetue o pagamento da sua parcela atrasada (${diasAtraso} dia${diasAtraso > 1 ? 's' : ''} de atraso)`
     : 'Sua parcela vence hoje — efetue o pagamento para evitar atraso';
 
+  // IMPORTANTE: linhas de espaçamento intencionais são string vazia (''),
+  // linhas CONDICIONAIS que devem sumir são `null` — nunca usar '' pras
+  // duas coisas ao mesmo tempo. Um bug antigo usava `.filter(Boolean)`, que
+  // remove '' também, e sem querer engolia os parágrafos em branco pedidos
+  // pelo usuário (o texto saía tudo grudado, sem separação visual).
   const texto = [
-    '*Cobrança de Pagamento*',
+    '*Lembrete de Pagamento*',
     '',
-    `*Empresa:* ${(App.settings && App.settings.company_name) || 'Siges Serviços Financeiros'}`,
     `*Cliente:* ${p.full_name || ''}`,
     `*Contrato:* ${(item.contract || {}).contract_number || ''}`,
     `*Parcela* ${parcelaLabel}`,
     `*Valor da Parcela:* ${formatMoney(item.amount)}`,
-    diasAtraso > 0 && encargoAtraso > 0 ? `*Juros + multa por atraso:* ${formatMoney(encargoAtraso)}` : '',
-    diasAtraso > 0 && encargoAtraso > 0 ? `*Valor atualizado a pagar:* ${formatMoney(valorAtualizado)}` : '',
+    diasAtraso > 0 && encargoAtraso > 0 ? `*Juros + multa por atraso:* ${formatMoney(encargoAtraso)}` : null,
+    diasAtraso > 0 && encargoAtraso > 0 ? `*Valor atualizado a pagar:* ${formatMoney(valorAtualizado)}` : null,
     `*Data Vencimento:* ${formatDateShortYear(item.due_date)}`,
     `*Chave Pix:* ${(App.settings && App.settings.company_pix_key) || '—'}`,
     '',
     `*Atenção:* ${atencao}`,
-  ].filter(Boolean).join('\n');
+  ].filter((linha) => linha !== null).join('\n');
 
   return `https://wa.me/${withCountry}?text=${encodeURIComponent(texto)}`;
 }

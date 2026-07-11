@@ -116,7 +116,12 @@ function barChartSVG(series, opts = {}) {
   const max = Math.max(1, ...series.map((p) => p.value)) * 1.15;
   const barW = (w - pad * 2) / series.length * 0.6;
   const gap = (w - pad * 2) / series.length;
-  const showStaticLabels = series.length <= 15;
+  // Com muitas barras (ex: 30 dias), mostrar rótulo em toda barra vira uma
+  // faixa ilegível de texto sobreposto — mesmo padrão de espaçamento do
+  // lineChartSVG: só mostra 1 a cada N pontos quando a série é longa. Usa o
+  // MESMO critério pro rótulo de valor (em cima da barra) e pro rótulo do
+  // eixo X, senão um mostraria mais pontos que o outro sem razão.
+  const shouldShowLabel = (i) => series.length <= 10 || i % Math.ceil(series.length / 8) === 0;
 
   const bars = series.map((p, i) => {
     const bh = ((p.value / max) * (h - pad * 2));
@@ -127,15 +132,12 @@ function barChartSVG(series, opts = {}) {
       <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(bh, 1).toFixed(1)}" rx="3" fill="${color}">
         <title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title>
       </rect>
-      ${showStaticLabels ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${Math.max(by - 5, 10).toFixed(1)}" font-size="9.5" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
+      ${shouldShowLabel(i) ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${Math.max(by - 5, 10).toFixed(1)}" font-size="9.5" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
     `;
   }).join('');
 
-  // Com muitas barras (ex: 30 dias), mostrar rótulo em toda barra vira uma
-  // faixa ilegível de texto sobreposto — mesmo padrão de espaçamento do
-  // lineChartSVG: só mostra 1 a cada N rótulos quando série é longa.
   const labels = series.map((p, i) => {
-    if (series.length > 10 && i % Math.ceil(series.length / 8) !== 0) return '';
+    if (!shouldShowLabel(i)) return '';
     const bx = pad + i * gap + gap / 2;
     return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
   }).join('');

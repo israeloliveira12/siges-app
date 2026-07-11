@@ -33,3 +33,13 @@ export async function getCallerProfile(accessToken) {
   if (!profileRes.ok || !Array.isArray(profileRes.data) || !profileRes.data.length) return null;
   return profileRes.data[0];
 }
+
+// Busca o profile de um usuário-ALVO (não quem chama) — usado por
+// endpoints que editam OUTRA conta (reset de senha, troca de e-mail), pra
+// checar se o alvo é um gerente antes de decidir se o caller precisa ser
+// is_primary_admin (só o admin primário mexe em conta de gerente).
+export async function getTargetProfile(userId) {
+  const res = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${userId}&select=id,role,is_primary_admin`, { method: 'GET' });
+  if (!res.ok || !Array.isArray(res.data) || !res.data.length) return null;
+  return res.data[0];
+}

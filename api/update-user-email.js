@@ -7,7 +7,7 @@
    Body: { user_id, new_email }
    ============================================================================ */
 
-import { supabaseAdminFetch, getCallerProfile } from './_lib/supabaseAdmin.js';
+import { supabaseAdminFetch, getCallerProfile, getTargetProfile } from './_lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Método não permitido' }); return; }
@@ -21,6 +21,15 @@ export default async function handler(req, res) {
 
   const { user_id, new_email } = req.body || {};
   if (!user_id || !new_email) { res.status(400).json({ error: 'Parâmetros inválidos.' }); return; }
+
+  // Trocar o e-mail de login de OUTRO gerente é exclusivo do admin primário
+  // — mesmo raciocínio do reset de senha (evita um gerente secundário
+  // sequestrar a conta de outro administrador).
+  const target = await getTargetProfile(user_id);
+  if (target && target.role === 'gerente' && !caller.is_primary_admin) {
+    res.status(403).json({ error: 'Apenas o Administrador pode alterar o e-mail de uma conta de gerente.' });
+    return;
+  }
 
   const email = String(new_email).trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

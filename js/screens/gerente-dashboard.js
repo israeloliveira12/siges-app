@@ -279,7 +279,7 @@ async function renderGerenteDashboard() {
 
     <div class="card mt-14">
       <h3>Recebido — últimos 30 dias</h3>
-      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
+      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good, width: 1180, height: 260 }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
     </div>
 
     <div class="card mt-14">

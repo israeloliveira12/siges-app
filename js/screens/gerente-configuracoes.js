@@ -206,9 +206,10 @@ function openWipeDataModal() {
       <div class="modal-head"><h3 style="color:var(--bad)">Apagar todos os dados</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
       <div class="modal-body">
         <p class="text-sm">Isso vai apagar <strong>permanentemente</strong>: todos os clientes, solicitações, contratos, parcelas, pagamentos, ciclos de renovação e notificações. Contas de administrador continuam intactas.</p>
-        <p class="text-sm mt-8">Para confirmar, digite <strong>APAGAR TUDO</strong> no campo abaixo.</p>
+        <p class="text-sm mt-8">Para confirmar, digite <strong>APAGAR TUDO</strong> e informe sua senha de Administrador.</p>
         <div id="wipe-feedback"></div>
         <div class="field mt-8"><input type="text" id="wipe-confirm-text" placeholder="APAGAR TUDO"></div>
+        <div class="field"><label>Sua senha</label>${passwordFieldHtml('wipe-password', 'placeholder="Senha do Administrador"')}</div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
@@ -219,6 +220,7 @@ function openWipeDataModal() {
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
+  wirePasswordToggles(overlay);
   document.getElementById('confirm-wipe').onclick = async () => {
     const feedback = document.getElementById('wipe-feedback');
     feedback.innerHTML = '';
@@ -226,9 +228,20 @@ function openWipeDataModal() {
       feedback.innerHTML = '<div class="auth-error">Digite exatamente "APAGAR TUDO" para confirmar.</div>';
       return;
     }
+    const password = document.getElementById('wipe-password').value;
+    if (!password) {
+      feedback.innerHTML = '<div class="auth-error">Informe sua senha de Administrador.</div>';
+      return;
+    }
     const btn = document.getElementById('confirm-wipe');
     btn.disabled = true;
     try {
+      // Confirma a senha reautenticando o próprio admin — é o jeito padrão
+      // do Supabase Auth de verificar "a senha atual está certa?" sem
+      // precisar de um endpoint dedicado (mesmo usuário, só revalida).
+      const { error: authError } = await supa.auth.signInWithPassword({ email: App.session.user.email, password });
+      if (authError) throw new Error('Senha incorreta.');
+
       const resp = await fetch('/api/wipe-all-data', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + App.session.access_token },

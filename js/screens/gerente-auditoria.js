@@ -35,14 +35,20 @@ function auditActionBadgeColor(action) {
 
 let auditActorFilter = 'todos';
 let auditActionFilter = 'todos';
+// Quantidade de eventos buscados do banco — não só escondidos no cliente,
+// pra tela não ficar lenta conforme o histórico crescer. 'todos' ainda usa
+// um teto (2000) pra nunca puxar a tabela inteira sem limite nenhum.
+let auditPageSize = 20;
+const AUDIT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 async function renderGerenteAuditoria() {
   const root = document.getElementById('screen-gerente-auditoria');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
+  const fetchLimit = auditPageSize === 'todos' ? 2000 : auditPageSize;
   const [{ data: admins }, { data: logs, error }] = await Promise.all([
     supa.from('profiles').select('id, full_name').eq('role', 'gerente').order('full_name'),
-    supa.from('audit_log').select('*').order('created_at', { ascending: false }).limit(300),
+    supa.from('audit_log').select('*').order('created_at', { ascending: false }).limit(fetchLimit),
   ]);
 
   if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
@@ -80,6 +86,13 @@ function paintAuditoria(root, { admins, logs }) {
             ${actionsPresent.map((a) => `<option value="${a}" ${auditActionFilter === a ? 'selected' : ''}>${escapeHtml(auditActionLabel(a))}</option>`).join('')}
           </select>
         </div>
+        <div class="field" style="min-width:160px;margin-bottom:0">
+          <label>Exibir</label>
+          <select id="aud-page-size">
+            ${AUDIT_PAGE_SIZE_OPTIONS.map((n) => `<option value="${n}" ${auditPageSize === n ? 'selected' : ''}>Exibir ${n}</option>`).join('')}
+            <option value="todos" ${auditPageSize === 'todos' ? 'selected' : ''}>Exibir tudo</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -103,6 +116,10 @@ function paintAuditoria(root, { admins, logs }) {
 
   document.getElementById('aud-actor').onchange = (e) => { auditActorFilter = e.target.value; paintAuditoria(root, { admins, logs }); };
   document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { admins, logs }); };
+  document.getElementById('aud-page-size').onchange = (e) => {
+    auditPageSize = e.target.value === 'todos' ? 'todos' : Number(e.target.value);
+    renderGerenteAuditoria();
+  };
 }
 
 registerRoute('gerente/auditoria', { role: 'gerente', screenId: 'gerente-auditoria', title: 'Auditoria', render: renderGerenteAuditoria });

@@ -244,7 +244,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   padding: 9px 16px; border-radius: var(--radius-sm); border: 1px solid transparent;
-  font-weight: 600; font-size: 13.5px; white-space: nowrap;
+  font-weight: 600; font-size: 13.5px; white-space: nowrap; text-decoration: none;
 }
 .btn svg { width: 15px; height: 15px; }
 .btn-primary { background: var(--brand); color: #fff; }

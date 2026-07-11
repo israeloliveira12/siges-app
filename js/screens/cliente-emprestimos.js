@@ -2,30 +2,54 @@
    Cliente — Meus empréstimos (em andamento e finalizados)
    ============================================================================ */
 
+let clienteEmprestimosTab = 'aberto'; // 'aberto' | 'finalizados'
+
 async function renderClienteEmprestimos() {
   const root = document.getElementById('screen-cliente-emprestimos');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
   const clientId = App.session.user.id;
-  const { data: contracts, error } = await supa
+  const { data: allContracts, error } = await supa
     .from('loan_contracts')
     .select('*')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false });
 
   if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
-  if (!contracts || !contracts.length) {
+  if (!allContracts || !allContracts.length) {
     root.innerHTML = `<div class="empty-state">${Icons.contract}<p>Você ainda não tem empréstimos.</p></div>`;
     return;
   }
 
-  const ids = contracts.map((c) => c.id);
+  const ids = allContracts.map((c) => c.id);
   const [{ data: installments }, { data: cycles }] = await Promise.all([
     supa.from('installments').select('*').in('contract_id', ids).order('sequence_number'),
     supa.from('renewal_cycles').select('*').in('contract_id', ids).order('cycle_number'),
   ]);
 
-  root.innerHTML = contracts.map((c) => {
+  paintClienteEmprestimos(root, allContracts, installments || [], cycles || []);
+}
+
+function paintClienteEmprestimos(root, allContracts, installments, cycles) {
+  const contracts = allContracts.filter((c) => {
+    const isFinalizado = c.status === 'quitado' || c.status === 'perda';
+    return clienteEmprestimosTab === 'aberto' ? !isFinalizado : isFinalizado;
+  });
+
+  const tabsHtml = `
+    <div class="flex gap-8">
+      <button class="btn btn-sm ${clienteEmprestimosTab === 'aberto' ? 'btn-primary' : 'btn-outline'}" id="tab-emp-aberto">Em aberto</button>
+      <button class="btn btn-sm ${clienteEmprestimosTab === 'finalizados' ? 'btn-primary' : 'btn-outline'}" id="tab-emp-finalizados">Finalizados</button>
+    </div>`;
+
+  if (!contracts.length) {
+    root.innerHTML = tabsHtml + `<div class="empty-state mt-14">${Icons.contract}<p>Nenhum empréstimo ${clienteEmprestimosTab === 'aberto' ? 'em aberto' : 'finalizado'}.</p></div>`;
+    document.getElementById('tab-emp-aberto').onclick = () => { clienteEmprestimosTab = 'aberto'; paintClienteEmprestimos(root, allContracts, installments, cycles); };
+    document.getElementById('tab-emp-finalizados').onclick = () => { clienteEmprestimosTab = 'finalizados'; paintClienteEmprestimos(root, allContracts, installments, cycles); };
+    return;
+  }
+
+  root.innerHTML = tabsHtml + contracts.map((c) => {
     const inst = (installments || []).filter((i) => i.contract_id === c.id);
     const cyc = (cycles || []).filter((r) => r.contract_id === c.id);
     const statusLabel = { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Em cobrança' }[c.status];
@@ -67,6 +91,9 @@ async function renderClienteEmprestimos() {
       </table>
     </div>`;
   }).join('');
+
+  document.getElementById('tab-emp-aberto').onclick = () => { clienteEmprestimosTab = 'aberto'; paintClienteEmprestimos(root, allContracts, installments, cycles); };
+  document.getElementById('tab-emp-finalizados').onclick = () => { clienteEmprestimosTab = 'finalizados'; paintClienteEmprestimos(root, allContracts, installments, cycles); };
 
   root.querySelectorAll('.extrato-btn').forEach((btn) => {
     btn.onclick = async () => {
