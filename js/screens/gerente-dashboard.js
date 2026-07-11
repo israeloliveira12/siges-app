@@ -54,8 +54,8 @@ async function renderGerenteDashboard() {
     supa.from('loan_contracts').select('status, created_at'),
     supa.from('payments').select('amount_received, received_at').gte('received_at', trend30Start),
     supa.from('loan_requests').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
-    supa.from('installments').select('amount_due, due_date, status, interest_share, principal_paid_partial, interest_paid_partial, loan_contracts!installments_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
-    supa.from('renewal_cycles').select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
+    supa.from('installments').select('amount_due, due_date, status, principal_share, interest_share, principal_paid_partial, interest_paid_partial, loan_contracts!installments_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
+    supa.from('renewal_cycles').select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
     supa.from('payments').select('operational_fee_amount').eq('has_operational_fee', true).gte('received_at', monthStart),
     supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('created_at', monthStart),
   ]);
@@ -78,6 +78,22 @@ async function renderGerenteDashboard() {
   const openContracts = statusCounts.em_aberto + statusCounts.atrasado;
   const finishedContracts = statusCounts.quitado + statusCounts.perda;
   const newThisMonth = (contractsStatus || []).filter((c) => String(c.created_at).slice(0, 7) === today.slice(0, 7)).length;
+  const newPrevPeriod = (contractsStatus || []).filter((c) => {
+    const d = String(c.created_at).slice(0, 10);
+    return d >= prevMonthStart && d <= prevMonthEnd;
+  }).length;
+
+  // Carteira ativa — capital (não saldo com juros) ainda emprestado, ou seja,
+  // não recuperado ainda. Parcelas: principal_share menos o que já foi pago
+  // parcialmente. Ciclos de renovação: a renovação só rola/quita JUROS (ver
+  // renew_installment no schema), o capital original do contrato continua
+  // intacto e em aberto, então usa-se loan_contracts.principal_amount do
+  // ciclo — nunca full_debt_amount, que já embute juros acumulados.
+  const principalOutstanding = (rows) => (rows || []).reduce((s, i) => s + Number(i.principal_share || 0) - Number(i.principal_paid_partial || 0), 0);
+  const principalFromCycles = (rows) => (rows || []).reduce((s, c) => s + Number((c.loan_contracts || {}).principal_amount || 0), 0);
+  const carteiraAtiva = principalOutstanding(dueSoon) + principalFromCycles(cyclesSoon);
+  const carteiraEmAtraso = principalOutstanding(atrasados) + principalFromCycles((cyclesSoon || []).filter((c) => c.new_due_date < today));
+  const pctCarteiraAtraso = carteiraAtiva > 0 ? (carteiraEmAtraso / carteiraAtiva) * 100 : 0;
 
   // Projeção de recebimentos — soma parcelas + ciclos de renovação em aberto
   // (pendente/atrasada) nos próximos 6 meses, agrupados por mês.
@@ -181,6 +197,20 @@ async function renderGerenteDashboard() {
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>
       <div class="mono" style="font-size:32px;font-weight:800;margin-top:6px">${formatMoney(lucroMes)}</div>
       <div style="font-size:13px;margin-top:8px;opacity:.95">${trendBadgeHtml(lucroMes, lucroPrevPeriod, true)} <span style="opacity:.8">vs. mesmo período do mês passado</span></div>
+      <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)</div>
+    </div>
+
+    <div class="grid grid-2 mt-14">
+      <div class="card stat-card">
+        <div class="label">Carteira ativa (capital emprestado)</div>
+        <div class="value mono">${formatMoney(carteiraAtiva)}</div>
+        <div class="text-sm text-soft mt-8">Capital ainda não recuperado, em parcelas e renovações abertas</div>
+      </div>
+      <div class="card stat-card" style="border-top:3px solid ${pctCarteiraAtraso >= 20 ? 'var(--bad)' : 'var(--line)'}">
+        <div class="label">Carteira em atraso</div>
+        <div class="value mono" style="color:${pctCarteiraAtraso >= 20 ? 'var(--bad)' : 'var(--ink)'}">${formatNumber(pctCarteiraAtraso, 1)}%</div>
+        <div class="text-sm text-soft mt-8">${formatMoney(carteiraEmAtraso)} do capital ativo em atraso</div>
+      </div>
     </div>
 
     <div class="grid grid-4 mt-14">
@@ -200,48 +230,6 @@ async function renderGerenteDashboard() {
       <div class="card stat-card">
         <div class="label">A receber</div>
         <div class="value mono">${formatMoney(receberTotal)}</div>
-      </div>
-    </div>
-
-    <h3 class="mt-20">Taxas operacionais pagas — mês</h3>
-    <p class="text-sm text-soft">Custo que já está descontado do lucro líquido acima — taxa de entrada (recebimentos) e de saída (novos contratos) pagas este mês</p>
-    <div class="grid grid-3 mt-14">
-      <div class="card stat-card">
-        <div class="label">Taxa de entrada</div>
-        <div class="value mono">${formatMoney(taxaEntradaMes)}</div>
-        <div class="text-sm text-soft mt-8">Paga nos recebimentos do mês</div>
-      </div>
-      <div class="card stat-card">
-        <div class="label">Taxa de saída</div>
-        <div class="value mono">${formatMoney(taxaSaidaMes)}</div>
-        <div class="text-sm text-soft mt-8">Paga em contratos novos do mês</div>
-      </div>
-      <div class="card stat-card" style="border-top:3px solid var(--warn)">
-        <div class="label">Total pago em taxas — mês</div>
-        <div class="value mono">${formatMoney(taxaEntradaMes + taxaSaidaMes)}</div>
-        <div class="text-sm text-soft mt-8">Reduz o lucro líquido (juros − taxas)</div>
-      </div>
-    </div>
-
-    <h3 class="mt-20">Visão geral dos contratos</h3>
-    <p class="text-sm text-soft">Acompanhe o status e performance dos seus contratos</p>
-    <div class="grid grid-3 mt-14">
-      <div class="card stat-card overview-card" style="border-top:3px solid var(--good)" onclick="router.navigate('#/gerente/contratos')">
-        <div class="label">Em andamento</div>
-        <div class="value mono">${openContracts || 0}</div>
-        <div class="text-sm text-soft mt-8">Contratos ativos e em execução</div>
-        <span class="text-sm overview-card-link">Ver todos ${Icons.chevronRight}</span>
-      </div>
-      <div class="card stat-card overview-card" style="border-top:3px solid var(--brand)" onclick="router.navigate('#/gerente/contratos')">
-        <div class="label">Finalizados</div>
-        <div class="value mono">${finishedContracts || 0}</div>
-        <div class="text-sm text-soft mt-8">Contratos concluídos ou em perda</div>
-        <span class="text-sm overview-card-link">Ver todos ${Icons.chevronRight}</span>
-      </div>
-      <div class="card stat-card" style="border-top:3px solid var(--warn)">
-        <div class="label">Novos do mês</div>
-        <div class="value mono">${newThisMonth || 0}</div>
-        <div class="text-sm text-soft mt-8">Contratos criados este mês</div>
       </div>
     </div>
 
@@ -266,6 +254,33 @@ async function renderGerenteDashboard() {
       </div>
     </div>
 
+    <h3 class="mt-20">Visão geral dos contratos</h3>
+    <p class="text-sm text-soft">Acompanhe o status e performance dos seus contratos</p>
+    <div class="grid grid-3 mt-14">
+      <div class="card stat-card overview-card" onclick="router.navigate('#/gerente/contratos')">
+        <div class="label">Em andamento</div>
+        <div class="value mono">${openContracts || 0}</div>
+        <div class="text-sm text-soft mt-8">Contratos ativos e em execução</div>
+        <span class="text-sm overview-card-link">Ver todos ${Icons.chevronRight}</span>
+      </div>
+      <div class="card stat-card overview-card" onclick="router.navigate('#/gerente/contratos')">
+        <div class="label">Finalizados</div>
+        <div class="value mono">${finishedContracts || 0}</div>
+        <div class="text-sm text-soft mt-8">Contratos concluídos ou em perda</div>
+        <span class="text-sm overview-card-link">Ver todos ${Icons.chevronRight}</span>
+      </div>
+      <div class="card stat-card">
+        <div class="label">Novos do mês</div>
+        <div class="value mono">${newThisMonth || 0}</div>
+        <div class="text-sm mt-8">${trendBadgeHtml(newThisMonth, newPrevPeriod)}</div>
+      </div>
+    </div>
+
+    <div class="card mt-14">
+      <h3>Recebido — últimos 30 dias</h3>
+      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good, width: 1180, height: 260 }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
+    </div>
+
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Projeção de Recebimentos (6 meses)</h3>
@@ -275,11 +290,6 @@ async function renderGerenteDashboard() {
         <h3>Projeção de Lucro (6 meses)</h3>
         <div class="mt-8">${areaChartSVG(profitSeries, { color: CHART_COLORS.good, gradId: 'lucro' })}</div>
       </div>
-    </div>
-
-    <div class="card mt-14">
-      <h3>Recebido — últimos 30 dias</h3>
-      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? barChartSVG(trendSeries, { color: CHART_COLORS.good, width: 1180, height: 260 }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
     </div>
 
     <div class="card mt-14">
