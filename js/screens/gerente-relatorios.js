@@ -243,12 +243,12 @@ function paintLancamentosFuturos(installments, cycles) {
 
   body.innerHTML = `
     <div class="grid grid-3">
-      <div class="card stat-card" style="background:var(--good);color:#fff">
+      <div class="card stat-card" style="background:var(--good-dark);color:#fff">
         <div class="label" style="color:rgba(255,255,255,.85)">Previsão de entradas</div>
         <div class="text-sm" style="color:rgba(255,255,255,.75)">Parcelas de empréstimos + entradas programadas</div>
         <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(previsaoEntradas)}</div>
       </div>
-      <div class="card stat-card" style="background:var(--bad);color:#fff">
+      <div class="card stat-card" style="background:var(--bad-dark);color:#fff">
         <div class="label" style="color:rgba(255,255,255,.85)">Previsão de saídas</div>
         <div class="text-sm" style="color:rgba(255,255,255,.75)">Saídas programadas ainda não debitadas</div>
         <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(previsaoSaidas)}</div>

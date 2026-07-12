@@ -134,7 +134,7 @@ function openRejectClientModal(clientId) {
         <button class="btn btn-danger" id="confirm-reject">Rejeitar cadastro</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
@@ -167,7 +167,7 @@ function openDeleteClienteConfirm(client) {
         <button class="btn btn-danger" id="confirm-delete">Excluir permanentemente</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
@@ -245,7 +245,7 @@ function openClienteModal(client) {
       </div>
     </div>
   `;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;

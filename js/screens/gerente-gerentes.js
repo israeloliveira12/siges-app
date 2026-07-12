@@ -76,7 +76,7 @@ function openEditGerenteModal(gerente) {
         <button class="btn btn-primary" id="save-modal">Salvar alterações</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
@@ -162,7 +162,7 @@ function openNovoGerenteModal() {
         <button class="btn btn-primary" id="save-modal">Criar gerente</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;

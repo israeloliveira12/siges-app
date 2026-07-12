@@ -268,7 +268,7 @@ function openDebtModal(monthKeys, existingDebt) {
         <button class="btn btn-primary" id="confirm-debt">${isEdit ? 'Salvar' : 'Adicionar'}</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const amountInput = document.getElementById('debt-amount');
   attachMoneyMask(amountInput);
   if (isEdit) setMoneyValue(amountInput, existingDebt.amount);

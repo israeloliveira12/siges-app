@@ -159,7 +159,7 @@ function openScoreHelpModal() {
         <button class="btn btn-primary" id="close-modal-2">Entendi</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('close-modal-2').onclick = close;

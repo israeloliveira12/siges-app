@@ -296,7 +296,7 @@ function openEditContratoModal(contract, onDone) {
         <button class="btn btn-primary" id="save-modal">Salvar alterações</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
@@ -347,7 +347,7 @@ function openDeleteContratoConfirm(contract) {
         <button class="btn btn-danger" id="confirm-delete">Excluir permanentemente</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
@@ -387,7 +387,7 @@ function openEditInstallmentModal(installment, onDone) {
         <button class="btn btn-primary" id="save-modal">Salvar</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;

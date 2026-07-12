@@ -48,7 +48,7 @@ async function openReceberModal(source, onDone) {
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  document.body.appendChild(overlay);
+  document.getElementById('app').appendChild(overlay);
 
   function paint() {
     overlay.innerHTML = `

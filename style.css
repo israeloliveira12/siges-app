@@ -25,6 +25,15 @@
   --good: #1E8A5F;
   --good-soft: #E4F2EC;
 
+  /* Variantes "-dark" fixas (não mudam entre os temas, igual --brand-dark) —
+     pra card "spotlight" com fundo sólido + texto branco (ex: cards de
+     Previsão em Relatórios). --good/--bad ficam mais claros no tema escuro
+     de propósito (pra funcionar como TEXTO sobre painel escuro), o que
+     reduz demais o contraste quando usados como FUNDO atrás de texto
+     branco — usa estas aqui nesse caso específico, nunca --good/--bad. */
+  --good-dark: #1E8A5F;
+  --bad-dark: #B8433A;
+
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Consolas, monospace;
   --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --radius: 12px;
