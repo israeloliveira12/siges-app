@@ -2,6 +2,8 @@
 
 > Leia isto primeiro se a conversa começar com algo como "continue o projeto siges". Este arquivo é para o Claude, não para o usuário — para instruções de deploy/setup, veja [README.md](README.md). Mantenha este arquivo atualizado ao final de cada rodada de mudanças relevante.
 
+> **Regra fixa, sempre válida (não é só pra início de sessão): antes de responder qualquer pergunta sobre a base de código ou de executar qualquer tarefa não-trivial, consulte o grafo do graphify primeiro** (`graphify query "<pergunta>"` / `graphify path "A" "B"` / `graphify explain "X"`, ver seção "Graphify" abaixo) — é mais rápido e mais confiável que grep/Read manual, porque já tem as relações entre telas/RPCs e o "porquê" de cada decisão capturadas. Só caia pra grep/Read direto se o grafo não existir (`graphify-out/graph.json` ausente) ou não trouxer contexto suficiente. **E depois de qualquer mudança de código, rode `graphify update .`** (AST-only, sem custo de API) antes de encerrar a rodada — isso é o que mantém esse atalho valendo pra próxima conversa. Este CLAUDE.md é o outro pilar da continuidade: ele + o grafo atualizado devem ser suficientes pra qualquer sessão nova continuar sem precisar que o usuário reexplique o projeto do zero.
+
 ## O que é o projeto
 
 SIGES (Siges Serviços Financeiros) é um SaaS de gestão de empréstimos, construído inteiramente por conversa com o Claude Code. Dois papéis: **cliente** (autocadastro, acesso restrito ao próprio contrato) e **gerente/administrador** (acesso total, só é criado internamente por outro gerente — nunca há tela pública de cadastro de gerente). Na UI o papel `gerente` é chamado de "Administrador" — a nomenclatura interna do código (roles, `is_gerente()`, nomes de tabela) continua "gerente" de propósito; não vale a pena renomear (risco alto, zero ganho pro usuário).
@@ -125,7 +127,7 @@ O projeto tem um grafo de conhecimento construído com [graphify](https://github
 
 Saídas em `graphify-out/`:
 - `graph.html` — grafo interativo, abrir no navegador
-- `graph.json` — dados brutos (346 nós, 511 arestas, 47 comunidades na última construção)
+- `graph.json` — dados brutos (379 nós, 408 arestas, 122 comunidades na última construção — número muda a cada `graphify update`, não precisa manter exato aqui)
 - `GRAPH_REPORT.md` — god nodes, conexões surpreendentes, perguntas sugeridas
 - `obsidian/` — vault Markdown pronto (393 arquivos, um por nó, com `.obsidian/` já configurado). Pro usuário abrir: Obsidian → "Abrir pasta como um cofre" → apontar pra `graphify-out/obsidian/` (não pra `graphify-out/` inteira).
 
@@ -133,7 +135,9 @@ Saídas em `graphify-out/`:
 
 ## Limpeza de código morto (2026-07-11)
 
-Removidos por não terem nenhuma referência em lugar nenhum do projeto (confirmado por grep exaustivo antes de cada remoção): `api/send-email.js` e `api/send-push.js` (endpoints órfãos — o envio real de e-mail/push sempre foi direto via `api/_lib/email.js`/`api/_lib/webpush.js`, chamado por `notify-event.js`/`cron-daily-check.js`), `cacheSet`/`cacheGet`/`localKey` (`js/state.js`), `uid()` (`js/utils.js`), 5 ícones não usados em `js/icons.js` (`cash`, `search`, `document`, `info`, `eyeOff`), e 4 classes CSS não usadas em `style.css` (`.nav-group-label`, `.panel-head`, `.panel-body`, `.w-full`, `.panel`). Se `Icons.cash`/`.panel`/etc. aparecerem referenciados em código futuro puxado de um branch antigo, é resquício pré-limpeza — não recriar sem necessidade real. As pastas `Identidade Visual/`, `Referencias de um site que já existe/` e `Regra de emprestimo de valores/` (já gitignored, material de referência) foram propositalmente **preservadas** — apagá-las seria irreversível (não estão no git) sem nenhum ganho real.
+Removidos por não terem nenhuma referência em lugar nenhum do projeto (confirmado por grep exaustivo antes de cada remoção): `api/send-email.js` e `api/send-push.js` (endpoints órfãos — o envio real de e-mail/push sempre foi direto via `api/_lib/email.js`/`api/_lib/webpush.js`, chamado por `notify-event.js`/`cron-daily-check.js`), `cacheSet`/`cacheGet`/`localKey` (`js/state.js`), `uid()` (`js/utils.js`), 5 ícones não usados em `js/icons.js` (`cash`, `search`, `document`, `info`, `eyeOff`), e 4 classes CSS não usadas em `style.css` (`.nav-group-label`, `.panel-head`, `.panel-body`, `.w-full`, `.panel`). Se `Icons.cash`/`.panel`/etc. aparecerem referenciados em código futuro puxado de um branch antigo, é resquício pré-limpeza — não recriar sem necessidade real.
+
+**Atualização (2026-07-12): as pastas `Identidade Visual/`, `Referencias de um site que já existe/` e `Regra de emprestimo de valores/`** (que tinham sido preservadas de propósito na limpeza acima) **foram removidas** a pedido explícito do usuário numa organização geral da pasta do projeto — nunca estiveram no git (não há nada a restaurar) e não faziam parte do site publicado, só material de consulta usado durante o desenvolvimento inicial. Junto com elas, as 3 entradas correspondentes em `.gitignore` também foram removidas (não apontavam mais pra nada). Se precisar desse material de novo, não existe mais localmente nem no histórico do git.
 
 ## Limitações conhecidas (v1, ver README para detalhes)
 
