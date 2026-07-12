@@ -2,24 +2,56 @@
    Gerente — Score de clientes (ranking + recalcular)
    ============================================================================ */
 
+// Módulo-level (sobrevive a repaints) — controla se cada lista mostra só o
+// top 10 ou todos os clientes daquela partição, igual ao padrão já usado em
+// plExpandedMonths (gerente-planejamento.js).
+let scoreShowAllMelhores = false;
+let scoreShowAllPiores = false;
+
 async function renderGerenteScore() {
   const root = document.getElementById('screen-gerente-score');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
-  const { data, error } = await supa
-    .from('clients')
-    .select('*, profiles!clients_profile_id_fkey(full_name, email)')
-    .order('score', { ascending: false });
+  const [{ data, error }, { data: paidInstallments }] = await Promise.all([
+    supa.from('clients').select('*, profiles!clients_profile_id_fkey(full_name, email)').order('score', { ascending: false }),
+    // Só as 2 colunas necessárias pro KPI de "pagamento adiantado" — sem
+    // join, leve mesmo somando toda a carteira (mesmo raciocínio de volume
+    // já aceito em outras telas sem paginação).
+    supa.from('installments').select('paid_at, due_date').eq('status', 'paga'),
+  ]);
 
   if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
 
   // Partição estrita por limiar — nunca por "top N / bottom N" — pra um
   // cliente jamais poder cair nas duas listas ao mesmo tempo. `rows` já vem
-  // ordenado desc pelo score (query abaixo), então melhores mantém a ordem
+  // ordenado desc pelo score (query acima), então melhores mantém a ordem
   // (melhor primeiro) e piores é reordenado asc (pior primeiro).
   const rows = data || [];
-  const melhores = rows.filter((c) => c.score >= 70).slice(0, 10);
-  const piores = rows.filter((c) => c.score < 70).sort((a, b) => a.score - b.score).slice(0, 10);
+  const melhoresAll = rows.filter((c) => c.score >= 70);
+  const pioresAll = rows.filter((c) => c.score < 70).sort((a, b) => a.score - b.score);
+  const melhores = scoreShowAllMelhores ? melhoresAll : melhoresAll.slice(0, 10);
+  const piores = scoreShowAllPiores ? pioresAll : pioresAll.slice(0, 10);
+
+  const scoreMedio = rows.length ? rows.reduce((s, c) => s + Number(c.score || 0), 0) / rows.length : 0;
+
+  // "Adiantado" usa a MESMA definição do motor de score (paid_at::date <
+  // due_date, ver recalculate_client_score no schema.sql) — não a comparação
+  // com fuso local usada no card de detalhe do cliente, pra não divergir do
+  // que realmente alimenta o score.
+  const paidList = paidInstallments || [];
+  const totalPaid = paidList.length;
+  const earlyPaid = paidList.filter((i) => i.paid_at && i.due_date && String(i.paid_at).slice(0, 10) < i.due_date).length;
+  const pctAdiantado = totalPaid ? (earlyPaid / totalPaid) * 100 : 0;
+
+  const tierCounts = { 'Ouro': 0, 'Bom': 0, 'Atenção': 0, 'Alto risco': 0 };
+  rows.forEach((c) => { if (tierCounts[c.score_tier] != null) tierCounts[c.score_tier]++; });
+  const tierSegments = [
+    { label: 'Ouro', value: tierCounts['Ouro'], color: CHART_COLORS.warn },
+    { label: 'Bom', value: tierCounts['Bom'], color: CHART_COLORS.good },
+    { label: 'Atenção', value: tierCounts['Atenção'], color: CHART_COLORS.purple },
+    { label: 'Alto risco', value: tierCounts['Alto risco'], color: CHART_COLORS.bad },
+  ];
+  const countFmt = (v) => `${v} cliente${v === 1 ? '' : 's'}`;
 
   injectScoreHelpButton();
 
@@ -29,14 +61,35 @@ async function renderGerenteScore() {
       <button class="btn btn-outline btn-sm" id="recalc-all">${Icons.renew} Recalcular todos</button>
     </div>
 
+    <div class="grid grid-3 mt-14">
+      <div class="card stat-card"><div class="label">Clientes analisados</div><div class="value mono">${rows.length}</div></div>
+      <div class="card stat-card"><div class="label">Score médio</div><div class="value mono">${formatNumber(scoreMedio, 1)}</div></div>
+      <div class="card stat-card">
+        <div class="label">Pagamento adiantado</div>
+        <div class="value mono">${formatNumber(pctAdiantado, 0)}%</div>
+        <div class="hint mt-8">${earlyPaid} de ${totalPaid} parcelas pagas</div>
+      </div>
+    </div>
+
+    ${rows.length ? `
+    <div class="card mt-14">
+      <h3>Distribuição por perfil</h3>
+      <div class="flex items-center mt-14" style="gap:20px;flex-wrap:wrap">
+        ${donutChartSVG(tierSegments, { valueFormatter: countFmt })}
+        <div style="flex:1;min-width:220px">${donutLegendHtml(tierSegments, { valueFormatter: countFmt })}</div>
+      </div>
+    </div>` : ''}
+
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Ranking — melhores scores</h3>
         <div class="mt-8">${scoreListHtml(melhores)}</div>
+        ${melhoresAll.length > 10 ? `<button class="btn btn-ghost btn-sm mt-8" id="toggle-melhores">${scoreShowAllMelhores ? 'Ver menos' : `Ver todos (${melhoresAll.length})`}</button>` : ''}
       </div>
       <div class="card" style="border-color:var(--bad)">
         <h3 style="color:var(--bad)">Atenção — menores scores</h3>
         <div class="mt-8">${scoreListHtml(piores)}</div>
+        ${pioresAll.length > 10 ? `<button class="btn btn-ghost btn-sm mt-8" id="toggle-piores">${scoreShowAllPiores ? 'Ver menos' : `Ver todos (${pioresAll.length})`}</button>` : ''}
       </div>
     </div>
   `;
@@ -44,10 +97,21 @@ async function renderGerenteScore() {
   document.getElementById('recalc-all').onclick = async (e) => {
     e.target.disabled = true;
     e.target.textContent = 'Recalculando...';
-    await supa.rpc('recalculate_all_scores');
+    const { error: recalcError } = await supa.rpc('recalculate_all_scores');
+    if (recalcError) {
+      showToast('Erro ao recalcular: ' + recalcError.message);
+      e.target.disabled = false;
+      e.target.textContent = 'Recalcular todos';
+      return;
+    }
     showToast('Scores recalculados.');
     renderGerenteScore();
   };
+
+  const toggleMelhoresBtn = document.getElementById('toggle-melhores');
+  if (toggleMelhoresBtn) toggleMelhoresBtn.onclick = () => { scoreShowAllMelhores = !scoreShowAllMelhores; renderGerenteScore(); };
+  const togglePioresBtn = document.getElementById('toggle-piores');
+  if (togglePioresBtn) togglePioresBtn.onclick = () => { scoreShowAllPiores = !scoreShowAllPiores; renderGerenteScore(); };
 
   root.querySelectorAll('.score-row').forEach((el) => {
     el.onclick = () => renderClienteScoreDetalheGerente(el.dataset.id);
@@ -105,9 +169,10 @@ function openScoreHelpModal() {
 function scoreListHtml(rows) {
   if (!rows.length) return `<div class="empty-state"><p>Sem clientes suficientes ainda.</p></div>`;
   return rows.map((c) => `
-    <div class="score-row flex justify-between items-center" style="padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer" data-id="${c.profile_id}">
-      <div>${escapeHtml((c.profiles || {}).full_name || '—')}</div>
-      <div class="flex items-center gap-8"><span class="mono">${c.score}</span>${scoreTierBadge(c.score_tier)}</div>
+    <div class="score-row flex items-center gap-10" style="padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer" data-id="${c.profile_id}">
+      ${avatarHtml((c.profiles || {}).full_name, 28)}
+      <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml((c.profiles || {}).full_name || '—')}</div>
+      <div class="flex items-center gap-8" style="flex:none"><span class="mono">${c.score}</span>${scoreTierBadge(c.score_tier)}</div>
     </div>
   `).join('');
 }

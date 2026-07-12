@@ -66,7 +66,7 @@ function paintClientesScreen() {
             const p = c.profiles || {};
             return `
             <tr>
-              <td data-label="Nome"><strong>${escapeHtml(p.full_name || '—')}</strong></td>
+              <td data-label="Nome"><div class="flex items-center gap-8">${avatarHtml(p.full_name, 28)}<strong>${escapeHtml(p.full_name || '—')}</strong></div></td>
               <td data-label="CPF" class="mono">${escapeHtml(formatCpf(p.cpf || '') || '—')}</td>
               <td data-label="Contato" class="mobile-hide"><div><div>${escapeHtml(p.email || '')}</div><div class="text-sm text-soft">${escapeHtml(p.phone || '')}</div></div></td>
               <td data-label="Grupo" class="mobile-hide">${escapeHtml(c.client_group || '—')}</td>

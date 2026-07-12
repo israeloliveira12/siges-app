@@ -30,6 +30,61 @@
   --radius: 12px;
   --radius-sm: 8px;
   --shadow: 0 1px 2px rgba(8, 20, 30, .06), 0 1px 1px rgba(8, 20, 30, .04);
+
+  /* Cores de gráfico (charts.js) isoladas dos tokens de UI (--brand/--accent)
+     de propósito — em modo escuro um azul-marinho quase preto (--brand) some
+     como LINHA de gráfico sobre painel escuro, mesmo funcionando bem como
+     fundo de botão. Permite otimizar cada uso sem conflito. */
+  --chart-brand: #0B416B;
+  --chart-accent: #1E9A95;
+  --chart-warn: #B8792B;
+  --chart-bad: #B8433A;
+  --chart-good: #1E8A5F;
+  --chart-purple: #7C5CFC;
+  --chart-line: #DCE2DF;
+}
+
+/* ---------------------------------------------------------------------------
+   Modo escuro — escopado em #app (nunca em :root) de propósito: a tela de
+   login (#auth-screen, fora de #app) tem que continuar sempre igual, mesmo
+   que o usuário reative o app com a preferência "dark" salva no localStorage
+   antes de autenticar de novo. O atributo data-theme fica no <html> (setado
+   cedo, via script inline no <head>, pra não piscar claro→escuro no load),
+   mas a troca de variável só cascateia pra dentro de #app.
+--------------------------------------------------------------------------- */
+html[data-theme="dark"] #app {
+  --bg: #0F161F;
+  --panel: #17212B;
+  --ink: #E8EDF1;
+  --ink-soft: #8CA0AB;
+  --line: #263340;
+
+  --brand: #4A9FDB;
+  --brand-soft: rgba(74, 159, 219, .16);
+
+  --accent: #2DD4BF;
+  --accent-soft: rgba(45, 212, 191, .16);
+
+  --warn: #E3A857;
+  --warn-soft: rgba(227, 168, 87, .16);
+
+  --bad: #F0665A;
+  --bad-soft: rgba(240, 102, 90, .16);
+
+  --good: #34C77E;
+  --good-soft: rgba(52, 199, 126, .16);
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 1px 1px rgba(0, 0, 0, .3);
+
+  --chart-brand: #4A9FDB;
+  --chart-accent: #2DD4BF;
+  --chart-warn: #E3A857;
+  --chart-bad: #F0665A;
+  --chart-good: #34C77E;
+  --chart-purple: #9B85FF;
+  --chart-line: #263340;
+
+  background: var(--bg);
 }
 
 * { box-sizing: border-box; }
@@ -181,7 +236,7 @@ button { cursor: pointer; }
 input[type="text"], input[type="email"], input[type="password"], input[type="number"],
 input[type="date"], input[type="tel"], select, textarea {
   border: 1px solid var(--line); border-radius: var(--radius-sm);
-  padding: 9px 11px; background: #fff; width: 100%; outline: none;
+  padding: 9px 11px; background: var(--panel); width: 100%; outline: none;
 }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 textarea { resize: vertical; min-height: 70px; }
@@ -241,7 +296,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 .btn-primary:hover { background: var(--brand-dark); }
 .btn-accent { background: var(--accent); color: #fff; }
 .btn-accent:hover { filter: brightness(.94); }
-.btn-outline { background: #fff; border-color: var(--line); color: var(--ink); }
+.btn-outline { background: var(--panel); border-color: var(--line); color: var(--ink); }
 .btn-outline:hover { background: var(--bg); }
 .btn-ghost { background: none; color: var(--ink-soft); }
 .btn-ghost:hover { background: var(--bg); color: var(--ink); }
@@ -251,7 +306,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 .btn-block { width: 100%; }
 .icon-btn {
   width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-sm); border: 1px solid var(--line); background: #fff; position: relative;
+  border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--panel); position: relative;
 }
 .icon-btn svg { width: 17px; height: 17px; }
 
@@ -265,6 +320,16 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 }
 .title-help-btn svg { width: 14px; height: 14px; }
 .title-help-btn:hover { color: var(--accent); }
+
+/* ---------------------------------------------------------------------------
+   Avatar de iniciais (sem upload de foto — cor determinística por nome)
+--------------------------------------------------------------------------- */
+
+.avatar-circle {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; color: #fff; font-weight: 700; flex: none;
+  letter-spacing: .01em; font-family: var(--sans);
+}
 
 /* ---------------------------------------------------------------------------
    Badges
@@ -325,7 +390,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   padding: 40px 16px; overflow-y: auto; z-index: 100;
 }
 .modal {
-  background: #fff; border-radius: var(--radius); width: 100%; max-width: 560px;
+  background: var(--panel); border-radius: var(--radius); width: 100%; max-width: 560px;
   box-shadow: 0 20px 60px rgba(0,0,0,.25);
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--line); }
@@ -379,11 +444,11 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .bell-wrap { position: relative; }
 .bell-dot {
   position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%;
-  background: var(--bad); border: 2px solid #fff;
+  background: var(--bad); border: 2px solid var(--panel);
 }
 .notif-panel {
   position: absolute; right: 0; top: 46px; width: 340px; max-width: calc(100vw - 24px); max-height: 420px; overflow-y: auto;
-  background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 16px 40px rgba(0,0,0,.18);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 16px 40px rgba(0,0,0,.18);
   z-index: 50;
 }
 @media (max-width: 480px) {
@@ -453,7 +518,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
     position: fixed; left: 8px; right: 8px;
     bottom: calc(70px + env(safe-area-inset-bottom));
-    z-index: 36; background: #fff; border-radius: 14px; padding: 10px;
+    z-index: 36; background: var(--panel); border-radius: 14px; padding: 10px;
     box-shadow: 0 -6px 24px rgba(20, 33, 43, .18);
   }
   .mobile-more-menu .nav-link {
@@ -468,7 +533,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
 
   .table-scroll thead { display: none; }
-  .table-scroll tr { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
+  .table-scroll tr { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel); }
   .table-scroll td { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border: none; gap: 10px; }
   .table-scroll td::before { content: attr(data-label); font-weight: 600; color: var(--ink-soft); font-size: 12px; }
   .table-scroll td > * { text-align: right; }

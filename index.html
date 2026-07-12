@@ -6,6 +6,22 @@
 <title>SIGES - Serviços Financeiros</title>
 <meta name="description" content="Sistema de gestão de empréstimos da Siges Serviços Financeiros">
 <meta name="theme-color" content="#0B416B">
+<script>
+  // Roda antes do CSS pintar a tela — evita um flash claro→escuro no load
+  // pra quem já escolheu modo escuro antes. Só o atributo no <html>; a troca
+  // de variável em si é toda em CSS, escopada em #app (style.css).
+  //
+  // Primeiro acesso é SEMPRE claro, mesmo com o sistema operacional em modo
+  // escuro (decisão explícita do usuário, 2026-07-12) — não olha
+  // prefers-color-scheme de propósito. Só muda depois que a pessoa escolhe
+  // no toggle (aí sim persiste via localStorage, pros 3 papéis).
+  (function () {
+    try {
+      var saved = localStorage.getItem('siges-theme');
+      document.documentElement.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light');
+    } catch (e) { /* localStorage indisponível (ex: modo privado) — segue claro */ }
+  })();
+</script>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="favicon.ico">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -34,8 +50,9 @@
       <nav id="sidebar-nav" class="nav-group"></nav>
       <div class="sidebar-footer">
         <div class="flex items-center gap-10" style="padding:8px 10px 12px">
-          <div>
-            <div style="font-size:13px;font-weight:700" id="sidebar-user-name">—</div>
+          <div id="sidebar-user-avatar"></div>
+          <div style="min-width:0">
+            <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="sidebar-user-name">—</div>
             <div style="font-size:11px;color:rgba(255,255,255,.55)" id="sidebar-user-role">—</div>
           </div>
         </div>
@@ -47,6 +64,7 @@
       <header class="topbar">
         <div class="topbar-title" id="topbar-title">SIGES</div>
         <div class="topbar-actions">
+          <button class="icon-btn" id="topbar-theme-toggle" title="Alternar modo escuro"></button>
           <div id="bell-wrap" class="bell-wrap"></div>
           <button class="icon-btn" id="topbar-signout" title="Sair"></button>
         </div>
@@ -118,6 +136,8 @@
   document.getElementById('topbar-signout').innerHTML = Icons.logout;
   document.getElementById('sidebar-signout-icon').innerHTML = Icons.logout;
   document.getElementById('sidebar-signout').onclick = handleSignOut;
+  document.getElementById('topbar-theme-toggle').innerHTML = currentTheme() === 'dark' ? Icons.sun : Icons.moon;
+  document.getElementById('topbar-theme-toggle').onclick = toggleTheme;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
   }

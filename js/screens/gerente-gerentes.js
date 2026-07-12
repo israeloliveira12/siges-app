@@ -26,7 +26,7 @@ async function renderGerenteGerentes() {
         <tbody>
           ${gerentesCache.map((g) => `
             <tr>
-              <td data-label="Nome">${escapeHtml(g.full_name || '—')}</td>
+              <td data-label="Nome"><div class="flex items-center gap-8">${avatarHtml(g.full_name, 28)}<span>${escapeHtml(g.full_name || '—')}</span></div></td>
               <td data-label="E-mail">${escapeHtml(g.email)}</td>
               <td data-label="Papel">${g.is_primary_admin ? '<span class="badge badge-brand">Administrador</span>' : '<span class="badge badge-neutral">Gerente</span>'}</td>
               <td data-label="Status">${g.active ? statusBadge('quitado', 'Ativo') : statusBadge('reprovada', 'Inativo')}</td>

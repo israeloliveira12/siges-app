@@ -77,6 +77,7 @@ function renderShellForRole() {
   });
   document.getElementById('mobile-more-backdrop').onclick = () => toggleMobileMoreMenu(false);
 
+  document.getElementById('sidebar-user-avatar').innerHTML = avatarHtml(userDisplayName(), 34);
   document.getElementById('sidebar-user-name').textContent = userDisplayName();
   document.getElementById('sidebar-user-role').textContent = role === 'gerente' ? (isPrimary ? 'Administrador' : 'Gerente') : 'Cliente';
   document.getElementById('topbar-signout').onclick = handleSignOut;

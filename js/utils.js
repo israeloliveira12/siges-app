@@ -119,6 +119,31 @@ function scoreTierBadge(tier) {
   return `<span class="badge ${map[tier] || 'badge-neutral'}">${escapeHtml(tier)}</span>`;
 }
 
+// Avatar de iniciais (sem upload de foto) — cor determinística por nome, pra
+// não repetir a mesma cor em toda linha de uma lista longa. Paleta restrita
+// aos tokens de gráfico já usados no resto do sistema (--chart-*), não uma
+// paleta nova.
+const AVATAR_PALETTE = ['var(--chart-brand)', 'var(--chart-accent)', 'var(--chart-good)', 'var(--chart-warn)', 'var(--chart-purple)', 'var(--chart-bad)'];
+
+function initialsOf(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function avatarColorFor(name) {
+  const s = String(name || '');
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+
+function avatarHtml(name, size) {
+  const s = size || 34;
+  return `<span class="avatar-circle" style="width:${s}px;height:${s}px;font-size:${Math.round(s * 0.4)}px;background:${avatarColorFor(name)}" title="${escapeHtml(name || '')}">${escapeHtml(initialsOf(name))}</span>`;
+}
+
 // HTML de um campo de senha com botão de mostrar/ocultar ("olhinho").
 // Uso: `<div class="field"><label>Senha</label>${passwordFieldHtml('f-password')}</div>`
 // e chamar wirePasswordToggles() depois de inserir o HTML no DOM.

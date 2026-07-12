@@ -4,7 +4,14 @@
    e, quando cabe no espaço, um rótulo estático com o valor.
    ============================================================================ */
 
-const CHART_COLORS = { brand: '#0B416B', accent: '#1E9A95', warn: '#B8792B', bad: '#B8433A', good: '#1E8A5F', purple: '#7C5CFC', line: '#DCE2DF' };
+// Referenciam --chart-* (style.css), não --brand/--accent direto: um azul-marinho
+// quase preto (--brand) funciona bem como fundo de botão mas some como LINHA de
+// gráfico sobre um painel escuro — os tokens de gráfico são otimizados à parte
+// e ganham uma variante mais clara em modo escuro sem mexer nos botões/links.
+const CHART_COLORS = {
+  brand: 'var(--chart-brand)', accent: 'var(--chart-accent)', warn: 'var(--chart-warn)',
+  bad: 'var(--chart-bad)', good: 'var(--chart-good)', purple: 'var(--chart-purple)', line: 'var(--chart-line)',
+};
 
 // SVG usa viewBox fixo + width:100% — isso ESCALA o texto junto quando o
 // container encolhe. Um viewBox pensado pra desktop (ex: 1180) fica com
@@ -38,7 +45,7 @@ function lineChartSVG(series, opts = {}) {
 
   const labels = series.map((p, i) => {
     if (series.length > 10 && i % Math.ceil(series.length / 8) !== 0) return '';
-    return `<text x="${x(i).toFixed(1)}" y="${h - 6}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
+    return `<text x="${x(i).toFixed(1)}" y="${h - 6}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
   }).join('');
 
   const points = series.map((p, i) => `
@@ -97,7 +104,7 @@ function areaChartSVG(series, opts = {}) {
   // continua acessível via <title> no ponto, ao passar o mouse).
   const shouldShowLabel = (i) => series.length <= 10 || i % Math.ceil(series.length / 8) === 0;
 
-  const labels = series.map((p, i) => shouldShowLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>` : '').join('');
+  const labels = series.map((p, i) => shouldShowLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>` : '').join('');
   // Rótulo de valor: sempre acima do ponto, com halo branco atrás e cor fixa
   // (--ink), nunca a mesma cor da linha — testado com valores caindo exatamente
   // sobre a linha e ficando ilegíveis quando usavam a mesma cor.
@@ -120,11 +127,11 @@ function areaChartSVG(series, opts = {}) {
     const ly = Math.max(12, y(p.value) - 12).toFixed(1);
     const txt = escapeHtml(fmt(p.value));
     return `
-      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="none" stroke="#fff" stroke-width="3" text-anchor="middle" font-weight="700" paint-order="stroke">${txt}</text>
-      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="#14212B" text-anchor="middle" font-weight="700">${txt}</text>
+      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="none" stroke="var(--panel)" stroke-width="3" text-anchor="middle" font-weight="700" paint-order="stroke">${txt}</text>
+      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="var(--ink)" text-anchor="middle" font-weight="700">${txt}</text>
     `;
   }).join('');
-  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${series.length > 15 ? 2.2 : 3.5}" fill="#fff" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
+  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${series.length > 15 ? 2.2 : 3.5}" fill="var(--panel)" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
 
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">
     <defs>
@@ -171,7 +178,7 @@ function barChartSVG(series, opts = {}) {
   const labels = series.map((p, i) => {
     if (!shouldShowLabel(i)) return '';
     const bx = pad + i * gap + gap / 2;
-    return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="10" fill="#5B6B74" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
+    return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
   }).join('');
 
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">
@@ -200,13 +207,14 @@ function donutChartSVG(segments, opts = {}) {
   </svg>`;
 }
 
-function donutLegendHtml(segments) {
+function donutLegendHtml(segments, opts = {}) {
+  const fmt = opts.valueFormatter || formatMoney;
   const total = segments.reduce((s, x) => s + x.value, 0) || 1;
   return segments.map((s) => `
     <div class="flex items-center gap-8" style="font-size:12.5px">
       <span style="width:10px;height:10px;border-radius:50%;background:${s.color};display:inline-block;flex:none"></span>
       <span>${escapeHtml(s.label)}</span>
-      <span class="text-soft mono" style="margin-left:8px">${escapeHtml(formatMoney(s.value))}</span>
+      <span class="text-soft mono" style="margin-left:8px">${escapeHtml(fmt(s.value))}</span>
       <span class="text-soft mono" style="margin-left:auto">${formatNumber((s.value / total) * 100, 0)}%</span>
     </div>
   `).join('');
