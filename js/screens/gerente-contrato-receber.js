@@ -193,6 +193,11 @@ async function openReceberModal(source, onDone) {
     } else {
       fields.innerHTML = `
         <p class="text-sm text-soft mt-8">O cliente paga só os juros deste ciclo, e a dívida cheia (${formatMoney(totalDue)}) renova para o próximo período.</p>
+        <div class="field mt-8">
+          <label>Nova data de vencimento</label>
+          <input type="date" id="r-new-due-date">
+          <span class="help">Sugestão automática com base no prazo do contrato — pode ajustar antes de confirmar.</span>
+        </div>
         ${diasAtraso > 0 ? `
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-late-toggle"><span class="track"></span></label><span>Aplicar encargo de atraso (${diasAtraso}d) nesta renovação?</span></div>
         <div id="r-late-fields" class="hidden mt-8">
@@ -211,6 +216,8 @@ async function openReceberModal(source, onDone) {
           <div class="stat-card" style="background:var(--bg)"><div class="label">Lucro líquido</div><div class="value mono" id="r-net-profit" style="font-size:16px">${formatMoney(interestPortion)}</div></div>
         </div>
       `;
+      const receivedAtNow = (document.getElementById('r-received-at') || {}).value || todayISO();
+      document.getElementById('r-new-due-date').value = addStepISO(receivedAtNow, contract.due_type, contract.custom_interval_days);
       const interestInput = document.getElementById('r-interest-amount');
       const feeInput = document.getElementById('r-fee-amount');
       const lateInterestInput = document.getElementById('r-late-interest');
@@ -322,6 +329,8 @@ async function openReceberModal(source, onDone) {
           ? Math.min(interestAmount, (lateInterestEl ? getMoneyValue(lateInterestEl) : 0) + (lateFeeEl ? getMoneyValue(lateFeeEl) : 0))
           : 0;
         if (interestAmount < 0) throw new Error('Valor inválido.');
+        const newDueDate = document.getElementById('r-new-due-date').value;
+        if (!newDueDate) throw new Error('Informe a nova data de vencimento.');
 
         const { error } = await supa.rpc('renew_installment', {
           p_source_type: isInstallment ? 'installment' : 'renewal_cycle',
@@ -331,10 +340,11 @@ async function openReceberModal(source, onDone) {
           p_operational_fee_amount: feeAmount,
           p_late_charge_amount: lateChargeAmount,
           p_received_at: receivedAt,
+          p_new_due_date: newDueDate,
         });
         if (error) throw error;
         notifyEvent('renovacao_registrada', contract.client_id, 'Renovação registrada',
-          `Recebemos os juros de ${formatMoney(interestAmount)}. Sua dívida foi renovada por mais um período.`);
+          `Recebemos os juros de ${formatMoney(interestAmount)}. Sua dívida foi renovada, novo vencimento ${formatDate(newDueDate)}.`);
         logAudit('renovacao_registrada', `Renovação registrada no contrato #${contract.contract_number} (juros ${formatMoney(interestAmount)})`, { contract_id: contract.id, interest_amount: interestAmount });
         showToast('Renovação registrada. Dívida renovada por mais um período.');
       }

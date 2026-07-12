@@ -87,6 +87,32 @@ function daysBetween(isoA, isoB) {
   return Math.round((b - a) / 86400000);
 }
 
+// Sugestão de próximo vencimento ao renovar — mesma regra de passo usada em
+// renew_installment() no banco (mensal/quinzenal/semanal/personalizado). É só
+// o valor inicial do campo (editável pelo gerente antes de confirmar), não
+// precisa ser byte-a-byte idêntico ao cálculo de data do Postgres.
+function addStepISO(iso, dueType, customDays) {
+  const d = new Date(iso + 'T00:00:00');
+  if (dueType === 'mensal') d.setMonth(d.getMonth() + 1);
+  else if (dueType === 'quinzenal') d.setDate(d.getDate() + 15);
+  else if (dueType === 'semanal') d.setDate(d.getDate() + 7);
+  else d.setDate(d.getDate() + Math.max(1, Number(customDays) || 30));
+  return d.toISOString().slice(0, 10);
+}
+
+// Estimativa de encargo de atraso (juros compostos diários sobre o saldo +
+// multa fixa) — mesma fórmula já usada no modal de recebimento
+// (gerente-contrato-receber.js) e na cobrança via WhatsApp (gerente-cobrar.js).
+// É só uma SUGESTÃO exibida ao cliente/gerente antes do vencimento ser
+// resolvido; o valor final cobrado continua sendo o que o gerente ajustar na
+// hora de receber de verdade.
+function estimateLateCharge(baseAmount, dueDateISO, lateInterestPercent, lateFeePercent) {
+  const diasAtraso = dueDateISO < todayISO() ? daysBetween(dueDateISO, todayISO()) : 0;
+  const jurosAtraso = diasAtraso > 0 ? Math.round(baseAmount * (Math.pow(1 + lateInterestPercent / 100, diasAtraso) - 1) * 100) / 100 : 0;
+  const multaAtraso = diasAtraso > 0 ? Math.round(baseAmount * (lateFeePercent / 100) * 100) / 100 : 0;
+  return { diasAtraso, jurosAtraso, multaAtraso, total: baseAmount + jurosAtraso + multaAtraso };
+}
+
 function debounce(fn, wait) {
   let t = null;
   return function (...args) {

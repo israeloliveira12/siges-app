@@ -930,7 +930,8 @@ create or replace function renew_installment(
   p_operational_fee_amount numeric,
   p_notes text default null,
   p_late_charge_amount numeric default 0,
-  p_received_at date default current_date
+  p_received_at date default current_date,
+  p_new_due_date date default null
 )
 returns uuid
 language plpgsql
@@ -1005,7 +1006,9 @@ begin
     when 'semanal' then interval '7 days'
     when 'personalizado' then (coalesce(v_custom_days, 30) || ' days')::interval
   end;
-  v_new_due_date := coalesce(p_received_at, current_date) + v_step;
+  -- p_new_due_date deixa o gerente escolher a data manualmente (tela de
+  -- recebimento) — se não vier, cai no cálculo automático de sempre.
+  v_new_due_date := coalesce(p_new_due_date, coalesce(p_received_at, current_date) + v_step);
 
   select coalesce(max(cycle_number), 0) + 1 into v_cycle_number
     from renewal_cycles where contract_id = v_contract_id;

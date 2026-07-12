@@ -96,23 +96,34 @@ function paintClienteIndicacoes(root, allContracts, installments, cycles, namesB
         <tbody>
           ${inst.map((i) => {
             const st = effectiveInstallmentStatus(i.status, i.due_date);
+            const remaining = i.amount_due - i.principal_paid_partial - i.interest_paid_partial;
             const isPartial = st !== 'paga' && (i.principal_paid_partial > 0 || i.interest_paid_partial > 0);
+            const late = st === 'atrasada' ? estimateLateCharge(remaining, i.due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
             return `
             <tr>
               <td data-label="Parcela">${i.sequence_number}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
-              <td data-label="Valor"><div><div class="mono">${formatMoney(i.amount_due)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
+              <td data-label="Valor"><div><div class="mono">${formatMoney(i.amount_due)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(remaining)}</div>` : ''}${late && (late.jurosAtraso > 0 || late.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</div></td>
               <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
             </tr>
           `; }).join('')}
-          ${cyc.map((r) => `
+          ${cyc.map((r) => {
+            const st = effectiveInstallmentStatus(r.status, r.new_due_date);
+            // Ciclo renovado (foi pra frente de novo): o valor desta linha é
+            // o que foi PAGO nessa renovação (só juros) — não a dívida cheia
+            // que rolou pro próximo ciclo. Só a quitação final (status paga)
+            // mostra o valor cheio, porque foi aí que ele foi pago de fato.
+            const cycleValue = st === 'renovada' ? r.interest_only_amount : r.full_debt_amount;
+            const rowLabel = st === 'paga' ? 'Quitação' : 'Renovação ' + r.cycle_number;
+            const cycleLate = st === 'atrasada' ? estimateLateCharge(cycleValue, r.new_due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
+            return `
             <tr>
-              <td data-label="Parcela">Renovação ${r.cycle_number}</td>
+              <td data-label="Parcela">${rowLabel}</td>
               <td data-label="Vencimento">${formatDate(r.new_due_date)}</td>
-              <td data-label="Valor" class="mono">${formatMoney(r.full_debt_amount)}</td>
-              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(r.status, r.new_due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada' }[st]); })()}</td>
+              <td data-label="Valor"><div><div class="mono">${formatMoney(cycleValue)}</div>${cycleLate && (cycleLate.jurosAtraso > 0 || cycleLate.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${cycleLate.diasAtraso}d): ${formatMoney(cycleLate.total)}</div>` : ''}</div></td>
+              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
             </tr>
-          `).join('')}
+          `; }).join('')}
         </tbody>
       </table>
     </div>`;
