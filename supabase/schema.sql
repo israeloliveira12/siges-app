@@ -960,7 +960,17 @@ begin
   end if;
 
   if p_source_type = 'installment' then
-    select i.contract_id, i.principal_share, i.interest_share, i.status
+    -- Descontar o que já foi pago parcialmente (principal_paid_partial/
+    -- interest_paid_partial) antes de renovar — mesmo ajuste que
+    -- receive_payment já faz corretamente. Sem isso, renovar uma parcela que
+    -- tinha recebido pagamento parcial recriava a dívida CHEIA original no
+    -- novo ciclo, fazendo o valor já pago "sumir" do saldo devedor do
+    -- cliente. greatest(0, ...) é defesa extra contra qualquer estado
+    -- inconsistente anterior (parcela editada com valor abaixo do já pago).
+    select i.contract_id,
+           greatest(0, i.principal_share - i.principal_paid_partial),
+           greatest(0, i.interest_share - i.interest_paid_partial),
+           i.status
       into v_contract_id, v_principal, v_interest, v_status
       from installments i where i.id = p_source_id for update;
   else
@@ -1058,6 +1068,7 @@ declare
   v_contract loan_contracts%rowtype;
   v_principal numeric;
   v_interest numeric;
+  v_full_amount_due numeric;
   v_payment_id uuid;
   v_remaining integer;
 begin
@@ -1068,6 +1079,18 @@ begin
   select * into v_cycle from renewal_cycles where id = p_cycle_id for update;
   if v_cycle.status not in ('pendente', 'atrasada') then
     raise exception 'CYCLE_NOT_PAYABLE';
+  end if;
+
+  -- Ciclo de renovação NÃO tem controle de pagamento parcial (diferente de
+  -- installments, que tem principal_paid_partial/interest_paid_partial) —
+  -- essa função só existe pra quitação total. Sem essa checagem, um valor
+  -- menor que o devido era aceito do mesmo jeito e o ciclo/contrato eram
+  -- marcados como quitados mesmo sem o valor real ter entrado, inflando o
+  -- lucro registrado nos relatórios (que gravavam o valor CHEIO esperado,
+  -- não o que realmente veio em p_amount_received).
+  v_full_amount_due := v_cycle.full_debt_amount + coalesce(p_late_charge_amount, 0);
+  if p_amount_received <= 0 or abs(p_amount_received - v_full_amount_due) > 0.01 then
+    raise exception 'INVALID_AMOUNT';
   end if;
 
   select * into v_contract from loan_contracts where id = v_cycle.contract_id for update;
@@ -1371,8 +1394,22 @@ returns void
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_installment installments%rowtype;
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+
+  select * into v_installment from installments where id = p_installment_id;
+  -- Não deixa o novo valor ficar abaixo do que já foi pago parcialmente —
+  -- sem essa checagem, o saldo restante (amount_due - paid_partial) ficava
+  -- negativo, e "Pago parcial: resta R$-X" aparecia nas telas do cliente.
+  if v_installment.id is not null and (
+    p_principal_share < v_installment.principal_paid_partial
+    or p_interest_share < v_installment.interest_paid_partial
+  ) then
+    raise exception 'AMOUNT_BELOW_ALREADY_PAID';
+  end if;
+
   update installments set
     due_date = p_due_date,
     principal_share = p_principal_share,

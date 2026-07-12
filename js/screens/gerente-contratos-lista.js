@@ -380,6 +380,9 @@ function openEditInstallmentModal(installment, onDone) {
           <div class="field"><label>Capital (R$)</label><input type="text" id="ei-principal"></div>
           <div class="field"><label>Juros (R$)</label><input type="text" id="ei-interest"></div>
         </div>
+        ${(Number(installment.principal_paid_partial) > 0 || Number(installment.interest_paid_partial) > 0) ? `
+        <p class="text-sm mt-8" style="color:var(--bad)">Esta parcela já recebeu pagamento parcial: ${formatMoney(Number(installment.principal_paid_partial) + Number(installment.interest_paid_partial))}. Capital e juros não podem ficar abaixo do que já foi pago.</p>
+        ` : ''}
         <p class="text-sm text-soft">Novo total da parcela: <strong class="mono" id="ei-total-preview">${formatMoney(installment.amount_due)}</strong></p>
       </div>
       <div class="modal-foot">
@@ -414,7 +417,10 @@ function openEditInstallmentModal(installment, onDone) {
       p_interest_share: getMoneyValue(interestInput),
     });
     if (error) {
-      document.getElementById('ei-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+      const msg = (error.message || '').includes('AMOUNT_BELOW_ALREADY_PAID')
+        ? 'Capital ou juros não podem ficar abaixo do valor já pago parcialmente nesta parcela.'
+        : error.message;
+      document.getElementById('ei-feedback').innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
       btn.disabled = false;
       return;
     }

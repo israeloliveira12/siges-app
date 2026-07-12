@@ -282,6 +282,12 @@ async function openReceberModal(source, onDone) {
           : 0;
         if (!amount || amount <= 0) throw new Error('Informe um valor válido.');
         if (amount > totalDue + lateChargeAmount + 0.01) throw new Error(`O valor não pode ser maior que o restante desta parcela mais o encargo de atraso (${formatMoney(totalDue + lateChargeAmount)}).`);
+        // Ciclo de renovação não tem controle de pagamento parcial (diferente
+        // de parcela normal) — só aceita quitação do valor cheio. Se o
+        // cliente só puder pagar uma parte, o caminho correto é "Renovar".
+        if (!isInstallment && amount < totalDue + lateChargeAmount - 0.01) {
+          throw new Error(`Ciclos de renovação não têm controle de pagamento parcial — informe o valor cheio (${formatMoney(totalDue + lateChargeAmount)}) para quitar, ou use "Renovar" se o cliente só puder pagar uma parte agora.`);
+        }
 
         if (isInstallment) {
           const { error } = await supa.rpc('receive_payment', {
@@ -337,6 +343,8 @@ async function openReceberModal(source, onDone) {
     } catch (e) {
       const msg = (e.message || '').includes('INSTALLMENT_NOT_PAYABLE')
         ? 'Esta parcela/ciclo já foi recebido ou renovado (provavelmente em outra aba ou por outro administrador). Atualize a tela.'
+        : (e.message || '').includes('INVALID_AMOUNT')
+        ? 'Valor inválido para este recebimento — confira o valor e tente novamente.'
         : (e.message || String(e));
       feedback.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
       btn.disabled = false;
