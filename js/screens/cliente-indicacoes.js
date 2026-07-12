@@ -40,11 +40,29 @@ async function renderClienteIndicacoes() {
   paintClienteIndicacoes(root, allContracts, installments || [], cycles || [], namesById);
 }
 
+// Menor data de vencimento ainda em aberto (pendente/atrasada) de um contrato
+// — usada só pra ordenar a aba "Em aberto" (atrasado/vence primeiro no topo).
+function nextDueDateFor(contractId, installments, cycles) {
+  const dates = [];
+  (installments || []).forEach((i) => { if (i.contract_id === contractId && (i.status === 'pendente' || i.status === 'atrasada')) dates.push(i.due_date); });
+  (cycles || []).forEach((r) => { if (r.contract_id === contractId && (r.status === 'pendente' || r.status === 'atrasada')) dates.push(r.new_due_date); });
+  dates.sort();
+  return dates[0] || null;
+}
+
 function paintClienteIndicacoes(root, allContracts, installments, cycles, namesById) {
   const contracts = allContracts.filter((c) => {
     const isFinalizado = c.status === 'quitado' || c.status === 'perda';
     return clienteIndicacoesTab === 'aberto' ? !isFinalizado : isFinalizado;
   });
+
+  if (clienteIndicacoesTab === 'aberto') {
+    contracts.sort((a, b) => {
+      const da = nextDueDateFor(a.id, installments, cycles) || '9999-12-31';
+      const db = nextDueDateFor(b.id, installments, cycles) || '9999-12-31';
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+  }
 
   const tabsHtml = `
     <div class="flex gap-8">
@@ -66,9 +84,8 @@ function paintClienteIndicacoes(root, allContracts, installments, cycles, namesB
     <div class="card mt-14">
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:10px">
         <div>
-          <strong>Contrato #${c.contract_number}</strong>
-          <div class="text-sm text-soft">Indicado: ${escapeHtml(namesById[c.client_id] || '—')}</div>
-          <div class="text-sm text-soft">${formatDate(c.contract_date)} · ${formatMoney(c.principal_amount)} em ${c.installments_count}x ${dueTypeLabel(c.due_type, c.custom_interval_days)}</div>
+          <strong>${escapeHtml(namesById[c.client_id] || '—')}</strong>
+          <div class="text-sm text-soft">Contrato #${c.contract_number} · ${formatDate(c.contract_date)} · ${formatMoney(c.principal_amount)} em ${c.installments_count}x ${dueTypeLabel(c.due_type, c.custom_interval_days)}</div>
         </div>
         <div class="flex items-center gap-8">
           ${statusBadge(c.status, statusLabel)}

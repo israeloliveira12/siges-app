@@ -10,7 +10,6 @@ const NAV_ITEMS = {
     { route: 'cliente/emprestimos', label: 'Empréstimos', icon: 'contract' },
     { route: 'cliente/indicacoes', label: 'Indicações', icon: 'userPlus', referralOnly: true },
     { route: 'cliente/score', label: 'Score', icon: 'score' },
-    { route: 'cliente/notificacoes', label: 'Avisos', icon: 'bell' },
   ],
   gerente: [
     { route: 'gerente/dashboard', label: 'Dashboard', icon: 'dashboard' },
@@ -29,12 +28,12 @@ const NAV_ITEMS = {
 
 // Só as rotas mais usadas viram aba direta na tabbar mobile (a tabbar só
 // cabe uns 5 itens legíveis) — o resto (se sobrar item) vai pra aba "Mais",
-// que abre uma folha com o restante do menu. Cliente tem 5 itens fixos e cabe
-// inteiro sem "Mais"; 'cliente/indicacoes' fica de fora de propósito (só
-// existe pra quem já indicou alguém) — quando existir, cai automaticamente no
-// "Mais" via moreItems abaixo. Gerente tem mais itens que isso.
+// que abre uma folha com o restante do menu. Cliente tem no máximo 5 itens
+// (dashboard/solicitar/emprestimos/indicacoes/score — 'indicacoes' só existe
+// pra quem já indicou alguém) e cabe inteiro sem "Mais" nos dois casos.
+// Gerente tem mais itens que isso.
 const MOBILE_TAB_ROUTES = {
-  cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/score', 'cliente/notificacoes'],
+  cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/indicacoes', 'cliente/score'],
   gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/contratos', 'gerente/relatorios'],
 };
 
