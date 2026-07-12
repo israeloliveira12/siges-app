@@ -85,6 +85,16 @@ html[data-theme="dark"] #app {
   --chart-line: #263340;
 
   background: var(--bg);
+  /* CRÍTICO: sem isso, qualquer texto que não declare a própria `color`
+     (a maioria — h1-h4, <p>, .card, .value, table td, etc.) herda o `color`
+     JÁ COMPUTADO do <body> (fora de #app, nunca escurece) em vez de
+     reavaliar var(--ink) aqui dentro. Resultado: texto continuava na tinta
+     clara (#14212B, quase preto) sobre fundo agora escuro — "dado sumindo"
+     reportado pelo usuário. --ink por si só cascateia certo (é variável),
+     mas `color` como PROPRIEDADE herda o valor computado do pai, não a
+     referência var() — precisa ser redeclarado aqui pra "resetar" a herança
+     a partir de #app com o --ink certo. */
+  color: var(--ink);
 }
 
 * { box-sizing: border-box; }
@@ -423,7 +433,11 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .auth-logo .sub { font-size: 11px; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; }
 .auth-tabs { display: flex; background: var(--bg); border-radius: var(--radius-sm); padding: 3px; margin-bottom: 18px; }
 .auth-tab { flex: 1; text-align: center; padding: 8px; border: none; background: none; border-radius: 6px; font-weight: 600; font-size: 13px; color: var(--ink-soft); }
-.auth-tab.active { background: #fff; color: var(--ink); box-shadow: var(--shadow); }
+/* .auth-tab também é reaproveitada fora do login (seletor de período em
+   gerente-relatorios.js/gerente-contrato-receber.js) — var(--panel) em vez
+   de #fff pra funcionar em modo escuro nesses usos, sem mudar nada no login
+   (var(--panel) resolve pro mesmo branco lá, #auth-screen nunca escurece). */
+.auth-tab.active { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
 .auth-divider { display: flex; align-items: center; gap: 10px; color: var(--ink-soft); font-size: 12px; margin: 16px 0; }
 .auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .google-btn {

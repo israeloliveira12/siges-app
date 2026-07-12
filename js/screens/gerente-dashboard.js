@@ -206,7 +206,7 @@ async function renderGerenteDashboard() {
   }
 
   root.innerHTML = `
-    <div class="card" style="background:var(--brand);color:#fff;border:none;padding:22px 24px">
+    <div class="card" style="background:var(--brand-dark);color:#fff;border:none;padding:22px 24px">
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>
       <div class="mono" style="font-size:32px;font-weight:800;margin-top:6px">${formatMoney(lucroMes)}</div>
       <div style="font-size:13px;margin-top:8px;opacity:.95">${trendBadgeHtml(lucroMes, lucroPrevPeriod, true)} <span style="opacity:.8">vs. mesmo período do mês passado</span></div>
