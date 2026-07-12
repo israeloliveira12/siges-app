@@ -65,6 +65,8 @@ export default async function handler(req, res) {
   const { event, client_id, title, body } = req.body || {};
   if (!event || !title || !body) { res.status(400).json({ error: 'Parâmetros ausentes' }); return; }
 
+  if (!caller.active) { res.status(403).json({ error: 'Conta desativada' }); return; }
+
   if (event === 'solicitacao_criada') {
     if (caller.role !== 'cliente') { res.status(403).json({ error: 'Apenas clientes disparam este evento' }); return; }
 

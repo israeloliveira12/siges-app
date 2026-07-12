@@ -189,8 +189,10 @@ async function renderClienteScoreDetalheGerente(clientId) {
     : { data: [] };
 
   const paid = (installments || []).filter((i) => i.status === 'paga');
-  const onTime = paid.filter((i) => new Date(i.paid_at) <= new Date(i.due_date + 'T23:59:59'));
-  const late = paid.filter((i) => new Date(i.paid_at) > new Date(i.due_date + 'T23:59:59'));
+  // Mesma definição do motor de score (paid_at::date <= due_date) — ver nota
+  // em cliente-score.js sobre o bug de fuso horário da comparação anterior.
+  const onTime = paid.filter((i) => i.paid_at && String(i.paid_at).slice(0, 10) <= i.due_date);
+  const late = paid.filter((i) => i.paid_at && String(i.paid_at).slice(0, 10) > i.due_date);
   const pct = (n, d) => d ? Math.round((n / d) * 100) : 0;
 
   root.innerHTML = `
@@ -213,8 +215,11 @@ async function renderClienteScoreDetalheGerente(clientId) {
   `;
 
   document.getElementById('back-to-ranking').onclick = () => renderGerenteScore();
-  document.getElementById('recalc-one').onclick = async () => {
-    await supa.rpc('recalculate_client_score', { p_client_id: clientId });
+  document.getElementById('recalc-one').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const { error } = await supa.rpc('recalculate_client_score', { p_client_id: clientId });
+    if (error) { btn.disabled = false; showToast('Erro ao recalcular: ' + error.message); return; }
     showToast('Score recalculado.');
     renderClienteScoreDetalheGerente(clientId);
   };

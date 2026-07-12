@@ -202,19 +202,23 @@ function paintPlanejamento(root, state) {
   setMoneyValue(caixaInput, calc.caixaAtual);
   attachMoneyMask(caixaInput);
 
-  document.getElementById('pl-save-caixa').onclick = async () => {
+  document.getElementById('pl-save-caixa').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
     const value = getMoneyValue(caixaInput);
     const { error } = await supa.from('system_settings').update({ planning_current_cash: value }).eq('id', true);
-    if (error) { showToast('Erro ao salvar: ' + error.message); return; }
+    if (error) { btn.disabled = false; showToast('Erro ao salvar: ' + error.message); return; }
     App.settings = { ...App.settings, planning_current_cash: value };
     showToast('Caixa atualizado.');
     renderGerentePlanejamento();
   };
 
-  document.getElementById('pl-save-ltv').onclick = async () => {
+  document.getElementById('pl-save-ltv').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
     const value = Number(document.getElementById('pl-ltv').value || 0);
     const { error } = await supa.from('system_settings').update({ planning_ltv_percent: value }).eq('id', true);
-    if (error) { showToast('Erro ao salvar: ' + error.message); return; }
+    if (error) { btn.disabled = false; showToast('Erro ao salvar: ' + error.message); return; }
     App.settings = { ...App.settings, planning_ltv_percent: value };
     showToast('LTV atualizado.');
     renderGerentePlanejamento();
@@ -238,8 +242,9 @@ function paintPlanejamento(root, state) {
     btn.onclick = async (e) => {
       e.stopPropagation();
       if (!confirm('Excluir esta dívida planejada?')) return;
+      btn.disabled = true;
       const { error } = await supa.from('planning_debts').delete().eq('id', btn.dataset.id);
-      if (error) { showToast('Erro ao excluir: ' + error.message); return; }
+      if (error) { btn.disabled = false; showToast('Erro ao excluir: ' + error.message); return; }
       renderGerentePlanejamento();
     };
   });
@@ -275,17 +280,19 @@ function openDebtModal(monthKeys, existingDebt) {
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
-  document.getElementById('confirm-debt').onclick = async () => {
+  document.getElementById('confirm-debt').onclick = async (e) => {
+    const btn = e.currentTarget;
     const name = document.getElementById('debt-name').value.trim();
     const amount = getMoneyValue(amountInput);
     const month = document.getElementById('debt-month').value;
     const feedback = document.getElementById('debt-feedback');
     if (!name) { feedback.innerHTML = `<div class="auth-error">Informe o nome da dívida.</div>`; return; }
     if (!amount || amount <= 0) { feedback.innerHTML = `<div class="auth-error">Informe um valor válido.</div>`; return; }
+    btn.disabled = true;
     const { error } = isEdit
       ? await supa.from('planning_debts').update({ month, name, amount }).eq('id', existingDebt.id)
       : await supa.from('planning_debts').insert({ month, name, amount, created_by: App.session.user.id });
-    if (error) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
+    if (error) { btn.disabled = false; feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
     close();
     showToast(isEdit ? 'Dívida atualizada.' : 'Dívida adicionada.');
     renderGerentePlanejamento();

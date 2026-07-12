@@ -32,8 +32,16 @@ async function loadProfileAndClient(userId) {
 }
 
 async function loadGlobalReferenceData() {
-  const { data: settings } = await supa.from('system_settings').select('*').maybeSingle();
-  App.settings = settings;
+  // SELECT direto em system_settings é exclusivo de gerente (RLS) — cliente
+  // usa a RPC public_company_info(), que só devolve os 2 campos que ele
+  // realmente consome (company_name/company_whatsapp), sem vazar taxas/caixa.
+  if (isGerente()) {
+    const { data: settings } = await supa.from('system_settings').select('*').maybeSingle();
+    App.settings = settings;
+  } else {
+    const { data } = await supa.rpc('public_company_info');
+    App.settings = (data && data[0]) || null;
+  }
 }
 
 async function onAuthenticated(session) {

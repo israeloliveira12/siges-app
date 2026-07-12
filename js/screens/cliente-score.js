@@ -14,7 +14,12 @@ async function renderClienteScore() {
     : { data: [] };
 
   const paid = (installments || []).filter((i) => i.status === 'paga');
-  const onTime = paid.filter((i) => new Date(i.paid_at) <= new Date(i.due_date + 'T23:59:59'));
+  // Compara datas puras (paid_at::date <= due_date), mesma definição usada no
+  // motor de score (recalculate_client_score, schema.sql) — comparar o
+  // instante UTC de paid_at com due_date+'T23:59:59' parseado em fuso LOCAL
+  // inflava o indicador (o cutoff local vira mais tarde em UTC, "perdoando"
+  // pagamentos feitos até ~1 dia depois do vencimento).
+  const onTime = paid.filter((i) => i.paid_at && String(i.paid_at).slice(0, 10) <= i.due_date);
   const pct = (n, d) => d ? Math.round((n / d) * 100) : 0;
 
   root.innerHTML = `

@@ -124,9 +124,11 @@ async function renderGerenteConfiguracoes() {
   attachMoneyMask(document.getElementById('cfg-exit-fee-fixed'));
   attachMoneyMask(document.getElementById('cfg-entry-fee-fixed'));
 
-  document.getElementById('cfg-save').onclick = async () => {
+  document.getElementById('cfg-save').onclick = async (e) => {
+    const btn = e.currentTarget;
     const feedback = document.getElementById('cfg-feedback');
     feedback.innerHTML = '';
+    btn.disabled = true;
     const payload = {
       company_name: document.getElementById('cfg-company-name').value.trim(),
       company_whatsapp: document.getElementById('cfg-company-whatsapp').value.replace(/\D/g, '') || null,
@@ -142,6 +144,7 @@ async function renderGerenteConfiguracoes() {
       backup_custom_days: parseInt(document.getElementById('cfg-backup-custom-days').value || '7', 10),
     };
     const { error } = await supa.from('system_settings').update(payload).eq('id', true);
+    btn.disabled = false;
     if (error) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
     App.settings = { ...App.settings, ...payload };
     showToast('Configurações salvas.');

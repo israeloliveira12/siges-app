@@ -37,7 +37,7 @@ create table profiles (
   phone text,
   email text not null,
   avatar_url text,
-  created_by uuid references profiles(id),
+  created_by uuid references profiles(id) on delete set null,
   active boolean not null default true,
   is_primary_admin boolean not null default false, -- só o 1º gerente criado; pode apagar todos os dados
   created_at timestamptz not null default now(),
@@ -56,7 +56,7 @@ create table clients (
   salary text,
   pix_key text,
   approval_status client_approval_status not null default 'pendente',
-  decided_by uuid references profiles(id),
+  decided_by uuid references profiles(id) on delete set null,
   decided_at timestamptz,
   decision_reason text,
   score integer not null default 50 check (score between 0 and 100),
@@ -79,7 +79,7 @@ create table loan_requests (
   requested_custom_interval_days integer, -- só usado quando requested_due_type = 'personalizado'
   message text,
   status request_status not null default 'pendente',
-  decided_by uuid references profiles(id),
+  decided_by uuid references profiles(id) on delete set null,
   decision_reason text,
   decided_at timestamptz,
   resulting_contract_id uuid,
@@ -110,8 +110,8 @@ create table loan_contracts (
   first_installment_date date not null,
 
   allows_renewal boolean not null default true,
-  late_fee_percent numeric(6,3) not null default 0,
-  late_interest_percent numeric(6,3) not null default 0,
+  late_fee_percent numeric(6,3) not null default 0 check (late_fee_percent >= 0),
+  late_interest_percent numeric(6,3) not null default 0 check (late_interest_percent >= 0),
 
   status contract_status not null default 'em_aberto',
   observations text,
@@ -700,6 +700,22 @@ language sql stable
 security definer set search_path = public
 as $$
   select email from profiles where cpf = p_cpf limit 1;
+$$;
+
+-- 5.5c Dados públicos da empresa pro cliente (nome/whatsapp) — o SELECT
+-- direto em system_settings é exclusivo de gerente (vazava taxas/caixa
+-- interno), então o cliente usa esta RPC pros 2 únicos campos que precisa.
+create or replace function public_company_info()
+returns table (company_name text, company_whatsapp text)
+language plpgsql stable
+security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'FORBIDDEN';
+  end if;
+  return query select s.company_name, s.company_whatsapp from system_settings s where s.id = true;
+end;
 $$;
 
 -- 5.6 Rejeitar solicitação
@@ -1452,10 +1468,18 @@ create policy "clients_gerente_update" on clients for update using (is_gerente()
 -- loan_requests
 create policy "requests_select" on loan_requests for select
   using (client_id = auth.uid() or is_gerente());
+-- with check trava também os campos de DECISÃO (status/decided_by/etc.) —
+-- sem isso, um cliente técnico conseguia inserir a própria solicitação já
+-- com status='aprovado' via REST direto, contornando a aprovação do gerente.
 create policy "requests_insert_self" on loan_requests for insert
   with check (
     client_id = auth.uid()
     and exists (select 1 from clients c where c.profile_id = auth.uid() and c.approval_status = 'aprovado')
+    and status = 'pendente'
+    and decided_by is null
+    and decision_reason is null
+    and decided_at is null
+    and resulting_contract_id is null
   );
 create policy "requests_update_gerente" on loan_requests for update
   using (is_gerente());
@@ -1504,10 +1528,12 @@ create policy "push_insert_own" on push_subscriptions for insert with check (pro
 create policy "push_delete_own" on push_subscriptions for delete using (profile_id = auth.uid());
 
 -- system_settings
--- Só usuários autenticados (cliente ou gerente) leem — antes qualquer
--- visitante anônimo conseguia ler taxas/percentuais internos direto pela
--- API REST do Supabase (a anon key é pública, embutida no JS do site).
-create policy "settings_select_authenticated" on system_settings for select using (auth.uid() is not null);
+-- Só gerentes leem a tabela inteira — vazava taxas/percentuais/caixa interno
+-- pra qualquer cliente autenticado (a anon key é pública, e a policy antiga
+-- só checava auth.uid() is not null, sem checar o papel). Cliente usa a RPC
+-- public_company_info() (security definer, ver seção 5) que só devolve
+-- company_name/company_whatsapp — os 2 únicos campos que ele realmente usa.
+create policy "settings_select_gerente" on system_settings for select using (is_gerente());
 -- is_primary_admin(), não is_gerente(): Configurações é tela exclusiva do
 -- Administrador (routes primaryOnly:true no router) — antes um gerente
 -- secundário conseguia alterar taxas/thresholds/caixa via REST direto,
