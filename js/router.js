@@ -57,6 +57,12 @@ const router = {
       this.navigate('#/gerente/dashboard');
       return;
     }
+    // 'Indicações' só existe pra cliente que já indicou alguém — acessar via
+    // hash direto sem isso redireciona, mesma lógica de primaryOnly acima.
+    if (config.referralOnly && !App.hasReferrals) {
+      this.navigate('#/cliente/dashboard');
+      return;
+    }
 
     this.currentPath = segments.join('/');
     this.currentParams = params;

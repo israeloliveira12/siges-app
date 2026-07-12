@@ -8,6 +8,7 @@ const NAV_ITEMS = {
     { route: 'cliente/dashboard', label: 'Início', icon: 'dashboard' },
     { route: 'cliente/solicitar', label: 'Solicitar', icon: 'plus' },
     { route: 'cliente/emprestimos', label: 'Empréstimos', icon: 'contract' },
+    { route: 'cliente/indicacoes', label: 'Indicações', icon: 'userPlus', referralOnly: true },
     { route: 'cliente/score', label: 'Score', icon: 'score' },
     { route: 'cliente/notificacoes', label: 'Avisos', icon: 'bell' },
   ],
@@ -28,8 +29,10 @@ const NAV_ITEMS = {
 
 // Só as rotas mais usadas viram aba direta na tabbar mobile (a tabbar só
 // cabe uns 5 itens legíveis) — o resto (se sobrar item) vai pra aba "Mais",
-// que abre uma folha com o restante do menu. Cliente tem exatamente 5 itens
-// e cabe inteiro sem "Mais"; gerente tem mais itens que isso.
+// que abre uma folha com o restante do menu. Cliente tem 5 itens fixos e cabe
+// inteiro sem "Mais"; 'cliente/indicacoes' fica de fora de propósito (só
+// existe pra quem já indicou alguém) — quando existir, cai automaticamente no
+// "Mais" via moreItems abaixo. Gerente tem mais itens que isso.
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/score', 'cliente/notificacoes'],
   gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/contratos', 'gerente/relatorios'],
@@ -51,7 +54,7 @@ function toggleMobileMoreMenu(forceOpen) {
 function renderShellForRole() {
   const role = isGerente() ? 'gerente' : 'cliente';
   const isPrimary = !!(App.profile && App.profile.is_primary_admin);
-  const items = NAV_ITEMS[role].filter((i) => !i.primaryOnly || isPrimary);
+  const items = NAV_ITEMS[role].filter((i) => (!i.primaryOnly || isPrimary) && (!i.referralOnly || App.hasReferrals));
 
   document.getElementById('sidebar-nav').innerHTML = items.map((i) => navLinkHtml(i)).join('');
   document.getElementById('sidebar-nav').querySelectorAll('a').forEach((a) => {

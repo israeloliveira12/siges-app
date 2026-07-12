@@ -38,9 +38,12 @@ async function loadGlobalReferenceData() {
   if (isGerente()) {
     const { data: settings } = await supa.from('system_settings').select('*').maybeSingle();
     App.settings = settings;
+    App.hasReferrals = false;
   } else {
     const { data } = await supa.rpc('public_company_info');
     App.settings = (data && data[0]) || null;
+    const { data: hasReferrals } = await supa.rpc('has_referrals');
+    App.hasReferrals = !!hasReferrals;
   }
 }
 

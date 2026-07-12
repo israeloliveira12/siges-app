@@ -63,7 +63,13 @@ create table clients (
   score_tier text not null default 'Atenção',
   score_updated_at timestamptz,
   notes text,
-  created_at timestamptz not null default now()
+  -- Feature "Indicações": quem indicou este cliente (preenchido pelo gerente
+  -- no cadastro via busca por nome — ver search_clients_for_referral).
+  -- Nullable/on delete set null: não afeta nenhum cliente existente e não
+  -- bloqueia exclusão do indicador.
+  referred_by_client_id uuid references clients(profile_id) on delete set null,
+  created_at timestamptz not null default now(),
+  constraint clients_no_self_referral check (referred_by_client_id is distinct from profile_id)
 );
 
 -- 2.3 loan_requests — solicitação do cliente (pré-contrato)
@@ -718,6 +724,73 @@ begin
 end;
 $$;
 
+-- 5.5d Feature "Indicações" — cliente indica outro cliente (clients.
+-- referred_by_client_id, preenchido pelo gerente no cadastro). Quem indicou
+-- acompanha o andamento da dívida de quem ele indicou num menu próprio.
+
+-- Usada só dentro de RLS (loan_contracts/installments/renewal_cycles) —
+-- nunca chamada direto pelo frontend.
+create or replace function is_referrer_of(p_client_id uuid)
+returns boolean
+language sql stable
+security definer set search_path = public
+as $$
+  select exists(select 1 from clients where profile_id = p_client_id and referred_by_client_id = auth.uid());
+$$;
+
+-- Gate leve do menu "Indicações" — chamada 1x no login do cliente.
+create or replace function has_referrals()
+returns boolean
+language sql stable
+security definer set search_path = public
+as $$
+  select exists(select 1 from clients where referred_by_client_id = auth.uid());
+$$;
+
+-- Lista curada (só profile_id + nome) de quem o cliente logado indicou — a
+-- tela Indicações usa isso pra saber DE QUEM buscar contratos/parcelas.
+-- Bypassa RLS de clients/profiles por ser security definer, mas devolve só 2
+-- campos não-sensíveis — nunca CPF/telefone/endereço/renda/pix do indicado
+-- (esses ficam protegidos pela RLS normal de clients, que não muda).
+create or replace function list_my_referred_clients()
+returns table (client_id uuid, full_name text)
+language sql stable
+security definer set search_path = public
+as $$
+  select c.profile_id, p.full_name
+  from clients c
+  join profiles p on p.id = c.profile_id
+  where c.referred_by_client_id = auth.uid()
+  order by p.full_name;
+$$;
+
+-- Autocomplete do campo "Indicado por": busca clientes por nome (parcial,
+-- case-insensitive) enquanto o gerente digita. Só gerente chama (vaza nomes/
+-- CPF de outros clientes). p_exclude_client_id evita que o próprio cliente em
+-- edição apareça como opção de indicador (defesa em profundidade — o mesmo
+-- já é bloqueado pelo check clients_no_self_referral no banco).
+create or replace function search_clients_for_referral(p_query text, p_exclude_client_id uuid default null)
+returns table (profile_id uuid, full_name text, cpf text)
+language plpgsql stable
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then
+    raise exception 'FORBIDDEN';
+  end if;
+
+  return query
+    select p.id, p.full_name, p.cpf
+    from profiles p
+    join clients c on c.profile_id = p.id
+    where p.role = 'cliente'
+      and (p_exclude_client_id is null or p.id <> p_exclude_client_id)
+      and p.full_name ilike '%' || trim(p_query) || '%'
+    order by p.full_name
+    limit 8;
+end;
+$$;
+
 -- 5.6 Rejeitar solicitação
 create or replace function reject_request(p_request_id uuid, p_reason text)
 returns void
@@ -1234,7 +1307,8 @@ create or replace function update_client_profile(
   p_company text default null,
   p_job_title text default null,
   p_salary text default null,
-  p_pix_key text default null
+  p_pix_key text default null,
+  p_referred_by_client_id uuid default null
 )
 returns void
 language plpgsql
@@ -1250,7 +1324,8 @@ begin
 
   update clients set credit_limit = p_credit_limit,
     client_group = p_client_group, notes = p_notes,
-    company = p_company, job_title = p_job_title, salary = p_salary, pix_key = p_pix_key
+    company = p_company, job_title = p_job_title, salary = p_salary, pix_key = p_pix_key,
+    referred_by_client_id = p_referred_by_client_id
     where profile_id = p_client_id;
 end;
 $$;
@@ -1485,15 +1560,19 @@ create policy "requests_update_gerente" on loan_requests for update
   using (is_gerente());
 
 -- loan_contracts
+-- is_referrer_of(client_id): quem indicou este cliente também pode ler os
+-- contratos dele (tela "Indicações") — dado financeiro, sem PII, diferente de
+-- clients/profiles (que continuam fechados pro indicador).
 create policy "contracts_select" on loan_contracts for select
-  using (client_id = auth.uid() or is_gerente());
+  using (client_id = auth.uid() or is_gerente() or is_referrer_of(client_id));
 create policy "contracts_gerente_all" on loan_contracts for all
   using (is_gerente()) with check (is_gerente());
 
 -- installments
 create policy "installments_select" on installments for select
   using (is_gerente() or exists (
-    select 1 from loan_contracts lc where lc.id = installments.contract_id and lc.client_id = auth.uid()
+    select 1 from loan_contracts lc where lc.id = installments.contract_id
+      and (lc.client_id = auth.uid() or is_referrer_of(lc.client_id))
   ));
 create policy "installments_gerente_write" on installments for all
   using (is_gerente()) with check (is_gerente());
@@ -1501,7 +1580,8 @@ create policy "installments_gerente_write" on installments for all
 -- renewal_cycles
 create policy "renewal_select" on renewal_cycles for select
   using (is_gerente() or exists (
-    select 1 from loan_contracts lc where lc.id = renewal_cycles.contract_id and lc.client_id = auth.uid()
+    select 1 from loan_contracts lc where lc.id = renewal_cycles.contract_id
+      and (lc.client_id = auth.uid() or is_referrer_of(lc.client_id))
   ));
 create policy "renewal_gerente_write" on renewal_cycles for all
   using (is_gerente()) with check (is_gerente());
@@ -1563,6 +1643,7 @@ create index idx_loan_contracts_client on loan_contracts(client_id);
 create index idx_loan_contracts_status on loan_contracts(status);
 create index idx_loan_requests_status on loan_requests(status);
 create index idx_notifications_recipient on notifications_log(recipient_id, read_at);
+create index idx_clients_referred_by on clients(referred_by_client_id);
 
 -- ============================================================================
 -- FIM DO SCHEMA

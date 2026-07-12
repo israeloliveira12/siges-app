@@ -229,6 +229,17 @@ function openClienteModal(client) {
           <div class="field"><label>Empresa</label><input type="text" id="m-company" value="${escapeHtml((client && client.company) || '')}"></div>
           <div class="field"><label>Cargo</label><input type="text" id="m-job-title" value="${escapeHtml((client && client.job_title) || '')}"></div>
         </div>
+        <div class="field">
+          <label>Indicado por (opcional)</label>
+          <div style="position:relative">
+            <div class="flex gap-8" style="align-items:center">
+              <input type="text" id="m-referred-by" placeholder="Buscar cliente por nome..." style="flex:1" autocomplete="off">
+              <button type="button" class="icon-btn" id="m-referred-by-clear" title="Remover indicação" style="display:none">${Icons.x}</button>
+            </div>
+            <div id="m-referred-by-results" class="hidden" style="position:absolute;z-index:5;top:100%;left:0;right:0;margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto;box-shadow:var(--shadow)"></div>
+          </div>
+          <div id="m-referred-by-feedback" class="text-sm mt-8"></div>
+        </div>
         <div class="field-row">
           <div class="field"><label>Renda Mensal</label><select id="m-salary">${incomeBracketOptionsHtml((client && client.salary) || null, true)}</select></div>
           <div class="field"><label>Chave Pix</label><input type="text" id="m-pix-key" value="${escapeHtml((client && client.pix_key) || '')}"></div>
@@ -254,6 +265,91 @@ function openClienteModal(client) {
   attachPhoneMask(document.getElementById('m-phone'));
   attachMoneyMask(document.getElementById('m-limit'));
   setMoneyValue(document.getElementById('m-limit'), client ? client.credit_limit : 0);
+
+  // "Indicado por" — autocomplete por nome (server-side, via
+  // search_clients_for_referral), com dropdown de resultados clicáveis.
+  // selectedReferrerId é o que realmente vai pro banco — o texto do input é
+  // só pra digitar/exibir o nome escolhido.
+  let selectedReferrerId = null;
+  let selectedReferrerName = '';
+  const referredInput = document.getElementById('m-referred-by');
+  const referredClearBtn = document.getElementById('m-referred-by-clear');
+  const referredFeedback = document.getElementById('m-referred-by-feedback');
+  const referredResults = document.getElementById('m-referred-by-results');
+
+  function setReferrerFeedback(text, ok) {
+    referredFeedback.textContent = text;
+    referredFeedback.style.color = ok ? 'var(--good)' : 'var(--ink-soft)';
+  }
+  function hideReferrerResults() {
+    referredResults.classList.add('hidden');
+    referredResults.innerHTML = '';
+  }
+  function selectReferrer(row) {
+    selectedReferrerId = row.profile_id;
+    selectedReferrerName = row.full_name;
+    referredInput.value = row.full_name;
+    hideReferrerResults();
+    setReferrerFeedback(`✓ Indicado por ${row.full_name}`, true);
+    referredClearBtn.style.display = '';
+  }
+  function clearReferrer() {
+    selectedReferrerId = null;
+    selectedReferrerName = '';
+    referredInput.value = '';
+    hideReferrerResults();
+    referredFeedback.textContent = '';
+    referredClearBtn.style.display = 'none';
+  }
+  async function searchReferrer(query) {
+    if (query.length < 2) { hideReferrerResults(); return; }
+    const { data, error } = await supa.rpc('search_clients_for_referral', {
+      p_query: query,
+      p_exclude_client_id: isEdit ? client.profile_id : null,
+    });
+    if (error || !data || !data.length) {
+      referredResults.innerHTML = `<div class="text-sm text-soft" style="padding:10px 12px">Nenhum cliente encontrado.</div>`;
+      referredResults.classList.remove('hidden');
+      return;
+    }
+    referredResults.innerHTML = data.map((r) => `
+      <div class="referrer-result-row" data-id="${r.profile_id}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--line)">
+        <div>${escapeHtml(r.full_name)}</div>
+        <div class="text-sm text-soft">${escapeHtml(formatCpf(r.cpf || '') || '—')}</div>
+      </div>
+    `).join('');
+    referredResults.classList.remove('hidden');
+    referredResults.querySelectorAll('.referrer-result-row').forEach((row) => {
+      row.onclick = () => {
+        const found = data.find((r) => r.profile_id === row.dataset.id);
+        if (found) selectReferrer(found);
+      };
+    });
+  }
+  referredInput.oninput = debounce((e) => {
+    // Editar o texto depois de já ter selecionado alguém invalida a seleção antiga.
+    if (selectedReferrerId && e.target.value !== selectedReferrerName) {
+      selectedReferrerId = null;
+      referredFeedback.textContent = '';
+      referredClearBtn.style.display = 'none';
+    }
+    searchReferrer(e.target.value.trim());
+  }, 300);
+  // Blur com pequeno atraso — dá tempo do clique num resultado registrar
+  // antes do dropdown sumir (padrão comum de autocomplete).
+  referredInput.onblur = () => setTimeout(hideReferrerResults, 150);
+  referredClearBtn.onclick = clearReferrer;
+  if (isEdit && client.referred_by_client_id) {
+    supa.from('profiles').select('id, full_name').eq('id', client.referred_by_client_id).maybeSingle()
+      .then(({ data: referrer }) => {
+        if (!referrer) return;
+        selectedReferrerId = referrer.id;
+        selectedReferrerName = referrer.full_name;
+        referredInput.value = referrer.full_name;
+        setReferrerFeedback(`✓ Indicado por ${referrer.full_name}`, true);
+        referredClearBtn.style.display = '';
+      });
+  }
 
   if (isEdit) {
     document.getElementById('reset-password-btn').onclick = async () => {
@@ -299,6 +395,7 @@ function openClienteModal(client) {
       job_title: document.getElementById('m-job-title').value.trim() || null,
       salary: document.getElementById('m-salary').value || null,
       pix_key: document.getElementById('m-pix-key').value.trim() || null,
+      referred_by_client_id: selectedReferrerId,
     };
     const btn = document.getElementById('save-modal');
     btn.disabled = true;
@@ -322,6 +419,7 @@ function openClienteModal(client) {
           p_client_group: payload.client_group, p_notes: payload.notes,
           p_company: payload.company, p_job_title: payload.job_title,
           p_salary: payload.salary, p_pix_key: payload.pix_key,
+          p_referred_by_client_id: payload.referred_by_client_id,
         });
         if (error) throw error;
       } else {
@@ -343,6 +441,7 @@ function openClienteModal(client) {
           p_client_group: payload.client_group, p_notes: payload.notes,
           p_company: payload.company, p_job_title: payload.job_title,
           p_salary: payload.salary, p_pix_key: payload.pix_key,
+          p_referred_by_client_id: payload.referred_by_client_id,
         });
         if (profileError) throw profileError;
         // Cliente criado diretamente pelo gerente já nasce aprovado (não precisa de aprovação retroativa).

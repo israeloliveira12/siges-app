@@ -9,6 +9,7 @@ const App = {
   client: null,        // linha de clients (só populada se profile.role === 'cliente')
   settings: null,       // system_settings (singleton), lido uma vez após login
   unreadCount: 0,
+  hasReferrals: false,  // cliente: já indicou alguém? controla o menu "Indicações"
 };
 
 function isGerente() {
