@@ -335,7 +335,10 @@ async function openReceberModal(source, onDone) {
       overlay.remove();
       if (typeof onDone === 'function') onDone();
     } catch (e) {
-      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+      const msg = (e.message || '').includes('INSTALLMENT_NOT_PAYABLE')
+        ? 'Esta parcela/ciclo já foi recebido ou renovado (provavelmente em outra aba ou por outro administrador). Atualize a tela.'
+        : (e.message || String(e));
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
       btn.disabled = false;
     }
   }

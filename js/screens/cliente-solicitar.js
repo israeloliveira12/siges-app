@@ -28,11 +28,14 @@ async function renderClienteSolicitar() {
 
   const clientId = App.session.user.id;
   let available = 0;
+  let limitKnown = false;
   try {
     const limit = App.client ? Number(App.client.credit_limit) : 0;
-    const { data } = await supa.rpc('client_outstanding_principal', { p_client_id: clientId });
+    const { data, error } = await supa.rpc('client_outstanding_principal', { p_client_id: clientId });
+    if (error) throw error;
     available = Math.max(0, limit - (Number(data) || 0));
-  } catch (e) { /* segue com 0 */ }
+    limitKnown = true;
+  } catch (e) { /* segue sem checagem no cliente; o servidor ainda bloqueia se ultrapassar */ }
 
   const { data: requests } = await supa
     .from('loan_requests').select('*')
@@ -108,8 +111,9 @@ async function renderClienteSolicitar() {
     const message = document.getElementById('s-message').value.trim() || null;
 
     if (!amount || amount <= 0) { feedback.innerHTML = '<div class="auth-error">Informe um valor válido.</div>'; return; }
-    if (available > 0 && amount > available) {
-      feedback.innerHTML = `<div class="auth-error">O valor solicitado ultrapassa seu limite disponível (${formatMoney(available)}). Você ainda pode enviar, mas o administrador poderá ajustar.</div>`;
+    if (limitKnown && amount > available) {
+      feedback.innerHTML = `<div class="auth-error">O valor solicitado ultrapassa seu limite de crédito disponível (${formatMoney(available)}). Reduza o valor da solicitação.</div>`;
+      return;
     }
 
     const btn = document.getElementById('s-submit');
@@ -129,7 +133,10 @@ async function renderClienteSolicitar() {
       showToast('Solicitação enviada! O administrador foi notificado.');
       await renderClienteSolicitar();
     } catch (e2) {
-      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e2.message || String(e2))}</div>`;
+      const msg = (e2.message || '').includes('CREDIT_LIMIT_EXCEEDED')
+        ? 'O valor solicitado ultrapassa seu limite de crédito disponível.'
+        : (e2.message || String(e2));
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
       btn.disabled = false;
     }
   };

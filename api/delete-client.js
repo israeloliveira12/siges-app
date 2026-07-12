@@ -5,7 +5,7 @@
    Admin API retorna erro e nada é apagado.
    ============================================================================ */
 
-import { supabaseAdminFetch, getCallerProfile } from './_lib/supabaseAdmin.js';
+import { supabaseAdminFetch, getCallerProfile, getTargetProfile } from './_lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Método não permitido' }); return; }
@@ -19,6 +19,17 @@ export default async function handler(req, res) {
 
   const { client_id } = req.body || {};
   if (!client_id) { res.status(400).json({ error: 'client_id ausente' }); return; }
+
+  // Este endpoint só existe pra excluir CLIENTE — sem essa checagem, qualquer
+  // gerente secundário ativo conseguia passar o profile_id de OUTRO gerente
+  // (inclusive o Administrador primário) como client_id: a checagem de
+  // contratos abaixo sempre dá vazio pra uma conta de gerente (nunca é
+  // client_id de contrato nenhum), e a exclusão seguia em frente.
+  const target = await getTargetProfile(client_id);
+  if (!target || target.role !== 'cliente') {
+    res.status(400).json({ error: 'Este endpoint só pode excluir contas de cliente.' });
+    return;
+  }
 
   const contractsRes = await supabaseAdminFetch(`/rest/v1/loan_contracts?client_id=eq.${client_id}&select=id&limit=1`, { method: 'GET' });
   if (contractsRes.ok && Array.isArray(contractsRes.data) && contractsRes.data.length) {

@@ -336,7 +336,7 @@ function openClienteModal(client) {
         });
         const result = await resp.json();
         if (!resp.ok) throw new Error(result.error || 'Falha ao criar cliente.');
-        await supa.rpc('update_client_profile', {
+        const { error: profileError } = await supa.rpc('update_client_profile', {
           p_client_id: result.user_id,
           p_full_name: payload.full_name, p_cpf: payload.cpf, p_phone: payload.phone,
           p_credit_limit: payload.credit_limit,
@@ -344,8 +344,10 @@ function openClienteModal(client) {
           p_company: payload.company, p_job_title: payload.job_title,
           p_salary: payload.salary, p_pix_key: payload.pix_key,
         });
+        if (profileError) throw profileError;
         // Cliente criado diretamente pelo gerente já nasce aprovado (não precisa de aprovação retroativa).
-        await supa.rpc('approve_client', { p_client_id: result.user_id });
+        const { error: approveError } = await supa.rpc('approve_client', { p_client_id: result.user_id });
+        if (approveError) throw approveError;
       }
       logAudit(isEdit ? 'cliente_editado' : 'cliente_criado', `Cliente ${payload.full_name} ${isEdit ? 'editado' : 'criado'}`, { client_id: isEdit ? client.profile_id : undefined });
       close();

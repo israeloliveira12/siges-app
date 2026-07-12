@@ -69,7 +69,10 @@ create table clients (
 -- 2.3 loan_requests — solicitação do cliente (pré-contrato)
 create table loan_requests (
   id uuid primary key default gen_random_uuid(),
-  client_id uuid not null references clients(profile_id),
+  -- CASCADE: se o cliente for excluído, a própria solicitação (que nunca virou
+  -- contrato, senão a exclusão do cliente já seria bloqueada por loan_contracts)
+  -- não tem motivo pra sobreviver e não deve impedir a exclusão.
+  client_id uuid not null references clients(profile_id) on delete cascade,
   requested_amount numeric(12,2) not null check (requested_amount > 0),
   requested_installments integer, -- obsoleto: cliente não escolhe mais parcelas, só prazo
   requested_due_type due_type,
@@ -190,7 +193,12 @@ create table payments (
 -- 2.8 notifications_log — histórico de disparos (canal extensível p/ whatsapp futuro)
 create table notifications_log (
   id uuid primary key default gen_random_uuid(),
-  recipient_id uuid not null references profiles(id),
+  -- CASCADE (diferente de related_contract_id/related_installment_id abaixo):
+  -- esses registros pertencem à PESSOA (destinatário), não são um log de
+  -- auditoria de negócio (isso é audit_log, que usa actor_id set null) — se o
+  -- destinatário for excluído, não faz sentido manter as notificações dele, e
+  -- sobretudo não deve BLOQUEAR a exclusão do cliente/gerente.
+  recipient_id uuid not null references profiles(id) on delete cascade,
   event notification_event not null,
   channel notification_channel not null,
   -- SET NULL (não CASCADE): notifications_log é um histórico de auditoria —
@@ -370,17 +378,25 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  if (new.role is distinct from old.role or new.is_primary_admin is distinct from old.is_primary_admin)
+  -- `active` entrou aqui junto de role/is_primary_admin: sem essa checagem, um
+  -- gerente desativado (sessão do navegador ainda válida — desativar não
+  -- revoga o token) conseguia se REATIVAR sozinho com um PATCH direto em
+  -- profiles (a policy profiles_update_self permite update na própria linha
+  -- sem restringir coluna), recuperando acesso total.
+  if (new.role is distinct from old.role
+      or new.is_primary_admin is distinct from old.is_primary_admin
+      or new.active is distinct from old.active)
      and not is_primary_admin()
      and coalesce(auth.role(), '') <> 'service_role' then
-    raise exception 'FORBIDDEN: só o administrador primário pode alterar papel/privilégio de uma conta';
+    raise exception 'FORBIDDEN: só o administrador primário pode alterar papel/privilégio/status de uma conta';
   end if;
   return new;
 end;
 $$;
 
+drop trigger if exists trg_prevent_profile_privilege_escalation on profiles;
 create trigger trg_prevent_profile_privilege_escalation
-  before update of role, is_primary_admin on profiles
+  before update of role, is_primary_admin, active on profiles
   for each row execute function prevent_profile_privilege_escalation();
 
 -- ============================================================================
@@ -489,6 +505,30 @@ $$;
 create trigger before_insert_loan_contract
   before insert on loan_contracts
   for each row execute function trg_check_credit_limit();
+
+-- 5.3a Defesa em profundidade: bloqueia SOLICITAÇÃO de empréstimo (cliente,
+-- pré-contrato) acima do limite de crédito disponível. Diferente de
+-- check_credit_limit (só gerente), aqui quem insere é o próprio cliente —
+-- client_outstanding_principal() já valida auth.uid() = p_client_id por baixo.
+create or replace function trg_check_credit_limit_request()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_limit numeric;
+begin
+  select credit_limit into v_limit from clients where profile_id = new.client_id;
+  if (client_outstanding_principal(new.client_id) + new.requested_amount) > coalesce(v_limit, 0) then
+    raise exception 'CREDIT_LIMIT_EXCEEDED';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger before_insert_loan_request
+  before insert on loan_requests
+  for each row execute function trg_check_credit_limit_request();
 
 -- 5.3b Número do contrato: 5 dígitos aleatórios, únicos
 create or replace function generate_contract_number()
@@ -820,24 +860,39 @@ declare
   v_payment_id uuid;
   v_client_id uuid;
   v_step interval;
+  v_status installment_status;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
 
+  if p_interest_only_amount < 0 then
+    raise exception 'INVALID_AMOUNT';
+  end if;
+
   if p_source_type = 'installment' then
-    select i.contract_id, i.principal_share, i.interest_share
-      into v_contract_id, v_principal, v_interest
+    select i.contract_id, i.principal_share, i.interest_share, i.status
+      into v_contract_id, v_principal, v_interest, v_status
       from installments i where i.id = p_source_id for update;
   else
-    select rc.contract_id, 0, (rc.full_debt_amount - 0)
-      into v_contract_id, v_principal, v_interest
+    select rc.contract_id, 0, (rc.full_debt_amount - 0), rc.status
+      into v_contract_id, v_principal, v_interest, v_status
       from renewal_cycles rc where rc.id = p_source_id for update;
     -- para ciclos já renovados, o "capital" permanece o mesmo da 1ª parcela original;
     -- full_debt_amount do ciclo anterior já é o total (capital+juros) então usamos ele
     select rc.full_debt_amount into v_full_debt from renewal_cycles rc where rc.id = p_source_id;
     v_principal := 0;
     v_interest := v_full_debt; -- mantém o valor cheio como base do próximo ciclo abaixo
+  end if;
+
+  -- defesa contra corrida: duplo-clique ou dois gerentes renovando a mesma
+  -- parcela/ciclo quase simultaneamente. O FOR UPDATE acima trava a linha, mas
+  -- sem essa checagem a 2ª chamada (liberada após a 1ª commitar) seguia em
+  -- frente do mesmo jeito, gerando um segundo renewal_cycles + payments
+  -- duplicado pro mesmo evento — mesmo padrão de proteção já usado em
+  -- receive_payment/receive_cycle_payment.
+  if v_status not in ('pendente', 'atrasada') then
+    raise exception 'INSTALLMENT_NOT_PAYABLE';
   end if;
 
   select lc.due_type, lc.client_id, lc.custom_interval_days into v_due_type, v_client_id, v_custom_days
@@ -1015,6 +1070,14 @@ declare
   v_overdue_now boolean; v_delay_penalty numeric; v_overdue_penalty numeric; v_perda_penalty numeric;
   v_qualidade numeric; v_volume numeric; v_maturidade numeric; v_score numeric;
 begin
+  -- service_role: chamada interna via refresh_overdue_status() no cron diário
+  -- (api/cron-daily-check.js), sem sessão de usuário (auth.uid() nulo). Sem
+  -- essa checagem, QUALQUER cliente autenticado podia chamar esta RPC direto
+  -- e forçar o recálculo do score de qualquer outro cliente à vontade.
+  if not is_gerente() and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'FORBIDDEN';
+  end if;
+
   select count(*) filter (where i.status = 'paga'),
          count(*) filter (where i.status = 'paga' and i.paid_at::date <= i.due_date),
          count(*) filter (where i.status = 'paga' and i.paid_at::date < i.due_date)
@@ -1130,6 +1193,10 @@ security definer set search_path = public
 as $$
 declare v_client record;
 begin
+  if not is_gerente() then
+    raise exception 'FORBIDDEN';
+  end if;
+
   for v_client in select profile_id from clients loop
     perform recalculate_client_score(v_client.profile_id);
   end loop;
@@ -1441,11 +1508,16 @@ create policy "push_delete_own" on push_subscriptions for delete using (profile_
 -- visitante anônimo conseguia ler taxas/percentuais internos direto pela
 -- API REST do Supabase (a anon key é pública, embutida no JS do site).
 create policy "settings_select_authenticated" on system_settings for select using (auth.uid() is not null);
-create policy "settings_gerente_update" on system_settings for update using (is_gerente());
+-- is_primary_admin(), não is_gerente(): Configurações é tela exclusiva do
+-- Administrador (routes primaryOnly:true no router) — antes um gerente
+-- secundário conseguia alterar taxas/thresholds/caixa via REST direto,
+-- contornando a restrição que só existia na UI.
+create policy "settings_gerente_update" on system_settings for update using (is_primary_admin());
 
 -- planning_debts
+-- is_primary_admin(): mesma razão acima — Planejamento também é primaryOnly.
 create policy "planning_debts_gerente_all" on planning_debts for all
-  using (is_gerente()) with check (is_gerente());
+  using (is_primary_admin()) with check (is_primary_admin());
 
 -- audit_log — só leitura, e só gerente. Escrita é exclusivamente via
 -- log_audit_event() (security definer, bypassa RLS), inclusive pra registrar

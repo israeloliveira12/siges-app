@@ -3,6 +3,7 @@
 Thumbs.db
 *.log
 .claude/
+graphify-out/
 
 # Material de referência/identidade visual (não faz parte do site publicado)
 Identidade Visual/
