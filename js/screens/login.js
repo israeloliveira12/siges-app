@@ -168,6 +168,25 @@ function renderPendingApprovalScreen(client) {
   document.getElementById('pending-signout').onclick = handleSignOut;
 }
 
+function renderDeactivatedGerenteScreen() {
+  const root = document.getElementById('auth-screen');
+  root.innerHTML = `
+    <div class="auth-shell">
+      <div class="auth-card text-center">
+        <div class="auth-logo">
+          ${Icons.logo}
+          <div class="name">SIGES</div>
+          <div class="sub">Serviços Financeiros</div>
+        </div>
+        <div class="auth-error">Sua conta foi desativada.</div>
+        <p class="text-sm text-soft mt-14">Um administrador precisa reativar seu acesso antes que você possa entrar novamente. Entre em contato com a Siges se acredita que isso é um engano.</p>
+        <button class="btn btn-outline btn-block mt-20" id="deactivated-signout">Sair</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('deactivated-signout').onclick = handleSignOut;
+}
+
 function renderResetPasswordModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';

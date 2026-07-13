@@ -6,7 +6,7 @@
    Body: { user_id, new_password }
    ============================================================================ */
 
-import { supabaseAdminFetch, getCallerProfile, getTargetProfile } from './_lib/supabaseAdmin.js';
+import { supabaseAdminFetch, getCallerProfile, getTargetProfile, isValidUUID } from './_lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Método não permitido' }); return; }
@@ -20,13 +20,18 @@ export default async function handler(req, res) {
 
   const { user_id, new_password } = req.body || {};
   if (!user_id || !new_password) { res.status(400).json({ error: 'Parâmetros inválidos.' }); return; }
+  if (!isValidUUID(user_id)) { res.status(400).json({ error: 'user_id inválido' }); return; }
   if (String(new_password).length < 6) { res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' }); return; }
 
   // Redefinir a senha de OUTRO gerente (inclusive o admin primário) é
   // exclusivo do admin primário — senão um gerente secundário conseguiria
   // resetar a senha de qualquer outra conta administrativa e assumi-la.
+  // O alvo precisa EXISTIR pra essa checagem valer alguma coisa — um target
+  // nulo (id que não resolve a nenhum profile) não pode silenciosamente
+  // pular a validação, senão a checagem de papel vira decorativa.
   const target = await getTargetProfile(user_id);
-  if (target && target.role === 'gerente' && !caller.is_primary_admin) {
+  if (!target) { res.status(404).json({ error: 'Usuário não encontrado.' }); return; }
+  if (target.role === 'gerente' && !caller.is_primary_admin) {
     res.status(403).json({ error: 'Apenas o Administrador pode redefinir a senha de uma conta de gerente.' });
     return;
   }

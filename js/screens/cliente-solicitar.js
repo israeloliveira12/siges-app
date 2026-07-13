@@ -37,10 +37,15 @@ async function renderClienteSolicitar() {
     limitKnown = true;
   } catch (e) { /* segue sem checagem no cliente; o servidor ainda bloqueia se ultrapassar */ }
 
-  const { data: requests } = await supa
+  const { data: requests, error: requestsError } = await supa
     .from('loan_requests').select('*')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false });
+
+  if (requestsError) {
+    root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar suas solicitações agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
+    return;
+  }
 
   root.innerHTML = `
     <div class="grid grid-2">

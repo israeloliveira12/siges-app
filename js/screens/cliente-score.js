@@ -6,12 +6,17 @@ async function renderClienteScore() {
   const root = document.getElementById('screen-cliente-score');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
-  const { data: client } = await supa.from('clients').select('*').eq('profile_id', App.session.user.id).maybeSingle();
-  const { data: contracts } = await supa.from('loan_contracts').select('id').eq('client_id', App.session.user.id);
+  const { data: client, error: e1 } = await supa.from('clients').select('*').eq('profile_id', App.session.user.id).maybeSingle();
+  const { data: contracts, error: e2 } = await supa.from('loan_contracts').select('id').eq('client_id', App.session.user.id);
   const contractIds = (contracts || []).map((c) => c.id);
-  const { data: installments } = contractIds.length
+  const { data: installments, error: e3 } = contractIds.length
     ? await supa.from('installments').select('*').in('contract_id', contractIds)
-    : { data: [] };
+    : { data: [], error: null };
+
+  if (e1 || e2 || e3) {
+    root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar seu score agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
+    return;
+  }
 
   const paid = (installments || []).filter((i) => i.status === 'paga');
   // Compara datas puras (paid_at::date <= due_date), mesma definição usada no

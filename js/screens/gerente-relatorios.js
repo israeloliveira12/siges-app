@@ -62,21 +62,33 @@ async function renderGerenteRelatorios() {
     };
   }
 
+  const body = document.getElementById('relatorios-body');
+
   if (relatoriosTab === 'futuro') {
-    const [{ data: installments }, { data: cycles }] = await Promise.all([
+    const [{ data: installments, error: fe1 }, { data: cycles, error: fe2 }] = await Promise.all([
       supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(contract_number, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
       supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(contract_number, client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
     ]);
+    if (fe1 || fe2) {
+      console.error('Erro ao carregar lançamentos futuros:', fe1 || fe2);
+      body.innerHTML = `<p class="auth-error">Não foi possível carregar os lançamentos futuros agora. Recarregue a página ou tente novamente em instantes.</p>`;
+      return;
+    }
     paintLancamentosFuturos(installments || [], cycles || []);
     return;
   }
 
   const { start, end, bucket } = periodoRange();
 
-  const [{ data: payments }, { data: contracts }] = await Promise.all([
+  const [{ data: payments, error: pe1 }, { data: contracts, error: pe2 }] = await Promise.all([
     supa.from('payments').select('*').gte('received_at', start).lt('received_at', end),
     supa.from('loan_contracts').select('*').gte('contract_date', start).lt('contract_date', end),
   ]);
+  if (pe1 || pe2) {
+    console.error('Erro ao carregar relatório:', pe1 || pe2);
+    body.innerHTML = `<p class="auth-error">Não foi possível carregar o relatório agora. Recarregue a página ou tente novamente em instantes.</p>`;
+    return;
+  }
 
   if (relatoriosTab === 'lucro') paintLucroAnalitico(payments || [], contracts || [], bucket);
   else if (relatoriosTab === 'fluxo') paintFluxoCaixa(payments || [], contracts || [], bucket);
@@ -220,7 +232,11 @@ function paintLancamentosFuturos(installments, cycles) {
 
   let items = [
     ...installments.map((i) => ({
-      tipo: 'parcela', data: i.due_date, valor: Number(i.amount_due),
+      tipo: 'parcela',
+      data: i.due_date,
+      // Saldo remanescente (não o valor cheio) — parcela com pagamento
+      // parcial já recebido não deve contar o total original como "previsto".
+      valor: Number(i.amount_due) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0),
       descricao: ((i.loan_contracts || {}).clients || {}).profiles ? ((i.loan_contracts.clients.profiles.full_name) + ' · Parcela #' + i.sequence_number) : 'Parcela #' + i.sequence_number,
       contractNumber: (i.loan_contracts || {}).contract_number, contractId: i.contract_id,
     })),

@@ -33,8 +33,13 @@ async function renderGerenteContratosLista() {
       paymentsByContract[p.contract_id].total += Number(p.amount_received);
       paymentsByContract[p.contract_id].interest += Number(p.interest_component);
     });
-    const { data: openInst } = await supa.from('installments').select('contract_id, amount_due').in('contract_id', contractIds).in('status', ['pendente', 'atrasada']);
-    (openInst || []).forEach((i) => { outstandingByContract[i.contract_id] = (outstandingByContract[i.contract_id] || 0) + Number(i.amount_due); });
+    const { data: openInst } = await supa.from('installments').select('contract_id, amount_due, principal_paid_partial, interest_paid_partial').in('contract_id', contractIds).in('status', ['pendente', 'atrasada']);
+    (openInst || []).forEach((i) => {
+      // Saldo remanescente (não o valor cheio) — parcela com pagamento
+      // parcial já recebido não deve contar o total original como "dívida atual".
+      const remaining = Number(i.amount_due) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0);
+      outstandingByContract[i.contract_id] = (outstandingByContract[i.contract_id] || 0) + remaining;
+    });
     const { data: openCycles } = await supa.from('renewal_cycles').select('contract_id, full_debt_amount, cycle_number').in('contract_id', contractIds).in('status', ['pendente', 'atrasada']);
     (openCycles || []).forEach((c) => {
       if (!outstandingByContract['cycle_' + c.contract_id] || c.cycle_number > outstandingByContract['cycle_' + c.contract_id].n) {

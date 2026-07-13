@@ -5,7 +5,7 @@
    Admin API retorna erro e nada é apagado.
    ============================================================================ */
 
-import { supabaseAdminFetch, getCallerProfile, getTargetProfile } from './_lib/supabaseAdmin.js';
+import { supabaseAdminFetch, getCallerProfile, getTargetProfile, isValidUUID } from './_lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Método não permitido' }); return; }
@@ -19,6 +19,7 @@ export default async function handler(req, res) {
 
   const { client_id } = req.body || {};
   if (!client_id) { res.status(400).json({ error: 'client_id ausente' }); return; }
+  if (!isValidUUID(client_id)) { res.status(400).json({ error: 'client_id inválido' }); return; }
 
   // Este endpoint só existe pra excluir CLIENTE — sem essa checagem, qualquer
   // gerente secundário ativo conseguia passar o profile_id de OUTRO gerente

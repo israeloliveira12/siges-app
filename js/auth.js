@@ -59,6 +59,17 @@ async function onAuthenticated(session) {
 
   await loadGlobalReferenceData();
 
+  // Desativar um gerente não revoga o token de sessão já emitido — sem essa
+  // checagem, ele entrava no shell inteiro (sidebar/dashboard/tabbar) e só
+  // descobria que foi desativado quando cada query/RPC (bloqueadas por
+  // is_gerente() no banco) começasse a falhar silenciosamente ou voltar vazia.
+  if (isGerente() && App.profile.active === false) {
+    document.getElementById('app').classList.remove('ready');
+    document.getElementById('auth-screen').classList.add('active');
+    renderDeactivatedGerenteScreen();
+    return;
+  }
+
   if (isCliente() && App.client && App.client.approval_status !== 'aprovado') {
     document.getElementById('app').classList.remove('ready');
     document.getElementById('auth-screen').classList.add('active');
@@ -187,6 +198,12 @@ async function doPasswordReset(email) {
 
 async function handleSignOut() {
   await supa.auth.signOut();
+  // Descarta qualquer resposta de API cacheada pelo service worker — evita
+  // que, num dispositivo compartilhado, o próximo usuário a logar reaproveite
+  // por engano um cache de dado financeiro da conta anterior.
+  if ('caches' in window) {
+    try { const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); } catch (e) { /* melhor esforço */ }
+  }
   location.hash = '';
   location.reload();
 }

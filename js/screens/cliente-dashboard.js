@@ -22,13 +22,18 @@ async function renderClienteDashboard() {
   const available = Math.max(0, limit - used);
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
 
-  const { count: pendingCount } = await supa
+  const { count: pendingCount, error: e1 } = await supa
     .from('loan_requests').select('id', { count: 'exact', head: true })
     .eq('client_id', clientId).eq('status', 'pendente');
 
-  const { count: openCount } = await supa
+  const { count: openCount, error: e2 } = await supa
     .from('loan_contracts').select('id', { count: 'exact', head: true })
     .eq('client_id', clientId).in('status', ['em_aberto', 'atrasado']);
+
+  if (e1 || e2) {
+    root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar seus dados agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
+    return;
+  }
 
   const score = App.client ? App.client.score : 50;
   const tier = App.client ? App.client.score_tier : 'Bom';

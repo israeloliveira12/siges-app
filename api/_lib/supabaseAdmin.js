@@ -6,6 +6,17 @@
 export const SUPABASE_URL = process.env.SUPABASE_URL;
 export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+// Todo id vindo de req.body que for interpolado numa URL (path ou query) da
+// Admin API/PostgREST PRECISA passar por aqui antes. Sem essa checagem, um
+// valor tipo "../../../../rest/v1/<tabela>?id=eq.<uuid>" é normalizado pelo
+// parser de URL (padrão WHATWG, usado pelo fetch/undici do Node) e escapa do
+// endpoint pretendido — a requisição sai com o header de service_role, que
+// ignora RLS por completo. Validar formato de UUID fecha esse vetor.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isValidUUID(v) {
+  return typeof v === 'string' && UUID_RE.test(v);
+}
+
 export async function supabaseAdminFetch(path, options = {}) {
   const res = await fetch(SUPABASE_URL + path, {
     ...options,

@@ -4,7 +4,7 @@
    .js/.css, e suba CACHE_NAME quando a lista mudar de forma significativa.
    ============================================================================ */
 
-const CACHE_NAME = 'siges-cache-v36';
+const CACHE_NAME = 'siges-cache-v37';
 
 const FILES_TO_CACHE = [
   './',
@@ -66,6 +66,16 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // Nunca intercepta/cacheia chamadas de outra origem (Supabase, Resend,
+  // etc.) — só o "shell" estático do próprio site (HTML/CSS/JS/ícones) deve
+  // passar pela estratégia de cache-com-fallback abaixo. Sem esse filtro, o
+  // service worker cacheava respostas de leitura da API (dados financeiros
+  // do cliente) sob a URL do recurso, sem levar em conta o token de sessão
+  // (PostgREST não envia Vary: Authorization) — numa oscilação de rede, o
+  // .catch() servia esse cache sem nenhum aviso de "dado desatualizado", e
+  // em dispositivo compartilhado o mesmo cache podia ser reaproveitado por
+  // outra conta que logasse em seguida.
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   event.respondWith(
     fetch(event.request, { cache: 'no-store' })
       .then((response) => {

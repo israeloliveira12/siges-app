@@ -65,8 +65,8 @@ async function renderGerenteCobrar() {
   const monthStart = today.slice(0, 7) + '-01';
 
   const [
-    { data: paymentsToday }, { data: paymentsMonth },
-    { data: dueInstallments }, { data: dueCycles },
+    { data: paymentsToday, error: e1 }, { data: paymentsMonth, error: e2 },
+    { data: dueInstallments, error: e3 }, { data: dueCycles, error: e4 },
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received').gte('received_at', monthStart),
@@ -74,12 +74,22 @@ async function renderGerenteCobrar() {
     supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(contract_number, allows_renewal, installments_count, principal_amount, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
   ]);
 
+  if (e1 || e2 || e3 || e4) {
+    console.error('Erro ao carregar dados de cobrança:', e1 || e2 || e3 || e4);
+    root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar os vencimentos agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
+    return;
+  }
+
   const sum = (rows, f) => (rows || []).reduce((s, r) => s + Number(r[f] || 0), 0);
 
   const items = [
     ...(dueInstallments || []).map((i) => ({
-      type: 'installment', id: i.id, due_date: i.due_date, amount: Number(i.amount_due), status: i.status,
-      contract: i.loan_contracts, seq: i.sequence_number, raw: i,
+      type: 'installment', id: i.id, due_date: i.due_date,
+      // Saldo remanescente real (valor cheio menos o que já foi pago
+      // parcialmente) — usar amount_due bruto infla a dívida exibida e a
+      // cobrança de juros/multa calculada em buildWhatsappUrl().
+      amount: Number(i.amount_due) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0),
+      status: i.status, contract: i.loan_contracts, seq: i.sequence_number, raw: i,
     })),
     ...(dueCycles || []).map((c) => ({
       type: 'renewal_cycle', id: c.id, due_date: c.new_due_date, amount: Number(c.full_debt_amount), status: c.status,

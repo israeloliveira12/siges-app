@@ -12,7 +12,7 @@ async function renderGerenteScore() {
   const root = document.getElementById('screen-gerente-score');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
-  const [{ data, error }, { data: paidInstallments }] = await Promise.all([
+  const [{ data, error }, { data: paidInstallments, error: error2 }] = await Promise.all([
     supa.from('clients').select('*, profiles!clients_profile_id_fkey(full_name, email)').order('score', { ascending: false }),
     // Só as 2 colunas necessárias pro KPI de "pagamento adiantado" — sem
     // join, leve mesmo somando toda a carteira (mesmo raciocínio de volume
@@ -20,7 +20,7 @@ async function renderGerenteScore() {
     supa.from('installments').select('paid_at, due_date').eq('status', 'paga'),
   ]);
 
-  if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
+  if (error || error2) { root.innerHTML = `<div class="auth-error">${escapeHtml((error || error2).message)}</div>`; return; }
 
   paintGerenteScore(root, { rows: data || [], paidInstallments: paidInstallments || [] });
 }

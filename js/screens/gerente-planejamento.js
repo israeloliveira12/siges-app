@@ -32,12 +32,20 @@ async function renderGerentePlanejamento() {
   const root = document.getElementById('screen-gerente-planejamento');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
-  const [{ data: settings }, { data: debts }, { data: pendingInst }, { data: pendingCycles }] = await Promise.all([
+  const [
+    { data: settings, error: e1 }, { data: debts, error: e2 },
+    { data: pendingInst, error: e3 }, { data: pendingCycles, error: e4 },
+  ] = await Promise.all([
     supa.from('system_settings').select('*').maybeSingle(),
     supa.from('planning_debts').select('*').order('month').order('created_at'),
-    supa.from('installments').select('amount_due').in('status', ['pendente', 'atrasada']),
+    supa.from('installments').select('amount_due, principal_paid_partial, interest_paid_partial').in('status', ['pendente', 'atrasada']),
     supa.from('renewal_cycles').select('full_debt_amount').in('status', ['pendente', 'atrasada']),
   ]);
+  if (e1 || e2 || e3 || e4) {
+    console.error('Erro ao carregar dados de planejamento:', e1 || e2 || e3 || e4);
+    root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar os dados de planejamento agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
+    return;
+  }
   App.settings = settings;
 
   const monthKeys = planningMonthKeys();
@@ -56,7 +64,11 @@ function calcPlanejamento({ settings, debtsList, pendingInst, pendingCycles }) {
   const dividaTotal = dividaBase + taxaSaida;
 
   const caixaAtual = Number((settings && settings.planning_current_cash) || 0);
-  const recebiveis = sum(pendingInst, 'amount_due') + sum(pendingCycles, 'full_debt_amount');
+  // Saldo remanescente real das parcelas (valor cheio menos pagamento
+  // parcial já recebido) — sem isso, "Recebíveis em aberto" ficava inflado
+  // pelo tanto que o cliente já pagou de cada parcela parcialmente quitada.
+  const recebiveisInst = (pendingInst || []).reduce((s, i) => s + Number(i.amount_due || 0) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0), 0);
+  const recebiveis = recebiveisInst + sum(pendingCycles, 'full_debt_amount');
   const faturamentoBase = caixaAtual + recebiveis;
   const entryPct = Number((settings && settings.default_entry_fee_percent) || 0);
   const entryFixed = Number((settings && settings.default_entry_fee_fixed) || 0);

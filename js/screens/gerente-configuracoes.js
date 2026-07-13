@@ -9,7 +9,12 @@ let cfgActiveTab = 'empresa'; // 'empresa' | 'backup' | 'risco'
 
 async function renderGerenteConfiguracoes() {
   const root = document.getElementById('screen-gerente-configuracoes');
-  const { data: settings } = await supa.from('system_settings').select('*').maybeSingle();
+  root.innerHTML = `<div class="text-soft">Carregando...</div>`;
+  const { data: settings, error } = await supa.from('system_settings').select('*').maybeSingle();
+  if (error || !settings) {
+    root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar as configurações agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
+    return;
+  }
   App.settings = settings;
   const isPrimary = App.profile.is_primary_admin;
   if (cfgActiveTab === 'risco' && !isPrimary) cfgActiveTab = 'empresa';

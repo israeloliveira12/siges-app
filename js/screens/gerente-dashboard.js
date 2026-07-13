@@ -37,17 +37,17 @@ async function renderGerenteDashboard() {
   const prevMonthEnd = prevMonthRef.getFullYear() + '-' + String(prevMonthRef.getMonth() + 1).padStart(2, '0') + '-' + String(prevMonthSameDay).padStart(2, '0');
 
   const [
-    { data: paymentsToday },
-    { data: paymentsMonth },
-    { data: paymentsPrevPeriod },
-    { data: contractsStatus },
-    { data: paymentsTrend },
-    { count: pendingRequests },
-    { data: dueSoon },
-    { data: cyclesSoon },
-    { data: entryFeesMonth },
-    { data: exitFeesMonth },
-    { data: exitFeesPrevPeriod },
+    { data: paymentsToday, error: e1 },
+    { data: paymentsMonth, error: e2 },
+    { data: paymentsPrevPeriod, error: e3 },
+    { data: contractsStatus, error: e4 },
+    { data: paymentsTrend, error: e5 },
+    { count: pendingRequests, error: e6 },
+    { data: dueSoon, error: e7 },
+    { data: cyclesSoon, error: e8 },
+    { data: entryFeesMonth, error: e9 },
+    { data: exitFeesMonth, error: e10 },
+    { data: exitFeesPrevPeriod, error: e11 },
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received, net_profit').gte('received_at', monthStart),
@@ -62,7 +62,19 @@ async function renderGerenteDashboard() {
     supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('created_at', prevMonthStart).lte('created_at', prevMonthEnd),
   ]);
 
+  const loadErrors = [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11].filter(Boolean);
+  if (loadErrors.length) {
+    console.error('Erro ao carregar dados do dashboard:', loadErrors);
+    root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar os dados do dashboard agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
+    return;
+  }
+
   const sum = (rows, field) => (rows || []).reduce((s, r) => s + Number(r[field] || 0), 0);
+  // Saldo remanescente real de uma parcela (valor cheio menos o que já foi
+  // pago parcialmente) — usar amount_due bruto infla todo "a receber"
+  // exibido em telas de gestão sempre que houve pagamento parcial.
+  const netAmountDue = (i) => Number(i.amount_due || 0) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0);
+  const netInterestShare = (i) => Number(i.interest_share || 0) - Number(i.interest_paid_partial || 0);
   const recebidoHoje = sum(paymentsToday, 'amount_received');
   const recebidoMes = sum(paymentsMonth, 'amount_received');
   // Lucro líquido = payments.net_profit (juros − taxa de ENTRADA, já embutido
@@ -84,7 +96,14 @@ async function renderGerenteDashboard() {
   // marca status='atrasada' roda 1x/dia, então uma parcela vencida há poucas
   // horas ainda pode estar com status 'pendente' até o próximo ciclo do cron.
   const atrasados = (dueSoon || []).filter((i) => i.due_date < today);
+  // Contagem exibida no card precisa incluir ciclos de renovação também —
+  // senão diverge do que a própria tela "Cobrar" (destino do botão ao lado)
+  // mostra, que já une os dois conjuntos.
+  const vencidosHojeCiclos = (cyclesSoon || []).filter((c) => c.new_due_date === today);
+  const atrasadosCiclos = (cyclesSoon || []).filter((c) => c.new_due_date < today);
+  const totalVencidosAtrasados = vencidosHoje.length + atrasados.length + vencidosHojeCiclos.length + atrasadosCiclos.length;
   const aReceberMes = (dueSoon || []).filter((i) => i.due_date && i.due_date.slice(0, 7) === today.slice(0, 7));
+  const aReceberMesCiclos = (cyclesSoon || []).filter((c) => c.new_due_date && c.new_due_date.slice(0, 7) === today.slice(0, 7));
 
   const statusCounts = { em_aberto: 0, atrasado: 0, quitado: 0, perda: 0 };
   (contractsStatus || []).forEach((c) => { statusCounts[c.status] = (statusCounts[c.status] || 0) + 1; });
@@ -115,7 +134,7 @@ async function renderGerenteDashboard() {
   const projectionByMonth = {};
   (dueSoon || []).forEach((i) => {
     const key = String(i.due_date).slice(0, 7);
-    projectionByMonth[key] = (projectionByMonth[key] || 0) + Number(i.amount_due || 0);
+    projectionByMonth[key] = (projectionByMonth[key] || 0) + netAmountDue(i);
   });
   (cyclesSoon || []).forEach((c) => {
     const key = String(c.new_due_date).slice(0, 7);
@@ -126,8 +145,10 @@ async function renderGerenteDashboard() {
     return { label: mesesPt[Number(m) - 1] + '/' + y, value: projectionByMonth[key] || 0 };
   });
   // Total geral a receber — TODAS as parcelas/ciclos pendentes/atrasados do
-  // sistema, sem limite de data (não só os próximos 6 meses).
-  const receberTotal = sum(dueSoon, 'amount_due') + sum(cyclesSoon, 'full_debt_amount');
+  // sistema, sem limite de data (não só os próximos 6 meses). Parcelas usam
+  // o saldo remanescente (não o valor cheio) — ciclos não têm controle de
+  // pagamento parcial, então full_debt_amount já é o saldo real ali.
+  const receberTotal = (dueSoon || []).reduce((s, i) => s + netAmountDue(i), 0) + sum(cyclesSoon, 'full_debt_amount');
 
   // Projeção de lucro — juros esperados (não o valor bruto da parcela/ciclo)
   // menos a taxa operacional de entrada estimada (% + fixo, config atual),
@@ -141,7 +162,9 @@ async function renderGerenteDashboard() {
   const profitByMonth = {};
   (dueSoon || []).forEach((i) => {
     const key = String(i.due_date).slice(0, 7);
-    const lucro = Number(i.interest_share || 0) - estEntryFee(Number(i.amount_due || 0));
+    // Juros líquido do que já foi pago parcialmente — sem isso, o juro de um
+    // pagamento parcial já recebido era contado de novo como lucro futuro.
+    const lucro = netInterestShare(i) - estEntryFee(netAmountDue(i));
     profitByMonth[key] = (profitByMonth[key] || 0) + lucro;
   });
   (cyclesSoon || []).forEach((c) => {
@@ -232,7 +255,7 @@ async function renderGerenteDashboard() {
       </div>
       <div class="card stat-card stat-card-compact">
         <div class="label">A receber este mês</div>
-        <div class="value mono">${formatMoney(sum(aReceberMes, 'amount_due'))}</div>
+        <div class="value mono">${formatMoney(aReceberMes.reduce((s, i) => s + netAmountDue(i), 0) + sum(aReceberMesCiclos, 'full_debt_amount'))}</div>
       </div>
       <div class="card stat-card stat-card-compact">
         <div class="label">A receber (todo o prazo)</div>
@@ -245,7 +268,7 @@ async function renderGerenteDashboard() {
         <div class="flex justify-between items-center">
           <div>
             <div class="label text-soft text-sm">Vence hoje / atrasados</div>
-            <div class="value mono" style="font-size:20px">${vencidosHoje.length + atrasados.length}</div>
+            <div class="value mono" style="font-size:20px">${totalVencidosAtrasados}</div>
           </div>
           <button class="btn btn-danger btn-sm" onclick="router.navigate('#/gerente/cobrar')">Ir para Cobrar</button>
         </div>
