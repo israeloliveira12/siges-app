@@ -336,6 +336,12 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 }
 .icon-btn svg { width: 17px; height: 17px; }
 
+/* Menu flutuante "⋮" (Editar/Excluir na lista de Clientes) — sem essa regra,
+   os <svg> dos ícones (Icons.edit/Icons.trash) não tinham nenhum CSS de
+   tamanho (o icon-btn normal não se aplica aqui) e caíam no tamanho padrão
+   do navegador pra SVG sem width/height — enorme, desproporcional. */
+.row-more-item svg { width: 16px; height: 16px; flex: none; }
+
 /* Ícone "?" discreto ao lado de um título (ex: "Score de Clientes") — bem
    menor e sem o "chip" de fundo/borda do .icon-btn normal, que ficava
    grande e chamativo demais colado num texto de topbar. */
@@ -561,6 +567,10 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 
 @media (max-width: 640px) {
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  /* Cartões de KPI do dashboard (não os gráficos) continuam em fileiras de
+     2 mesmo no celular, em vez de empilhar um a um — só o hero (fora de
+     qualquer grid) fica sozinho no topo. */
+  .dash-grid-2, .dash-grid-3, .dash-grid-4 { grid-template-columns: 1fr 1fr; }
 
   .table-scroll thead { display: none; }
   .table-scroll tr { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel); }

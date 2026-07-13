@@ -236,28 +236,12 @@ function paintLancamentosFuturos(installments, cycles) {
   items.sort((a, b) => a.data.localeCompare(b.data));
 
   const previsaoEntradas = items.reduce((s, i) => s + i.valor, 0);
-  const previsaoSaidas = 0; // este sistema não tem conceito de saída programada (novo crédito é sob demanda, não agendado)
-  const projecaoLiquida = previsaoEntradas - previsaoSaidas;
 
   const diasRestantes = (dataStr) => Math.round((new Date(dataStr) - new Date(today)) / 86400000);
 
   body.innerHTML = `
-    <div class="grid grid-3">
-      <div class="card stat-card" style="background:var(--good-dark);color:#fff">
-        <div class="label" style="color:rgba(255,255,255,.85)">Previsão de entradas</div>
-        <div class="text-sm" style="color:rgba(255,255,255,.75)">Parcelas de empréstimos + entradas programadas</div>
-        <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(previsaoEntradas)}</div>
-      </div>
-      <div class="card stat-card" style="background:var(--bad-dark);color:#fff">
-        <div class="label" style="color:rgba(255,255,255,.85)">Previsão de saídas</div>
-        <div class="text-sm" style="color:rgba(255,255,255,.75)">Saídas programadas ainda não debitadas</div>
-        <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(previsaoSaidas)}</div>
-      </div>
-      <div class="card stat-card" style="background:var(--purple, #7C5CFC);color:#fff">
-        <div class="label" style="color:rgba(255,255,255,.85)">Projeção líquida</div>
-        <div class="text-sm" style="color:rgba(255,255,255,.75)">Entradas previstas − saídas previstas</div>
-        <div class="value mono" style="color:#fff;font-size:20px">${formatMoney(projecaoLiquida)}</div>
-      </div>
+    <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:8px">
+      <p class="text-sm text-soft">Previsto: <strong class="mono" style="color:var(--ink)">${formatMoney(previsaoEntradas)}</strong> em ${items.length} lançamento${items.length === 1 ? '' : 's'}</p>
     </div>
 
     <div class="field-row mt-14">

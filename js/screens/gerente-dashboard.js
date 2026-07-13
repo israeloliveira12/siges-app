@@ -208,7 +208,7 @@ async function renderGerenteDashboard() {
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)</div>
     </div>
 
-    <div class="grid grid-2 mt-14">
+    <div class="grid grid-2 dash-grid-2 mt-14">
       <div class="card stat-card">
         <div class="label">Carteira ativa (capital emprestado)</div>
         <div class="value mono">${formatMoney(carteiraAtiva)}</div>
@@ -221,7 +221,7 @@ async function renderGerenteDashboard() {
       </div>
     </div>
 
-    <div class="grid grid-4 mt-14">
+    <div class="grid grid-4 dash-grid-4 mt-14">
       <div class="card stat-card stat-card-compact">
         <div class="label">Recebido hoje</div>
         <div class="value mono">${formatMoney(recebidoHoje)}</div>
@@ -240,7 +240,7 @@ async function renderGerenteDashboard() {
       </div>
     </div>
 
-    <div class="grid grid-2 mt-14">
+    <div class="grid grid-2 dash-grid-2 mt-14">
       <div class="card" style="border-color:var(--bad)">
         <div class="flex justify-between items-center">
           <div>
@@ -262,7 +262,7 @@ async function renderGerenteDashboard() {
     </div>
 
     <h3 class="mt-20">Visão geral dos contratos</h3>
-    <div class="grid grid-3 mt-14">
+    <div class="grid grid-3 dash-grid-3 mt-14">
       <div class="card stat-card stat-card-compact overview-card" onclick="router.navigate('#/gerente/contratos')">
         <div class="label">Em andamento</div>
         <div class="value mono">${openContracts || 0}</div>

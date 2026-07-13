@@ -5,9 +5,6 @@
 let clientesCache = [];
 let clientesSearch = '';
 let clientesTab = 'aprovado'; // 'pendente' | 'aprovado' | 'rejeitado'
-// Carteira em aberto (capital ainda emprestado, não saldo com juros — mesmo
-// cálculo/critério do card "Carteira ativa" do dashboard) por cliente.
-let carteiraByClient = {};
 
 async function renderGerenteClientes() {
   const root = document.getElementById('screen-gerente-clientes');
@@ -17,27 +14,12 @@ async function renderGerenteClientes() {
 }
 
 async function loadClientesCache() {
-  const [{ data, error }, { data: openInst }, { data: openCycles }] = await Promise.all([
-    supa.from('clients').select('*, profiles!clients_profile_id_fkey(full_name, email, cpf, phone, active)').order('created_at', { ascending: false }),
-    supa.from('installments').select('principal_share, principal_paid_partial, loan_contracts!installments_contract_id_fkey(client_id)').in('status', ['pendente', 'atrasada']),
-    supa.from('renewal_cycles').select('loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount)').in('status', ['pendente', 'atrasada']),
-  ]);
+  const { data, error } = await supa
+    .from('clients')
+    .select('*, profiles!clients_profile_id_fkey(full_name, email, cpf, phone, active)')
+    .order('created_at', { ascending: false });
   if (error) { console.error(error); clientesCache = []; return; }
   clientesCache = data || [];
-
-  carteiraByClient = {};
-  const addCarteira = (clientId, amount) => {
-    if (!clientId) return;
-    carteiraByClient[clientId] = (carteiraByClient[clientId] || 0) + amount;
-  };
-  (openInst || []).forEach((i) => {
-    const clientId = (i.loan_contracts || {}).client_id;
-    addCarteira(clientId, Number(i.principal_share || 0) - Number(i.principal_paid_partial || 0));
-  });
-  (openCycles || []).forEach((c) => {
-    const lc = c.loan_contracts || {};
-    addCarteira(lc.client_id, Number(lc.principal_amount || 0));
-  });
 }
 
 function paintClientesScreen() {
@@ -77,7 +59,7 @@ function paintClientesScreen() {
       ${rows.length ? `
       <table class="data-table table-scroll">
         <thead><tr>
-          <th>Nome</th><th>CPF</th><th>Contato</th><th>Grupo</th><th>Limite de crédito</th><th>Carteira em aberto</th><th>Score</th><th>Ações</th>
+          <th>Nome</th><th>CPF</th><th>Contato</th><th>Limite de crédito</th><th>Ações</th>
         </tr></thead>
         <tbody>
           ${rows.map((c) => {
@@ -89,10 +71,7 @@ function paintClientesScreen() {
               <td data-label="Nome"><div class="flex items-center gap-8">${avatarHtml(p.full_name, 28)}<strong>${escapeHtml(p.full_name || '—')}</strong></div></td>
               <td data-label="CPF" class="mono">${escapeHtml(formatCpf(p.cpf || '') || '—')}</td>
               <td data-label="Contato" class="mobile-hide"><div><div>${escapeHtml(p.email || '')}</div><div class="text-sm text-soft">${escapeHtml(formatPhoneBR(p.phone || ''))}</div></div></td>
-              <td data-label="Grupo" class="mobile-hide">${escapeHtml(c.client_group || '—')}</td>
               <td data-label="Limite" class="mono mobile-hide">${formatMoney(c.credit_limit)}</td>
-              <td data-label="Carteira" class="mono mobile-hide">${formatMoney(carteiraByClient[c.profile_id] || 0)}</td>
-              <td data-label="Score">${c.score} ${scoreTierBadge(c.score_tier)}</td>
               <td data-label="Ações">
                 <div class="flex gap-8">
                   ${clientesTab === 'pendente' ? `
@@ -156,8 +135,8 @@ function openRowMoreMenu(anchorBtn, clientId) {
   menu.className = 'row-more-menu';
   menu.style.cssText = `position:fixed;z-index:50;top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow);min-width:140px;overflow:hidden`;
   menu.innerHTML = `
-    <button type="button" class="row-more-edit" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:none;border:none;text-align:left;cursor:pointer;color:var(--ink);font-size:13.5px">${Icons.edit} Editar</button>
-    <button type="button" class="row-more-delete" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:none;border:none;border-top:1px solid var(--line);text-align:left;cursor:pointer;color:var(--bad);font-size:13.5px">${Icons.trash} Excluir</button>
+    <button type="button" class="row-more-edit row-more-item" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:none;border:none;text-align:left;cursor:pointer;color:var(--ink);font-size:13.5px">${Icons.edit} Editar</button>
+    <button type="button" class="row-more-delete row-more-item" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:none;border:none;border-top:1px solid var(--line);text-align:left;cursor:pointer;color:var(--bad);font-size:13.5px">${Icons.trash} Excluir</button>
   `;
   document.getElementById('app').appendChild(menu);
   const close = () => { menu.remove(); document.removeEventListener('click', onOutsideClick); };
