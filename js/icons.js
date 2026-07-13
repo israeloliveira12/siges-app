@@ -36,4 +36,5 @@ const Icons = {
   audit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6a1 1 0 0 1 1 1v1H8V4a1 1 0 0 1 1-1Z"/><path d="M8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"/><path d="m9 13 2 2 4-4"/></svg>`,
   sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>`,
   moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>`,
+  whatsapp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6.4 17.6 4 20l2.5-.7A8 8 0 1 0 4 12a7.9 7.9 0 0 0 1.1 4Z"/><path d="M9.4 9.4c0 3.1 2.6 5.7 5.7 5.7.5 0 1-.3 1.2-.8l.2-.6a.9.9 0 0 0-.4-1.1L15 11.7a.9.9 0 0 0-1 .1l-.4.4a4.8 4.8 0 0 1-2-2l.4-.4a.9.9 0 0 0 .1-1l-.9-1.1a.9.9 0 0 0-1.1-.4l-.6.2a1.3 1.3 0 0 0-.8 1.2Z"/></svg>`,
 };

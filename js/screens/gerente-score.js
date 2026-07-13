@@ -3,7 +3,7 @@
    ============================================================================ */
 
 // Módulo-level (sobrevive a repaints) — controla se cada lista mostra só o
-// top 10 ou todos os clientes daquela partição, igual ao padrão já usado em
+// top 15 ou todos os clientes daquela partição, igual ao padrão já usado em
 // plExpandedMonths (gerente-planejamento.js).
 let scoreShowAllMelhores = false;
 let scoreShowAllPiores = false;
@@ -22,15 +22,22 @@ async function renderGerenteScore() {
 
   if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
 
+  paintGerenteScore(root, { rows: data || [], paidInstallments: paidInstallments || [] });
+}
+
+// Repintura pura (sem refetch) — usada pelos toggles "Ver todos/Ver menos",
+// que só mudam quantos itens aparecem na lista já carregada. Chamar
+// renderGerenteScore() (que refaz a consulta inteira) pra isso fazia a tela
+// inteira "piscar" como um F5, mesmo o dado já estando em memória.
+function paintGerenteScore(root, { rows, paidInstallments }) {
   // Partição estrita por limiar — nunca por "top N / bottom N" — pra um
   // cliente jamais poder cair nas duas listas ao mesmo tempo. `rows` já vem
   // ordenado desc pelo score (query acima), então melhores mantém a ordem
   // (melhor primeiro) e piores é reordenado asc (pior primeiro).
-  const rows = data || [];
   const melhoresAll = rows.filter((c) => c.score >= 70);
   const pioresAll = rows.filter((c) => c.score < 70).sort((a, b) => a.score - b.score);
-  const melhores = scoreShowAllMelhores ? melhoresAll : melhoresAll.slice(0, 10);
-  const piores = scoreShowAllPiores ? pioresAll : pioresAll.slice(0, 10);
+  const melhores = scoreShowAllMelhores ? melhoresAll : melhoresAll.slice(0, 15);
+  const piores = scoreShowAllPiores ? pioresAll : pioresAll.slice(0, 15);
 
   const scoreMedio = rows.length ? rows.reduce((s, c) => s + Number(c.score || 0), 0) / rows.length : 0;
 
@@ -84,12 +91,12 @@ async function renderGerenteScore() {
       <div class="card">
         <h3>Ranking — melhores scores</h3>
         <div class="mt-8">${scoreListHtml(melhores)}</div>
-        ${melhoresAll.length > 10 ? `<button class="btn btn-ghost btn-sm mt-8" id="toggle-melhores">${scoreShowAllMelhores ? 'Ver menos' : `Ver todos (${melhoresAll.length})`}</button>` : ''}
+        ${melhoresAll.length > 15 ? `<button class="btn btn-ghost btn-sm mt-8" id="toggle-melhores">${scoreShowAllMelhores ? 'Ver menos' : `Ver todos (${melhoresAll.length})`}</button>` : ''}
       </div>
       <div class="card" style="border-color:var(--bad)">
         <h3 style="color:var(--bad)">Atenção — menores scores</h3>
         <div class="mt-8">${scoreListHtml(piores)}</div>
-        ${pioresAll.length > 10 ? `<button class="btn btn-ghost btn-sm mt-8" id="toggle-piores">${scoreShowAllPiores ? 'Ver menos' : `Ver todos (${pioresAll.length})`}</button>` : ''}
+        ${pioresAll.length > 15 ? `<button class="btn btn-ghost btn-sm mt-8" id="toggle-piores">${scoreShowAllPiores ? 'Ver menos' : `Ver todos (${pioresAll.length})`}</button>` : ''}
       </div>
     </div>
   `;
@@ -109,9 +116,9 @@ async function renderGerenteScore() {
   };
 
   const toggleMelhoresBtn = document.getElementById('toggle-melhores');
-  if (toggleMelhoresBtn) toggleMelhoresBtn.onclick = () => { scoreShowAllMelhores = !scoreShowAllMelhores; renderGerenteScore(); };
+  if (toggleMelhoresBtn) toggleMelhoresBtn.onclick = () => { scoreShowAllMelhores = !scoreShowAllMelhores; paintGerenteScore(root, { rows, paidInstallments }); };
   const togglePioresBtn = document.getElementById('toggle-piores');
-  if (togglePioresBtn) togglePioresBtn.onclick = () => { scoreShowAllPiores = !scoreShowAllPiores; renderGerenteScore(); };
+  if (togglePioresBtn) togglePioresBtn.onclick = () => { scoreShowAllPiores = !scoreShowAllPiores; paintGerenteScore(root, { rows, paidInstallments }); };
 
   root.querySelectorAll('.score-row').forEach((el) => {
     el.onclick = () => renderClienteScoreDetalheGerente(el.dataset.id);

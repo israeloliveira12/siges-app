@@ -65,7 +65,6 @@ async function renderGerenteDashboard() {
   const sum = (rows, field) => (rows || []).reduce((s, r) => s + Number(r[field] || 0), 0);
   const recebidoHoje = sum(paymentsToday, 'amount_received');
   const recebidoMes = sum(paymentsMonth, 'amount_received');
-  const recebidoPrevPeriod = sum(paymentsPrevPeriod, 'amount_received');
   // Lucro líquido = payments.net_profit (juros − taxa de ENTRADA, já embutido
   // na coluna gerada) MENOS a taxa de SAÍDA dos contratos criados no período
   // — essa segunda parte NÃO está em net_profit (é cobrada uma vez, na
@@ -92,10 +91,6 @@ async function renderGerenteDashboard() {
   const openContracts = statusCounts.em_aberto + statusCounts.atrasado;
   const finishedContracts = statusCounts.quitado + statusCounts.perda;
   const newThisMonth = (contractsStatus || []).filter((c) => String(c.created_at).slice(0, 7) === today.slice(0, 7)).length;
-  const newPrevPeriod = (contractsStatus || []).filter((c) => {
-    const d = String(c.created_at).slice(0, 10);
-    return d >= prevMonthStart && d <= prevMonthEnd;
-  }).length;
 
   // Carteira ativa — capital (não saldo com juros) ainda emprestado, ou seja,
   // não recuperado ainda. Parcelas: principal_share menos o que já foi pago
@@ -227,21 +222,20 @@ async function renderGerenteDashboard() {
     </div>
 
     <div class="grid grid-4 mt-14">
-      <div class="card stat-card">
+      <div class="card stat-card stat-card-compact">
         <div class="label">Recebido hoje</div>
         <div class="value mono">${formatMoney(recebidoHoje)}</div>
       </div>
-      <div class="card stat-card">
+      <div class="card stat-card stat-card-compact">
         <div class="label">Recebido no mês</div>
         <div class="value mono">${formatMoney(recebidoMes)}</div>
-        <div class="text-sm mt-8">${trendBadgeHtml(recebidoMes, recebidoPrevPeriod)}</div>
       </div>
-      <div class="card stat-card">
+      <div class="card stat-card stat-card-compact">
         <div class="label">A receber este mês</div>
         <div class="value mono">${formatMoney(sum(aReceberMes, 'amount_due'))}</div>
       </div>
-      <div class="card stat-card">
-        <div class="label">A receber</div>
+      <div class="card stat-card stat-card-compact">
+        <div class="label">A receber (todo o prazo)</div>
         <div class="value mono">${formatMoney(receberTotal)}</div>
       </div>
     </div>
@@ -268,24 +262,20 @@ async function renderGerenteDashboard() {
     </div>
 
     <h3 class="mt-20">Visão geral dos contratos</h3>
-    <p class="text-sm text-soft">Acompanhe o status e performance dos seus contratos</p>
     <div class="grid grid-3 mt-14">
-      <div class="card stat-card overview-card" onclick="router.navigate('#/gerente/contratos')">
+      <div class="card stat-card stat-card-compact overview-card" onclick="router.navigate('#/gerente/contratos')">
         <div class="label">Em andamento</div>
         <div class="value mono">${openContracts || 0}</div>
-        <div class="text-sm text-soft mt-8">Contratos ativos e em execução</div>
         <span class="text-sm overview-card-link">Ver todos ${Icons.chevronRight}</span>
       </div>
-      <div class="card stat-card overview-card" onclick="router.navigate('#/gerente/contratos')">
+      <div class="card stat-card stat-card-compact overview-card" onclick="router.navigate('#/gerente/contratos')">
         <div class="label">Finalizados</div>
         <div class="value mono">${finishedContracts || 0}</div>
-        <div class="text-sm text-soft mt-8">Contratos concluídos ou em perda</div>
         <span class="text-sm overview-card-link">Ver todos ${Icons.chevronRight}</span>
       </div>
-      <div class="card stat-card">
+      <div class="card stat-card stat-card-compact">
         <div class="label">Novos do mês</div>
         <div class="value mono">${newThisMonth || 0}</div>
-        <div class="text-sm mt-8">${trendBadgeHtml(newThisMonth, newPrevPeriod)}</div>
       </div>
     </div>
 
@@ -301,7 +291,7 @@ async function renderGerenteDashboard() {
       </div>
       <div class="card">
         <h3>Projeção de Lucro (6 meses)</h3>
-        <div class="mt-8">${areaChartSVG(profitSeries, { color: CHART_COLORS.good, gradId: 'lucro', ...chartSize(600, 220, 320, 200) })}</div>
+        <div class="mt-8">${areaChartSVG(profitSeries, { color: CHART_COLORS.purple, gradId: 'lucro', ...chartSize(600, 220, 320, 200) })}</div>
       </div>
     </div>
 

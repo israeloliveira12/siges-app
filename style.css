@@ -227,6 +227,13 @@ button { cursor: pointer; }
 .stat-card .value { font-family: var(--mono); font-size: 22px; font-weight: 700; margin-top: 4px; }
 .stat-card .hint { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
 
+/* Faixa secundária de KPI — mesma informação, peso visual menor, pra
+   sinalizar "contexto", não "manchete". Usada nos grupos de apoio do
+   dashboard (Recebido/A receber, Visão geral dos contratos). */
+.stat-card-compact { padding: 9px 14px; }
+.stat-card-compact .label { font-size: 11px; }
+.stat-card-compact .value { font-size: 17px; margin-top: 2px; }
+
 .overview-card { cursor: pointer; transition: box-shadow .15s, transform .15s; }
 .overview-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
 .overview-card-link {

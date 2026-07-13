@@ -46,18 +46,23 @@ async function renderGerenteAuditoria() {
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
   const fetchLimit = auditPageSize === 'todos' ? 2000 : auditPageSize;
-  const [{ data: admins }, { data: logs, error }] = await Promise.all([
-    supa.from('profiles').select('id, full_name').eq('role', 'gerente').order('full_name'),
-    supa.from('audit_log').select('*').order('created_at', { ascending: false }).limit(fetchLimit),
-  ]);
+  const { data: logs, error } = await supa.from('audit_log').select('*').order('created_at', { ascending: false }).limit(fetchLimit);
 
   if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
 
-  paintAuditoria(root, { admins: admins || [], logs: logs || [] });
+  paintAuditoria(root, { logs: logs || [] });
 }
 
-function paintAuditoria(root, { admins, logs }) {
+function paintAuditoria(root, { logs }) {
   const actionsPresent = Array.from(new Set(logs.map((l) => l.action))).sort();
+  // Derivado dos próprios logs (não uma query fixa em profiles role=gerente)
+  // — o filtro precisa listar QUALQUER ator que já gerou um evento, cliente
+  // ou gerente (ex: login_sucesso/login_falho de cliente, cliente_criado
+  // etc.), não só administradores. Antes disso, clientes nunca apareciam
+  // nessa lista mesmo tendo ações registradas.
+  const actorsPresent = Array.from(
+    new Map(logs.filter((l) => l.actor_id).map((l) => [l.actor_id, l.actor_name || 'Anônimo'])).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
 
   const filtered = logs.filter((l) => {
     if (auditActorFilter !== 'todos' && l.actor_id !== auditActorFilter) return false;
@@ -76,7 +81,7 @@ function paintAuditoria(root, { admins, logs }) {
           <label>Usuário</label>
           <select id="aud-actor">
             <option value="todos">Todos os usuários</option>
-            ${admins.map((a) => `<option value="${a.id}" ${auditActorFilter === a.id ? 'selected' : ''}>${escapeHtml(a.full_name || '—')}</option>`).join('')}
+            ${actorsPresent.map(([id, name]) => `<option value="${id}" ${auditActorFilter === id ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}
           </select>
         </div>
         <div class="field" style="min-width:220px;margin-bottom:0">
@@ -114,8 +119,8 @@ function paintAuditoria(root, { admins, logs }) {
     </div>
   `;
 
-  document.getElementById('aud-actor').onchange = (e) => { auditActorFilter = e.target.value; paintAuditoria(root, { admins, logs }); };
-  document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { admins, logs }); };
+  document.getElementById('aud-actor').onchange = (e) => { auditActorFilter = e.target.value; paintAuditoria(root, { logs }); };
+  document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { logs }); };
   document.getElementById('aud-page-size').onchange = (e) => {
     auditPageSize = e.target.value === 'todos' ? 'todos' : Number(e.target.value);
     renderGerenteAuditoria();
