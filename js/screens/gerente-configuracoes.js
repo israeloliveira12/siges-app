@@ -78,7 +78,7 @@ async function renderGerenteConfiguracoes() {
     <div id="cfg-panel-backup" class="mt-14 ${cfgActiveTab === 'backup' ? '' : 'hidden'}">
       <div class="card">
         <h3>Backup e exportação de dados</h3>
-        <p class="text-sm text-soft mt-8">O backup baixa um arquivo .json com todos os dados do sistema (clientes, contratos, parcelas, pagamentos, solicitações) direto para este computador.</p>
+        <p class="text-sm text-soft mt-8">O backup baixa dois arquivos com todos os dados do sistema (clientes, contratos, parcelas, pagamentos, solicitações) direto para este computador: um <strong>.json</strong> (dado bruto completo) e um <strong>.sql</strong> (pronto pra colar no SQL Editor do Supabase em caso de restauração).</p>
         <div class="toggle-row mt-14"><label class="switch"><input type="checkbox" id="cfg-backup-toggle" ${settings.backup_auto_enabled ? 'checked' : ''}><span class="track"></span></label><span>Backup automático ao abrir o sistema</span></div>
         <div id="cfg-backup-fields" class="mt-14 ${settings.backup_auto_enabled ? '' : 'hidden'}">
           <div class="field-row">
@@ -103,6 +103,7 @@ async function renderGerenteConfiguracoes() {
         <div class="flex gap-8 mt-14" style="flex-wrap:wrap">
           <button class="btn btn-primary" id="cfg-backup-save">Salvar backup automático</button>
           <button class="btn btn-outline" id="cfg-backup-now-btn">${Icons.printer} Fazer backup agora (.json)</button>
+          <button class="btn btn-outline" id="cfg-backup-now-sql-btn">${Icons.printer} Fazer backup agora (.sql)</button>
         </div>
 
         <h3 class="mt-20">Exportar dados</h3>
@@ -208,6 +209,11 @@ async function renderGerenteConfiguracoes() {
     const btn = e.currentTarget;
     btn.disabled = true;
     try { await runBackupJSON(false); } finally { btn.disabled = false; }
+  };
+  document.getElementById('cfg-backup-now-sql-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try { await runBackupSQL(false); } finally { btn.disabled = false; }
   };
 
   const exportFormatSelect = document.getElementById('cfg-export-format');

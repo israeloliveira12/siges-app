@@ -45,11 +45,101 @@ function downloadBlob(filename, blob) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-async function runBackupJSON(silent) {
-  const data = await collectAllSystemData();
+async function runBackupJSON(silent, preloadedData) {
+  const data = preloadedData || await collectAllSystemData();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   downloadBlob(`siges-backup-${todayISO()}.json`, blob);
-  if (!silent) showToast('Backup gerado com sucesso.');
+  if (!silent) showToast('Backup .json gerado com sucesso.');
+}
+
+// ---------------------------------------------------------------------------
+// Backup em .sql — mesmo escopo de dados do .json (as mesmas 6 tabelas),
+// só que como INSERTs prontos pra colar no SQL Editor do Supabase (a mesma
+// ferramenta já usada toda semana pras migrations), sem precisar de um
+// script de importação customizado na hora do aperto.
+// ---------------------------------------------------------------------------
+
+const SQL_TABLE_MAP = {
+  clientes: 'clients',
+  contratos: 'loan_contracts',
+  parcelas: 'installments',
+  ciclos_renovacao: 'renewal_cycles',
+  pagamentos: 'payments',
+  solicitacoes: 'loan_requests',
+};
+
+// Ordem já é FK-safe (cliente antes de contrato, contrato antes de parcela...
+// mesma ordem de SQL_TABLE_MAP/BACKUP_TABLE_LABELS). Chave primária de cada
+// tabela, usada no ON CONFLICT DO NOTHING (torna o dump seguro de rodar mais
+// de uma vez sem duplicar linha).
+const SQL_TABLE_PK = {
+  clients: 'profile_id',
+  loan_contracts: 'id',
+  installments: 'id',
+  renewal_cycles: 'id',
+  payments: 'id',
+  loan_requests: 'id',
+};
+
+function sqlEscapeString(s) {
+  return "'" + String(s).replace(/'/g, "''") + "'";
+}
+
+function sqlLiteral(v) {
+  if (v === null || v === undefined) return 'NULL';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
+  if (typeof v === 'object') return sqlEscapeString(JSON.stringify(v));
+  return sqlEscapeString(v);
+}
+
+function buildSqlDump(data) {
+  const lines = [];
+  lines.push('-- ============================================================================');
+  lines.push('-- Backup SIGES (SQL) — gerado em ' + data.generated_at);
+  lines.push('-- Cole este arquivo inteiro no SQL Editor do Supabase (o mesmo lugar onde você');
+  lines.push('-- roda as migrations) para restaurar os dados destas 6 tabelas.');
+  lines.push('--');
+  lines.push('-- ATENCAO — pré-requisito antes de rodar este dump:');
+  lines.push('-- as contas de autenticação (auth.users / profiles) de cada cliente precisam');
+  lines.push('-- já existir no banco de destino com os MESMOS IDs (profile_id abaixo). O');
+  lines.push('-- Supabase Auth guarda senha como hash irreversível — nenhum backup feito pelo');
+  lines.push('-- navegador tem acesso a ela nem à service_role key, então recriar as contas é');
+  lines.push('-- sempre um passo separado (mesma técnica já usada na importação em massa de');
+  lines.push('-- 2026-07-11: inserir em auth.users com senha temporária via crypt(), deixar o');
+  lines.push('-- trigger handle_new_user() criar profiles/clients, e depois resetar a senha de');
+  lines.push('-- cada cliente pela tela "Redefinir senha"). Sem isso, os INSERTs em "clients"');
+  lines.push('-- abaixo vão falhar por violação de chave estrangeira.');
+  lines.push('-- ============================================================================');
+  lines.push('');
+  lines.push('begin;');
+  lines.push('');
+
+  Object.keys(SQL_TABLE_MAP).forEach((key) => {
+    const table = SQL_TABLE_MAP[key];
+    const pk = SQL_TABLE_PK[table];
+    const rows = data[key] || [];
+    lines.push(`-- ---- ${table} (${rows.length} linha${rows.length === 1 ? '' : 's'}) ----`);
+    if (rows.length) {
+      const columns = Object.keys(rows[0]).filter((c) => c !== 'profiles');
+      rows.forEach((row) => {
+        const values = columns.map((c) => sqlLiteral(row[c]));
+        lines.push(`insert into ${table} (${columns.join(', ')}) values (${values.join(', ')}) on conflict (${pk}) do nothing;`);
+      });
+    }
+    lines.push('');
+  });
+
+  lines.push('commit;');
+  return lines.join('\n');
+}
+
+async function runBackupSQL(silent, preloadedData) {
+  const data = preloadedData || await collectAllSystemData();
+  const sql = buildSqlDump(data);
+  const blob = new Blob([sql], { type: 'application/sql' });
+  downloadBlob(`siges-backup-${todayISO()}.sql`, blob);
+  if (!silent) showToast('Backup .sql gerado com sucesso.');
 }
 
 function flattenRowForSheet(row) {
@@ -334,7 +424,13 @@ function shouldAutoBackupNow() {
 async function maybeRunAutoBackup() {
   try {
     if (!isGerente() || !shouldAutoBackupNow()) return;
-    await runBackupJSON(true);
+    const data = await collectAllSystemData();
+    await runBackupJSON(true, data);
+    // Pequeno intervalo entre os dois downloads — disparar dois arquivos no
+    // mesmíssimo instante às vezes faz o navegador tratar o segundo como
+    // pop-up/spam e bloquear silenciosamente.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await runBackupSQL(true, data);
     localStorage.setItem('siges_last_auto_backup', todayISO());
   } catch (e) { /* falha silenciosa — tenta de novo no próximo acesso */ }
 }

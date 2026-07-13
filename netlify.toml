@@ -1,0 +1,18 @@
+# ============================================================================
+# Configuração de migração para Netlify — dormente enquanto o site roda na
+# Vercel (vercel.json continua sendo a configuração ativa). Ver a seção
+# "Pacote de migração para Netlify" em CLAUDE.md para o runbook completo e a
+# regra de manter isto sincronizado com api/*.js.
+# ============================================================================
+
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# Preserva 100% das chamadas do frontend (fetch('/api/create-user', ...) etc.)
+# sem precisar mudar nenhuma linha de js/*.js — só redireciona por baixo dos
+# panos para onde o Netlify Functions realmente vive.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
