@@ -568,9 +568,25 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 @media (max-width: 640px) {
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
   /* Cartões de KPI do dashboard (não os gráficos) continuam em fileiras de
-     2 mesmo no celular, em vez de empilhar um a um — só o hero (fora de
-     qualquer grid) fica sozinho no topo. */
+     2 mesmo no celular, em vez de empilhar um a um — só o hero, "Vence
+     hoje/atrasados" e "Solicitações pendentes" (fora de qualquer .dash-grid)
+     ficam sozinhos, cada um ocupando a largura inteira. */
   .dash-grid-2, .dash-grid-3, .dash-grid-4 { grid-template-columns: 1fr 1fr; }
+
+  /* Carteira ativa/atraso mantém o texto descritivo completo no desktop de
+     propósito (card de risco, merece destaque) — mas ao lado do outro card
+     da mesma fileira no celular, esse texto extra desalinha a altura e foge
+     do padrão compacto dos demais grupos de 2 em 2. Só no celular, reduz
+     pro mesmo respiro/fonte dos cards compactos e esconde a legenda. */
+  .dash-grid-2 .stat-card { padding: 9px 14px; }
+  .dash-grid-2 .stat-card .label { font-size: 11px; }
+  .dash-grid-2 .stat-card .value { font-size: 17px; margin-top: 2px; }
+  .dash-grid-2 .stat-card .text-sm.text-soft { display: none; }
+
+  /* grid-3 (Visão geral dos contratos) tem 3 cards — em 2 colunas, o 3º
+     ficaria sozinho e desalinhado numa fileira pela metade. Ocupa a largura
+     inteira sozinho em vez disso, mantendo os outros dois pareados. */
+  .dash-grid-3 > :nth-child(3) { grid-column: 1 / -1; }
 
   .table-scroll thead { display: none; }
   .table-scroll tr { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel); }

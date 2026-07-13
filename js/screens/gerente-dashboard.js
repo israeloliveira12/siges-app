@@ -240,7 +240,7 @@ async function renderGerenteDashboard() {
       </div>
     </div>
 
-    <div class="grid grid-2 dash-grid-2 mt-14">
+    <div class="grid grid-2 mt-14">
       <div class="card" style="border-color:var(--bad)">
         <div class="flex justify-between items-center">
           <div>
