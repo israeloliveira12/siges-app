@@ -228,30 +228,38 @@ function openResetClientPasswordModal(client, p) {
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal" style="max-width:420px">
-      <div class="modal-head"><h3>Redefinir senha</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-head"><h3>Redefinir senha</h3><button class="icon-btn" id="rp-close">${Icons.x}</button></div>
       <div class="modal-body">
         <p class="text-sm text-soft">Nova senha para ${escapeHtml(p.full_name || 'o cliente')}.</p>
         <div class="field mt-14"><label>Nova senha</label>${passwordFieldHtml('rp-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
         <div id="rp-feedback"></div>
       </div>
       <div class="modal-foot">
-        <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
+        <button class="btn btn-ghost" id="rp-cancel">Cancelar</button>
         <button class="btn btn-primary" id="rp-confirm">Redefinir</button>
       </div>
     </div>`;
   document.getElementById('app').appendChild(overlay);
+  // Escopado em `overlay` (nunca `document.getElementById`) — este popup
+  // fica empilhado por cima do modal de editar cliente, que já usa os IDs
+  // genéricos "close-modal"/"cancel-modal". Um modal aberto por cima do
+  // outro com IDs repetidos faz `document.getElementById` pegar sempre o
+  // elemento do modal de baixo (o primeiro no DOM), religando os botões do
+  // popup pro modal errado — bug real corrigido (2026-07-14): X/Cancelar do
+  // popup não fechavam nada porque o clique ia pro botão escondido atrás.
   const close = () => overlay.remove();
-  document.getElementById('close-modal').onclick = close;
-  document.getElementById('cancel-modal').onclick = close;
+  overlay.querySelector('#rp-close').onclick = close;
+  overlay.querySelector('#rp-cancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
   wirePasswordToggles(overlay);
 
-  document.getElementById('rp-confirm').onclick = async () => {
-    const feedback = document.getElementById('rp-feedback');
-    const input = document.getElementById('rp-password');
+  overlay.querySelector('#rp-confirm').onclick = async () => {
+    const feedback = overlay.querySelector('#rp-feedback');
+    const input = overlay.querySelector('#rp-password');
     const newPassword = input.value;
     feedback.innerHTML = '';
     if (newPassword.length < 6) { feedback.innerHTML = `<div class="auth-error">A senha precisa ter pelo menos 6 caracteres.</div>`; return; }
-    const btn = document.getElementById('rp-confirm');
+    const btn = overlay.querySelector('#rp-confirm');
     btn.disabled = true;
     try {
       const { data: { session } } = await supa.auth.getSession();
