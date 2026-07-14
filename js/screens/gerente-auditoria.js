@@ -33,7 +33,7 @@ function auditActionBadgeColor(action) {
   return 'var(--ink-soft)';
 }
 
-let auditActorFilter = 'todos';
+let auditActorSearch = '';
 let auditActionFilter = 'todos';
 // Quantidade de eventos buscados do banco — não só escondidos no cliente,
 // pra tela não ficar lenta conforme o histórico crescer. 'todos' ainda usa
@@ -46,14 +46,33 @@ async function renderGerenteAuditoria() {
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
   const fetchLimit = auditPageSize === 'todos' ? 2000 : auditPageSize;
-  const { data: logs, error } = await supa.from('audit_log').select('*').order('created_at', { ascending: false }).limit(fetchLimit);
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
 
-  if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
+  // Sumário sempre calculado com queries próprias (contagem no servidor),
+  // independente do filtro/paginação da tabela abaixo — senão "última hora"
+  // ficaria errado sempre que auditPageSize fosse menor que o volume real.
+  const [
+    { data: logs, error },
+    { count: lastHourCount, error: e1 },
+    { count: loginsHojeCount, error: e2 },
+    { count: falhasHojeCount, error: e3 },
+  ] = await Promise.all([
+    supa.from('audit_log').select('*').order('created_at', { ascending: false }).limit(fetchLimit),
+    supa.from('audit_log').select('id', { count: 'exact', head: true }).gte('created_at', oneHourAgo),
+    supa.from('audit_log').select('id', { count: 'exact', head: true }).eq('action', 'login_sucesso').gte('created_at', todayStart.toISOString()),
+    supa.from('audit_log').select('id', { count: 'exact', head: true }).eq('action', 'login_falho').gte('created_at', todayStart.toISOString()),
+  ]);
 
-  paintAuditoria(root, { logs: logs || [] });
+  if (error || e1 || e2 || e3) { root.innerHTML = `<div class="auth-error">${escapeHtml((error || e1 || e2 || e3).message)}</div>`; return; }
+
+  paintAuditoria(root, {
+    logs: logs || [],
+    summary: { lastHourCount: lastHourCount || 0, loginsHojeCount: loginsHojeCount || 0, falhasHojeCount: falhasHojeCount || 0 },
+  });
 }
 
-function paintAuditoria(root, { logs }) {
+function paintAuditoria(root, { logs, summary }) {
   const actionsPresent = Array.from(new Set(logs.map((l) => l.action))).sort();
   // Derivado dos próprios logs (não uma query fixa em profiles role=gerente)
   // — o filtro precisa listar QUALQUER ator que já gerou um evento, cliente
@@ -64,25 +83,36 @@ function paintAuditoria(root, { logs }) {
     new Map(logs.filter((l) => l.actor_id).map((l) => [l.actor_id, l.actor_name || 'Anônimo'])).entries()
   ).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
 
+  const term = auditActorSearch.trim().toLowerCase();
   const filtered = logs.filter((l) => {
-    if (auditActorFilter !== 'todos' && l.actor_id !== auditActorFilter) return false;
+    if (term && !(l.actor_name || 'anônimo').toLowerCase().includes(term)) return false;
     if (auditActionFilter !== 'todos' && l.action !== auditActionFilter) return false;
     return true;
   });
+
+  const oldActorInput = document.getElementById('aud-actor');
+  const hadFocus = document.activeElement === oldActorInput;
+  const selStart = hadFocus ? oldActorInput.selectionStart : null;
 
   root.innerHTML = `
     <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
       <p class="text-sm text-soft">Trilha das ações importantes do sistema — mostrando os ${logs.length} eventos mais recentes.</p>
     </div>
 
+    <div class="grid grid-3 mt-14">
+      <div class="card stat-card"><div class="label">Ações na última hora</div><div class="value mono">${summary.lastHourCount}</div></div>
+      <div class="card stat-card"><div class="label">Logins hoje</div><div class="value mono">${summary.loginsHojeCount}</div></div>
+      <div class="card stat-card"><div class="label">Falhas de login hoje</div><div class="value mono" style="${summary.falhasHojeCount > 0 ? 'color:var(--bad)' : ''}">${summary.falhasHojeCount}</div></div>
+    </div>
+
     <div class="card mt-14">
       <div class="flex gap-14" style="flex-wrap:wrap">
         <div class="field" style="min-width:220px;margin-bottom:0">
           <label>Usuário</label>
-          <select id="aud-actor">
-            <option value="todos">Todos os usuários</option>
-            ${actorsPresent.map(([id, name]) => `<option value="${id}" ${auditActorFilter === id ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}
-          </select>
+          <input type="text" id="aud-actor" list="aud-actor-options" placeholder="Buscar por nome..." value="${escapeHtml(auditActorSearch)}">
+          <datalist id="aud-actor-options">
+            ${actorsPresent.map(([, name]) => `<option value="${escapeHtml(name)}">`).join('')}
+          </datalist>
         </div>
         <div class="field" style="min-width:220px;margin-bottom:0">
           <label>Ação</label>
@@ -119,8 +149,10 @@ function paintAuditoria(root, { logs }) {
     </div>
   `;
 
-  document.getElementById('aud-actor').onchange = (e) => { auditActorFilter = e.target.value; paintAuditoria(root, { logs }); };
-  document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { logs }); };
+  const newActorInput = document.getElementById('aud-actor');
+  if (hadFocus) { newActorInput.focus(); newActorInput.setSelectionRange(selStart, selStart); }
+  newActorInput.oninput = debounce((e) => { auditActorSearch = e.target.value; paintAuditoria(root, { logs, summary }); }, 200);
+  document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { logs, summary }); };
   document.getElementById('aud-page-size').onchange = (e) => {
     auditPageSize = e.target.value === 'todos' ? 'todos' : Number(e.target.value);
     renderGerenteAuditoria();

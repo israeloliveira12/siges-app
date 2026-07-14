@@ -58,8 +58,8 @@ async function renderGerenteDashboard() {
     supa.from('installments').select('amount_due, due_date, status, principal_share, interest_share, principal_paid_partial, interest_paid_partial, loan_contracts!installments_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
     supa.from('renewal_cycles').select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
     supa.from('payments').select('operational_fee_amount').eq('has_operational_fee', true).gte('received_at', monthStart),
-    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('created_at', monthStart),
-    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('created_at', prevMonthStart).lte('created_at', prevMonthEnd),
+    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', monthStart),
+    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', prevMonthStart).lte('contract_date', prevMonthEnd),
   ]);
 
   const loadErrors = [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11].filter(Boolean);
@@ -87,6 +87,15 @@ async function renderGerenteDashboard() {
   // esquecia (bug real reportado pelo usuário, 2026-07-11). O ajuste do
   // período anterior (`taxaSaidaPrevPeriod`) existe pra comparação ▲/▼ do
   // trend badge não ficar comparando "ajustado" com "não ajustado".
+  // 2026-07-14: a mesma divergência voltou a acontecer mesmo já com essa
+  // subtração — causa raiz era o CAMPO usado pra filtrar/agrupar por mês:
+  // aqui usava-se `created_at` (timestamp real do INSERT), enquanto os 3
+  // relatórios (paintLucroAnalitico/paintFluxoCaixa/paintRelatorioAnalitico
+  // em gerente-relatorios.js) sempre agruparam por `contract_date` (o campo
+  // "Data do contrato" que o admin escolhe livremente no wizard, podendo
+  // divergir do dia real de criação). Contrato criado num mês mas com
+  // `contract_date` de outro mês caía em meses diferentes conforme a tela.
+  // Corrigido usando `contract_date` aqui também, igual aos relatórios.
   const taxaSaidaMes = sum(exitFeesMonth, 'operational_fee_amount');
   const taxaSaidaPrevPeriod = sum(exitFeesPrevPeriod, 'operational_fee_amount');
   const lucroMes = sum(paymentsMonth, 'net_profit') - taxaSaidaMes;
@@ -192,25 +201,34 @@ async function renderGerenteDashboard() {
 
   // Top clientes por saldo em aberto — soma o que falta de cada parcela
   // (amount_due menos o que já foi pago parcialmente) + ciclos de renovação
-  // pendentes/atrasados, agrupado por cliente.
+  // pendentes/atrasados, agrupado por cliente. `principal` acompanha em
+  // paralelo (mesma metodologia de capital usada em `carteiraAtiva` acima —
+  // principal_share/principal_amount, nunca o saldo com juros) só pra poder
+  // calcular "% da carteira ativa" com a mesma base que o card usa, já que
+  // `total` (saldo devedor com juros) não é comparável a `carteiraAtiva`
+  // (capital) — somar % de saldo-com-juros sobre uma base de capital
+  // distorceria o número.
   const outstandingByClient = {};
-  const addOutstanding = (clientId, name, amount) => {
+  const addOutstanding = (clientId, name, amount, principal) => {
     if (!clientId) return;
-    if (!outstandingByClient[clientId]) outstandingByClient[clientId] = { name: name || '—', total: 0 };
+    if (!outstandingByClient[clientId]) outstandingByClient[clientId] = { name: name || '—', total: 0, principal: 0 };
     outstandingByClient[clientId].total += amount;
+    outstandingByClient[clientId].principal += principal;
   };
   (dueSoon || []).forEach((i) => {
     const lc = i.loan_contracts || {};
     const name = ((lc.clients || {}).profiles || {}).full_name;
     const remaining = Number(i.amount_due || 0) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0);
-    addOutstanding(lc.client_id, name, remaining);
+    const principal = Number(i.principal_share || 0) - Number(i.principal_paid_partial || 0);
+    addOutstanding(lc.client_id, name, remaining, principal);
   });
   (cyclesSoon || []).forEach((c) => {
     const lc = c.loan_contracts || {};
     const name = ((lc.clients || {}).profiles || {}).full_name;
-    addOutstanding(lc.client_id, name, Number(c.full_debt_amount || 0));
+    addOutstanding(lc.client_id, name, Number(c.full_debt_amount || 0), Number(lc.principal_amount || 0));
   });
   const topClientes = Object.values(outstandingByClient).sort((a, b) => b.total - a.total).slice(0, 5);
+  const topClientesPctSum = carteiraAtiva > 0 ? (topClientes.reduce((s, c) => s + c.principal, 0) / carteiraAtiva) * 100 : 0;
 
   const trendByDay = {};
   (paymentsTrend || []).forEach((p) => {
@@ -319,15 +337,25 @@ async function renderGerenteDashboard() {
     </div>
 
     <div class="card mt-14">
-      <h3>Top clientes por saldo em aberto</h3>
-      <p class="text-sm text-soft mt-8">Soma de parcelas e ciclos de renovação pendentes/atrasados de cada cliente</p>
+      <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:8px">
+        <div>
+          <h3>Top clientes por saldo em aberto</h3>
+          <p class="text-sm text-soft mt-8">Soma de parcelas e ciclos de renovação pendentes/atrasados de cada cliente</p>
+        </div>
+        ${topClientes.length ? `<p class="text-sm text-soft">Juntos concentram <strong class="mono" style="color:var(--ink)">${formatNumber(topClientesPctSum, 1)}%</strong> da carteira ativa</p>` : ''}
+      </div>
       <div class="mt-14">
-        ${!topClientes.length ? '<p class="text-soft text-sm">Nenhum saldo em aberto no momento.</p>' : topClientes.map((c, i) => `
+        ${!topClientes.length ? '<p class="text-soft text-sm">Nenhum saldo em aberto no momento.</p>' : topClientes.map((c, i) => {
+          const pct = carteiraAtiva > 0 ? (c.principal / carteiraAtiva) * 100 : 0;
+          return `
           <div class="flex justify-between items-center" style="padding:9px 0;border-bottom:1px solid var(--line)">
             <div class="flex items-center gap-10"><span class="text-soft mono text-sm">${i + 1}º</span><span>${escapeHtml(c.name)}</span></div>
-            <span class="mono" style="font-weight:700">${formatMoney(c.total)}</span>
+            <div class="flex items-center gap-14">
+              <span class="text-sm text-soft mono">${formatNumber(pct, 1)}% da carteira</span>
+              <span class="mono" style="font-weight:700">${formatMoney(c.total)}</span>
+            </div>
           </div>
-        `).join('')}
+        `; }).join('')}
       </div>
     </div>
   `;

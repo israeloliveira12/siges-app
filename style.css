@@ -25,6 +25,9 @@
   --good: #1E8A5F;
   --good-soft: #E4F2EC;
 
+  --purple: #6B4FD6;
+  --purple-soft: #ECE8FB;
+
   /* Variantes "-dark" fixas (não mudam entre os temas, igual --brand-dark) —
      pra qualquer componente com fundo sólido + texto branco em cima (cards
      "spotlight" tipo Previsão em Relatórios, e os botões .btn-primary/
@@ -86,6 +89,9 @@ html[data-theme="dark"] #app {
 
   --good: #34C77E;
   --good-soft: rgba(52, 199, 126, .16);
+
+  --purple: #9B85FF;
+  --purple-soft: rgba(155, 133, 255, .16);
 
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 1px 1px rgba(0, 0, 0, .3);
 
@@ -225,6 +231,7 @@ button { cursor: pointer; }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-score-summary { grid-template-columns: 260px 1fr; align-items: stretch; }
 
 .stat-card { padding: 14px 16px; }
 .stat-card .label { font-size: 12px; color: var(--ink-soft); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
@@ -381,6 +388,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 0.85; }
 .badge-brand { background: var(--brand-soft); color: var(--brand); }
 .badge-accent { background: var(--accent-soft); color: var(--accent); }
 .badge-neutral { background: var(--bg); color: var(--ink-soft); }
+.badge-purple { background: var(--purple-soft); color: var(--purple); }
 
 /* ---------------------------------------------------------------------------
    Tabelas (viram cards no mobile)
@@ -536,6 +544,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .sidebar { display: none; }
   .main { padding: 14px; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+  .grid-score-summary { grid-template-columns: 1fr; }
 
   .tabbar-mobile {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;

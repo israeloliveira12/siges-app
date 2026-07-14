@@ -51,7 +51,7 @@ async function renderGerenteContratoNovo() {
   }
 
   if (wiz.step === 1 && !wizClientsList.length) {
-    const { data } = await supa.from('clients').select('profile_id, credit_limit, profiles!clients_profile_id_fkey(full_name, email)').order('created_at', { ascending: false });
+    const { data } = await supa.from('clients').select('profile_id, credit_limit, profiles!clients_profile_id_fkey(full_name, email, cpf)').order('created_at', { ascending: false });
     wizClientsList = data || [];
   }
 
@@ -86,7 +86,7 @@ function paintWizardStep1() {
     <div class="card">
       <h3>Selecione o cliente</h3>
       <div class="field mt-14">
-        <input type="text" id="w-client-search" placeholder="Buscar cliente por nome ou e-mail..." value="${escapeHtml(wizClientSearch)}">
+        <input type="text" id="w-client-search" placeholder="Buscar cliente por nome, e-mail ou CPF..." value="${escapeHtml(wizClientSearch)}">
       </div>
       <div id="w-client-list" style="max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius-sm)"></div>
       <div class="modal-foot" style="border:none;padding:14px 0 0">
@@ -97,12 +97,18 @@ function paintWizardStep1() {
 
   function paintClientList() {
     const term = wizClientSearch.trim().toLowerCase();
-    const filtered = wizClientsList.filter((c) => {
-      if (!term) return true;
-      const p = c.profiles || {};
-      return (p.full_name || '').toLowerCase().includes(term) || (p.email || '').toLowerCase().includes(term);
-    });
+    const termDigits = term.replace(/\D/g, '');
     const listEl = document.getElementById('w-client-list');
+    if (!term) {
+      listEl.innerHTML = `<div class="empty-state" style="padding:20px"><p>Digite para buscar um cliente.</p></div>`;
+      return;
+    }
+    const filtered = wizClientsList.filter((c) => {
+      const p = c.profiles || {};
+      const nameOrEmailMatch = (p.full_name || '').toLowerCase().includes(term) || (p.email || '').toLowerCase().includes(term);
+      const cpfMatch = termDigits && (p.cpf || '').replace(/\D/g, '').includes(termDigits);
+      return nameOrEmailMatch || cpfMatch;
+    });
     if (!filtered.length) {
       listEl.innerHTML = `<div class="empty-state" style="padding:20px"><p>Nenhum cliente encontrado.</p></div>`;
       return;
@@ -146,11 +152,8 @@ function paintWizardStep2() {
       <p class="text-sm text-soft mt-8">Limite disponível para este cliente: <strong class="mono">${formatMoney(availableForClient)}</strong></p>
 
       <div class="form-section-title">Valor e datas</div>
-      <div class="field">
-        <label>Valor emprestado — dívida-base (R$)</label>
-        <input type="text" id="w-principal" value="">
-      </div>
       <div class="field-row">
+        <div class="field"><label>Valor emprestado — dívida-base (R$)</label><input type="text" id="w-principal" value=""></div>
         <div class="field"><label>Data do contrato</label><input type="date" id="w-contract-date" value="${wiz.contract_date}"></div>
         <div class="field"><label>Data da 1ª parcela</label><input type="date" id="w-first-date" value="${wiz.first_installment_date}"></div>
       </div>
@@ -162,12 +165,6 @@ function paintWizardStep2() {
           <input type="number" min="0" step="0.01" id="w-rate" value="${wiz.interest_rate}">
         </div>
         <div class="field">
-          <label>Parcelas</label>
-          <input type="number" min="1" step="1" id="w-installments" value="${wiz.installments_count}">
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
           <label>Tipo de vencimento *</label>
           <select id="w-due-type">
             <option value="mensal" ${wiz.due_type === 'mensal' ? 'selected' : ''}>Mensal</option>
@@ -175,10 +172,14 @@ function paintWizardStep2() {
             <option value="personalizado" ${wiz.due_type === 'personalizado' ? 'selected' : ''}>Personalizado (dias)</option>
           </select>
         </div>
-        <div class="field ${wiz.due_type === 'personalizado' ? '' : 'hidden'}" id="w-custom-days-field">
-          <label>Intervalo (dias)</label>
-          <input type="number" min="1" step="1" id="w-custom-days" value="${wiz.custom_interval_days || 3}">
+        <div class="field">
+          <label>Parcelas</label>
+          <input type="number" min="1" step="1" id="w-installments" value="${wiz.installments_count}">
         </div>
+      </div>
+      <div class="field ${wiz.due_type === 'personalizado' ? '' : 'hidden'}" id="w-custom-days-field">
+        <label>Intervalo (dias)</label>
+        <input type="number" min="1" step="1" id="w-custom-days" value="${wiz.custom_interval_days || 3}">
       </div>
 
       <div class="form-section-title">Taxa operacional</div>
@@ -204,8 +205,8 @@ function paintWizardStep2() {
         <span>Permite renovação (juros repete)</span>
       </div>
       <div class="field-row mt-14">
-        <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="w-late-fee" value="${wiz.late_fee_percent}"></div>
-        <div class="field"><label>Juros por atraso (% ao dia)</label><input type="number" min="0" step="0.01" id="w-late-interest" value="${wiz.late_interest_percent}"></div>
+        <div class="field"><label>Multa por atraso (%)</label><input type="number" min="0" step="0.01" id="w-late-fee" placeholder="0" value="${wiz.late_fee_percent ? wiz.late_fee_percent : ''}"></div>
+        <div class="field"><label>Juros por atraso (% ao dia)</label><input type="number" min="0" step="0.01" id="w-late-interest" placeholder="0" value="${wiz.late_interest_percent ? wiz.late_interest_percent : ''}"></div>
       </div>
       <span class="help">Aplicados no momento do recebimento: juros compostos diariamente sobre o saldo da parcela/ciclo em atraso (ex: 2% ao dia) + multa fixa uma vez — o gerente pode ajustar ou zerar em cada recebimento.</span>
 
@@ -296,12 +297,12 @@ function paintWizardStep3() {
     <div class="card">
       <h3>Revisão e confirmação</h3>
       <div class="grid grid-3 mt-14">
-        <div class="stat-card"><div class="label">Cliente</div><div class="value" style="font-size:15px">${escapeHtml(wiz.client_name)}</div></div>
-        <div class="stat-card"><div class="label">Valor liberado</div><div class="value mono">${formatMoney(wiz.principal_amount)}</div></div>
-        <div class="stat-card"><div class="label">Juros</div><div class="value" style="font-size:15px">${formatNumber(wiz.interest_rate, 2)}% (Simples)</div></div>
-        <div class="stat-card"><div class="label">Parcelas</div><div class="value" style="font-size:15px">${wiz.installments_count}x (${dueTypeLabel(wiz.due_type, wiz.custom_interval_days)})</div></div>
-        <div class="stat-card"><div class="label">Valor total a receber</div><div class="value mono">${formatMoney(totalAmount)}</div></div>
-        <div class="stat-card"><div class="label">Total a desembolsar (contrato + taxa)</div><div class="value mono">${formatMoney(Number(wiz.principal_amount) + (wiz.has_operational_fee ? Number(wiz.operational_fee_amount) : 0))}</div></div>
+        <div class="stat-card"><div class="label">Cliente</div><div class="value" style="font-size:17px">${escapeHtml(wiz.client_name)}</div></div>
+        <div class="stat-card"><div class="label">Valor liberado</div><div class="value mono" style="font-size:17px">${formatMoney(wiz.principal_amount)}</div></div>
+        <div class="stat-card"><div class="label">Juros</div><div class="value" style="font-size:17px">${formatNumber(wiz.interest_rate, 2)}% (Simples)</div></div>
+        <div class="stat-card"><div class="label">Parcelas</div><div class="value" style="font-size:17px">${wiz.installments_count}x (${dueTypeLabel(wiz.due_type, wiz.custom_interval_days)})</div></div>
+        <div class="stat-card"><div class="label">Valor total a receber</div><div class="value mono" style="font-size:17px">${formatMoney(totalAmount)}</div></div>
+        <div class="stat-card"><div class="label">Total a desembolsar (contrato + taxa)</div><div class="value mono" style="font-size:17px">${formatMoney(Number(wiz.principal_amount) + (wiz.has_operational_fee ? Number(wiz.operational_fee_amount) : 0))}</div></div>
       </div>
 
       <div class="flex justify-between items-center mt-20">

@@ -107,28 +107,7 @@ function paintPlanejamento(root, state) {
   const monthsWithDebts = monthKeys.filter((k) => debtsByMonth[k] && debtsByMonth[k].length);
 
   root.innerHTML = `
-    <div class="grid grid-2">
-      <div class="card">
-        <h3>Caixa disponível hoje</h3>
-        <p class="text-sm text-soft mt-8">Quanto a empresa tem em caixa neste momento (informado manualmente).</p>
-        <div class="field mt-14">
-          <label>Caixa atual (R$)</label>
-          <input type="text" id="pl-caixa">
-        </div>
-        <button class="btn btn-primary btn-sm" id="pl-save-caixa">Salvar</button>
-      </div>
-      <div class="card">
-        <h3>LTV aplicado</h3>
-        <p class="text-sm text-soft mt-8">Percentual do lucro bruto que vira lucro líquido projetado (ex: 80% significa que 80% do lucro bruto é considerado líquido).</p>
-        <div class="field mt-14">
-          <label>LTV (%)</label>
-          <input type="number" min="0" max="100" step="0.01" id="pl-ltv" value="${Number((settings && settings.planning_ltv_percent) || 0)}">
-        </div>
-        <button class="btn btn-primary btn-sm" id="pl-save-ltv">Salvar</button>
-      </div>
-    </div>
-
-    <div class="card mt-14" style="border-color:var(--brand)">
+    <div class="card" style="border-color:var(--brand)">
       <h3>Resumo do planejamento</h3>
       <div class="grid grid-2 mt-14" style="gap:24px">
         <div>
@@ -157,6 +136,27 @@ function paintPlanejamento(root, state) {
           <div class="value mono" style="font-size:22px;color:${calc.lucroLiquido >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroLiquido)}</div>
           <div class="hint">${formatMoney(calc.lucroBruto)} × ${formatNumber(calc.ltvPercent, 2)}%</div>
         </div>
+      </div>
+    </div>
+
+    <div class="grid grid-2 mt-14">
+      <div class="card">
+        <h3>Caixa disponível hoje</h3>
+        <p class="text-sm text-soft mt-8">Quanto a empresa tem em caixa neste momento (informado manualmente).</p>
+        <div class="field mt-14">
+          <label>Caixa atual (R$)</label>
+          <input type="text" id="pl-caixa">
+        </div>
+        <button class="btn btn-primary btn-sm" id="pl-save-caixa">Salvar</button>
+      </div>
+      <div class="card">
+        <h3>LTV aplicado</h3>
+        <p class="text-sm text-soft mt-8">Percentual do lucro bruto que vira lucro líquido projetado (ex: 80% significa que 80% do lucro bruto é considerado líquido).</p>
+        <div class="field mt-14">
+          <label>LTV (%)</label>
+          <input type="number" min="0" max="100" step="0.01" id="pl-ltv" value="${Number((settings && settings.planning_ltv_percent) || 0)}">
+        </div>
+        <button class="btn btn-primary btn-sm" id="pl-save-ltv">Salvar</button>
       </div>
     </div>
 

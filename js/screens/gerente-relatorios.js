@@ -279,7 +279,7 @@ function paintLancamentosFuturos(installments, cycles) {
           ${items.length ? items.map((i) => {
             const dias = diasRestantes(i.data);
             const diasLabel = dias < 0 ? `${Math.abs(dias)}d atrasado` : dias === 0 ? 'Hoje' : `${dias} dia${dias === 1 ? '' : 's'}`;
-            const diasColor = dias < 0 ? 'badge-bad' : dias <= 3 ? 'badge-warn' : 'badge-neutral';
+            const diasColor = dias < 0 ? 'badge-bad' : dias <= 7 ? 'badge-warn' : 'badge-purple';
             return `
             <tr>
               <td data-label="Tipo"><span class="badge badge-brand">${i.tipo === 'parcela' ? 'Parcela' : 'Renovação'}</span></td>

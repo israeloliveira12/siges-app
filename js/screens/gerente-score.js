@@ -68,24 +68,25 @@ function paintGerenteScore(root, { rows, paidInstallments }) {
       <button class="btn btn-outline btn-sm" id="recalc-all">${Icons.renew} Recalcular todos</button>
     </div>
 
-    <div class="grid grid-3 mt-14">
-      <div class="card stat-card"><div class="label">Clientes analisados</div><div class="value mono">${rows.length}</div></div>
-      <div class="card stat-card"><div class="label">Score médio</div><div class="value mono">${formatNumber(scoreMedio, 1)}</div></div>
-      <div class="card stat-card">
-        <div class="label">Pagamento adiantado</div>
-        <div class="value mono">${formatNumber(pctAdiantado, 0)}%</div>
-        <div class="hint mt-8">${earlyPaid} de ${totalPaid} parcelas pagas</div>
+    <div class="grid grid-score-summary mt-14">
+      <div class="flex" style="flex-direction:column;gap:14px">
+        <div class="card stat-card"><div class="label">Clientes analisados</div><div class="value mono">${rows.length}</div></div>
+        <div class="card stat-card"><div class="label">Score médio</div><div class="value mono">${formatNumber(scoreMedio, 1)}</div></div>
+        <div class="card stat-card">
+          <div class="label">Pagamento adiantado</div>
+          <div class="value mono">${formatNumber(pctAdiantado, 0)}%</div>
+          <div class="hint mt-8">${earlyPaid} de ${totalPaid} parcelas pagas</div>
+        </div>
       </div>
+      ${rows.length ? `
+      <div class="card">
+        <h3>Distribuição por perfil</h3>
+        <div class="flex items-center mt-14" style="gap:20px;flex-wrap:wrap">
+          ${donutChartSVG(tierSegments, { valueFormatter: countFmt })}
+          <div style="flex:1;min-width:220px">${donutLegendHtml(tierSegments, { valueFormatter: countFmt })}</div>
+        </div>
+      </div>` : '<div></div>'}
     </div>
-
-    ${rows.length ? `
-    <div class="card mt-14">
-      <h3>Distribuição por perfil</h3>
-      <div class="flex items-center mt-14" style="gap:20px;flex-wrap:wrap">
-        ${donutChartSVG(tierSegments, { valueFormatter: countFmt })}
-        <div style="flex:1;min-width:220px">${donutLegendHtml(tierSegments, { valueFormatter: countFmt })}</div>
-      </div>
-    </div>` : ''}
 
     <div class="grid grid-2 mt-14">
       <div class="card">

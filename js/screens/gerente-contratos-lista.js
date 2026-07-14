@@ -142,7 +142,7 @@ async function renderGerenteContratoDetalhe(params) {
       <div class="flex justify-between items-center" style="flex-wrap:wrap">
         <div>
           <h3>Contrato #${contract.contract_number} — ${escapeHtml(p.full_name || '')}</h3>
-          <div class="text-sm text-soft">CPF ${escapeHtml(p.cpf || '—')} · ${escapeHtml(p.phone || '')}</div>
+          <div class="text-sm text-soft">CPF ${escapeHtml(p.cpf || '—')} · ${escapeHtml(p.phone || '')} · Contrato firmado em ${formatDate(contract.contract_date)}</div>
         </div>
         <div class="flex items-center gap-8" style="flex-wrap:wrap">
           ${statusBadge(contract.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[contract.status])}

@@ -113,12 +113,14 @@ async function renderGerenteCobrar() {
           ${list.map((i) => {
             const p = ((i.contract || {}).clients || {}).profiles || {};
             const waUrl = buildWhatsappUrl(i);
+            const late = estimateLateCharge(i.amount, i.due_date, Number((i.contract || {}).late_interest_percent || 0), Number((i.contract || {}).late_fee_percent || 0));
+            const encargo = late.jurosAtraso + late.multaAtraso;
             return `
             <tr>
               <td data-label="Cliente"><div>${escapeHtml(p.full_name || '—')}<div class="text-sm text-soft">${escapeHtml(p.phone || '')}</div></div></td>
               <td data-label="Contrato">#${(i.contract || {}).contract_number} · ${i.seq}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
-              <td data-label="Valor" class="mono">${formatMoney(i.amount)}</td>
+              <td data-label="Valor"><div class="mono">${formatMoney(i.amount)}</div>${encargo > 0 ? `<div class="text-sm mono" style="color:var(--bad)">Com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</td>
               <td data-label="">
                 <div class="flex gap-8">
                   <button class="btn btn-accent btn-sm cobrar-item-btn" data-type="${i.type}" data-id="${i.id}">Receber</button>

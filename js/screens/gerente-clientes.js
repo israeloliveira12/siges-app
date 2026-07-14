@@ -51,8 +51,11 @@ function paintClientesScreen() {
       <button class="btn btn-primary" id="novo-cliente-btn">${Icons.plus} Novo Cliente</button>
     </div>
 
-    <div class="mt-14" style="max-width:320px">
-      <input type="text" id="clientes-search" placeholder="Buscar por nome, e-mail ou CPF" value="${escapeHtml(clientesSearch)}">
+    <div class="flex items-center justify-between gap-10 mt-14" style="flex-wrap:wrap">
+      <div style="max-width:320px;flex:1">
+        <input type="text" id="clientes-search" placeholder="Buscar por nome, e-mail ou CPF" value="${escapeHtml(clientesSearch)}">
+      </div>
+      <p class="text-sm text-soft">${rows.length} cliente${rows.length === 1 ? '' : 's'}${term ? ' encontrado' + (rows.length === 1 ? '' : 's') : ''}</p>
     </div>
 
     <div class="card mt-14" style="padding:0;overflow:hidden">
