@@ -223,6 +223,55 @@ function openDeleteClienteConfirm(client) {
   };
 }
 
+function openResetClientPasswordModal(client, p) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-head"><h3>Redefinir senha</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
+      <div class="modal-body">
+        <p class="text-sm text-soft">Nova senha para ${escapeHtml(p.full_name || 'o cliente')}.</p>
+        <div class="field mt-14"><label>Nova senha</label>${passwordFieldHtml('rp-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
+        <div id="rp-feedback"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
+        <button class="btn btn-primary" id="rp-confirm">Redefinir</button>
+      </div>
+    </div>`;
+  document.getElementById('app').appendChild(overlay);
+  const close = () => overlay.remove();
+  document.getElementById('close-modal').onclick = close;
+  document.getElementById('cancel-modal').onclick = close;
+  wirePasswordToggles(overlay);
+
+  document.getElementById('rp-confirm').onclick = async () => {
+    const feedback = document.getElementById('rp-feedback');
+    const input = document.getElementById('rp-password');
+    const newPassword = input.value;
+    feedback.innerHTML = '';
+    if (newPassword.length < 6) { feedback.innerHTML = `<div class="auth-error">A senha precisa ter pelo menos 6 caracteres.</div>`; return; }
+    const btn = document.getElementById('rp-confirm');
+    btn.disabled = true;
+    try {
+      const { data: { session } } = await supa.auth.getSession();
+      const resp = await fetch('/api/reset-client-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+        body: JSON.stringify({ user_id: client.profile_id, new_password: newPassword }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || 'Falha ao redefinir a senha.');
+      logAudit('senha_redefinida', `Senha redefinida para o cliente ${p.full_name || ''}`, { client_id: client.profile_id });
+      showToast('Senha do cliente redefinida.');
+      close();
+    } catch (e) {
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+      btn.disabled = false;
+    }
+  };
+}
+
 function openClienteModal(client) {
   const isEdit = !!client;
   const p = (client && client.profiles) || {};
@@ -241,14 +290,12 @@ function openClienteModal(client) {
         ` : ''}
         <div class="field"><label>Nome completo</label><input type="text" id="m-name" value="${escapeHtml(p.full_name || '')}"></div>
         ${isEdit ? `
-        <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" value="${escapeHtml(p.email || '')}"></div>
-        <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
-          <label>Redefinir senha do cliente</label>
-          <div class="flex gap-8 mt-8" style="align-items:flex-start">
-            <div style="flex:1">${passwordFieldHtml('m-reset-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
-            <button type="button" class="btn btn-outline btn-sm" id="reset-password-btn" style="flex:none">Redefinir</button>
+        <div class="field">
+          <label>E-mail (login do cliente)</label>
+          <div class="flex gap-8" style="align-items:center">
+            <input type="email" id="m-email" value="${escapeHtml(p.email || '')}" style="flex:1">
+            <button type="button" class="btn btn-outline btn-sm" id="reset-password-btn" style="flex:none">Redefinir senha</button>
           </div>
-          <div id="reset-password-feedback" class="mt-8"></div>
         </div>
         ` : ''}
         <div class="field-row">
@@ -382,33 +429,7 @@ function openClienteModal(client) {
   }
 
   if (isEdit) {
-    document.getElementById('reset-password-btn').onclick = async () => {
-      const feedback = document.getElementById('reset-password-feedback');
-      const input = document.getElementById('m-reset-password');
-      const newPassword = input.value;
-      feedback.innerHTML = '';
-      if (newPassword.length < 6) { feedback.innerHTML = `<div class="auth-error">A senha precisa ter pelo menos 6 caracteres.</div>`; return; }
-      const btn = document.getElementById('reset-password-btn');
-      btn.disabled = true;
-      try {
-        const { data: { session } } = await supa.auth.getSession();
-        const resp = await fetch('/api/reset-client-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
-          body: JSON.stringify({ user_id: client.profile_id, new_password: newPassword }),
-        });
-        const result = await resp.json();
-        if (!resp.ok) throw new Error(result.error || 'Falha ao redefinir a senha.');
-        logAudit('senha_redefinida', `Senha redefinida para o cliente ${p.full_name || ''}`, { client_id: client.profile_id });
-        input.value = '';
-        feedback.innerHTML = `<div class="auth-success">Senha redefinida com sucesso.</div>`;
-        showToast('Senha do cliente redefinida.');
-      } catch (e) {
-        feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
-      } finally {
-        btn.disabled = false;
-      }
-    };
+    document.getElementById('reset-password-btn').onclick = () => openResetClientPasswordModal(client, p);
   }
 
   document.getElementById('save-modal').onclick = async () => {
