@@ -301,6 +301,60 @@ Lista numerada de 14 itens do usuário, todos implementados diretamente (nenhum 
 - **Bug real corrigido no mesmo dia**: o popup usava `id="close-modal"`/`id="cancel-modal"` — os MESMOS IDs que o modal de editar cliente (por baixo dele, ainda aberto) já usa nos seus próprios botões X/Cancelar. `document.getElementById(id)` sempre retorna o primeiro elemento com aquele ID no DOM inteiro, então a wiring do popup acabava religando os botões do modal de EDITAR (que veio primeiro no DOM), não os do popup — o X/Cancelar do popup não faziam nada (o clique de verdade ia pro botão errado, escondido atrás). Corrigido renomeando pra IDs únicos (`rp-close`/`rp-cancel`) e escopando toda busca dentro da função a `overlay.querySelector(...)`, nunca `document.getElementById`, já que este é o primeiro caso no sistema de um modal aberto por cima de outro modal simultaneamente. Também adicionado fechar ao clicar no backdrop (`overlay.onclick`), padrão já usado em outros modais do sistema (ex: `openScoreHelpModal`) que este não tinha. **Se um modal-sobre-modal for criado no futuro, sempre escopar as buscas de elemento ao próprio `overlay`, nunca a `document`, mesmo que os IDs pareçam únicos "à primeira vista".**
 - `sw.js` em `v40`.
 
+## Edição de parcela liberada para qualquer status (2026-07-14, `migration_024`)
+
+Pedido do usuário: como Administrador, poder editar/reagendar uma parcela mesmo com o contrato já finalizado (quitado/perda) ou quando a própria parcela já foi paga — antes o botão "Editar" só aparecia pra parcelas `pendente`/`atrasada`.
+
+- **`gerente-contratos-lista.js`**: o botão de editar (`edit-inst-btn`) agora aparece SEMPRE na tabela de Parcelas, não só junto do botão "Receber" (que continua restrito a `pendente`/`atrasada`, correto — só parcela em aberto pode receber pagamento). `openEditInstallmentModal()` ganhou avisos contextuais: se a parcela já foi `renovada`, avisa que a edição é só correção de registro histórico e não recalcula o ciclo já criado; se já tem valor pago (parcial ou integral), a mensagem agora distingue "já foi paga" de "recebeu pagamento parcial" (antes sempre dizia "parcial" mesmo numa parcela 100% paga, confuso).
+- **`update_installment_schedule()` (SQL)**: o `where` do `UPDATE` tinha `and status in ('pendente', 'atrasada')` — o botão até podia aparecer, mas o UPDATE silenciosamente não afetava nenhuma linha pra parcela em outro status. Removida essa restrição; a proteção que já existia contra reduzir capital/juros abaixo do que já foi efetivamente recebido (`AMOUNT_BELOW_ALREADY_PAID`) continua valendo sempre — **confirmado que essa proteção é segura mesmo numa parcela 100% paga**, porque `receive_payment()` sempre acumula `principal_paid_partial`/`interest_paid_partial` até o valor cheio da parcela quando ela é quitada por completo (não são colunas exclusivas de pagamento parcial), então o admin nunca consegue editar pra um valor abaixo do que o cliente já pagou de verdade — só pode aumentar os valores ou mudar a data. Editar uma parcela `renovada` ou `paga` é só uma correção do REGISTRO da parcela em si — não recalcula pagamentos já lançados em `payments` nem ciclos de renovação já criados a partir dela.
+- Adicionado `if v_installment.id is null then raise exception 'NOT_FOUND'` na função (defesa em profundidade, não existia antes).
+- `sw.js` em `v41`.
+
+**Migration a rodar manualmente no SQL Editor do Supabase:**
+
+```sql
+-- Migration 024: permite editar/reagendar uma parcela em QUALQUER status
+-- (inclusive já paga/renovada, ou de contrato já finalizado/quitado) — antes
+-- a RPC só atualizava linhas com status in ('pendente', 'atrasada'), então o
+-- UPDATE silenciosamente não fazia nada para parcelas já pagas/renovadas,
+-- mesmo que o botão de editar aparecesse no admin. A proteção contra reduzir
+-- o valor abaixo do que já foi efetivamente recebido (AMOUNT_BELOW_ALREADY_PAID)
+-- continua valendo sempre. Assinatura da função não muda (mesmos parâmetros),
+-- então create or replace substitui a versão antiga sem precisar de drop.
+
+create or replace function update_installment_schedule(
+  p_installment_id uuid,
+  p_due_date date,
+  p_principal_share numeric,
+  p_interest_share numeric
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_installment installments%rowtype;
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+
+  select * into v_installment from installments where id = p_installment_id;
+  if v_installment.id is null then raise exception 'NOT_FOUND'; end if;
+
+  if p_principal_share < v_installment.principal_paid_partial
+    or p_interest_share < v_installment.interest_paid_partial
+  then
+    raise exception 'AMOUNT_BELOW_ALREADY_PAID';
+  end if;
+
+  update installments set
+    due_date = p_due_date,
+    principal_share = p_principal_share,
+    interest_share = p_interest_share
+  where id = p_installment_id;
+end;
+$$;
+```
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

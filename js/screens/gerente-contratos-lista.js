@@ -190,8 +190,8 @@ async function renderGerenteContratoDetalhe(params) {
                 <div class="flex gap-8">
                   ${(i.status === 'pendente' || i.status === 'atrasada') ? `
                     <button class="btn btn-accent btn-sm receive-inst-btn" data-id="${i.id}">Receber</button>
-                    <button class="icon-btn edit-inst-btn" data-id="${i.id}" title="Editar/reagendar parcela">${Icons.edit}</button>
                   ` : ''}
+                  <button class="icon-btn edit-inst-btn" data-id="${i.id}" title="Editar/reagendar parcela">${Icons.edit}</button>
                 </div>
               </td>
             </tr>
@@ -385,8 +385,11 @@ function openEditInstallmentModal(installment, onDone) {
           <div class="field"><label>Capital (R$)</label><input type="text" id="ei-principal"></div>
           <div class="field"><label>Juros (R$)</label><input type="text" id="ei-interest"></div>
         </div>
+        ${installment.status === 'renovada' ? `
+        <p class="text-sm mt-8" style="color:var(--warn)">Esta parcela já foi renovada (rolou para um novo ciclo) — a edição aqui é só uma correção de registro histórico, não recalcula o ciclo já criado.</p>
+        ` : ''}
         ${(Number(installment.principal_paid_partial) > 0 || Number(installment.interest_paid_partial) > 0) ? `
-        <p class="text-sm mt-8" style="color:var(--bad)">Esta parcela já recebeu pagamento parcial: ${formatMoney(Number(installment.principal_paid_partial) + Number(installment.interest_paid_partial))}. Capital e juros não podem ficar abaixo do que já foi pago.</p>
+        <p class="text-sm mt-8" style="color:var(--bad)">${installment.status === 'paga' ? 'Esta parcela já foi paga' : 'Esta parcela já recebeu pagamento parcial'}: ${formatMoney(Number(installment.principal_paid_partial) + Number(installment.interest_paid_partial))}. Capital e juros não podem ficar abaixo do que já foi pago.</p>
         ` : ''}
         <p class="text-sm text-soft">Novo total da parcela: <strong class="mono" id="ei-total-preview">${formatMoney(installment.amount_due)}</strong></p>
       </div>

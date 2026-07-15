@@ -1386,7 +1386,13 @@ begin
 end;
 $$;
 
--- Editar/reagendar uma parcela específica (só enquanto não estiver paga)
+-- Editar/reagendar uma parcela específica — permitido em QUALQUER status
+-- (inclusive já paga/renovada, ou de contrato já finalizado/quitado), pra
+-- o administrador poder corrigir um dado lançado errado. A proteção contra
+-- reduzir abaixo do valor já efetivamente recebido continua valendo sempre
+-- (ver AMOUNT_BELOW_ALREADY_PAID abaixo) — isso não recalcula pagamentos já
+-- registrados em `payments`/ciclos de renovação já criados, é só a edição
+-- do registro da própria parcela.
 create or replace function update_installment_schedule(
   p_installment_id uuid,
   p_due_date date,
@@ -1403,13 +1409,15 @@ begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
 
   select * into v_installment from installments where id = p_installment_id;
-  -- Não deixa o novo valor ficar abaixo do que já foi pago parcialmente —
-  -- sem essa checagem, o saldo restante (amount_due - paid_partial) ficava
-  -- negativo, e "Pago parcial: resta R$-X" aparecia nas telas do cliente.
-  if v_installment.id is not null and (
-    p_principal_share < v_installment.principal_paid_partial
+  if v_installment.id is null then raise exception 'NOT_FOUND'; end if;
+
+  -- Não deixa o novo valor ficar abaixo do que já foi pago (parcial ou
+  -- integralmente) — sem essa checagem, o saldo restante (amount_due -
+  -- paid_partial) ficava negativo, e "Pago parcial: resta R$-X" aparecia
+  -- nas telas do cliente.
+  if p_principal_share < v_installment.principal_paid_partial
     or p_interest_share < v_installment.interest_paid_partial
-  ) then
+  then
     raise exception 'AMOUNT_BELOW_ALREADY_PAID';
   end if;
 
@@ -1417,7 +1425,7 @@ begin
     due_date = p_due_date,
     principal_share = p_principal_share,
     interest_share = p_interest_share
-  where id = p_installment_id and status in ('pendente', 'atrasada');
+  where id = p_installment_id;
 end;
 $$;
 
