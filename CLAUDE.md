@@ -389,6 +389,14 @@ end;
 $$;
 ```
 
+## Texto de cobrança via WhatsApp ganhou o valor de renovação (2026-07-14)
+
+`buildWhatsappUrl()` (`gerente-cobrar.js`) — nova linha `*Valor para renovar (só juros):*` no texto, mostrando quanto o cliente pagaria pra "rolar" o vencimento em vez de quitar a dívida inteira.
+
+- **Só aparece pra contratos de parcela única com renovação permitida** (`contract.allows_renewal && installments_count === 1`) — mesma regra (`canRenew`) já usada em `openReceberModal()` (`gerente-contrato-receber.js`) pra decidir se a aba "Renovar" existe.
+- **Valor = juros da parcela/ciclo + encargo de atraso já sugerido** (quando em atraso) — mesma fórmula/soma que `openReceberModal()` já pré-preenche por padrão na aba "Renovar" (`syncInterestFromLate`), então o texto de cobrança fica consistente com o que o gerente veria se abrisse o modal de recebimento de verdade. Para parcela (`type: 'installment'`), juros = `interest_share - interest_paid_partial` (do `item.raw`, o installment row original); para ciclo já renovado (`type: 'renewal_cycle'`), juros = `full_debt_amount - contract.principal_amount` (mesma fórmula usada em `openReceberModal` pra ciclos — funciona também numa 2ª/3ª renovação em diante).
+- `sw.js` em `v43`.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

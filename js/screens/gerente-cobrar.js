@@ -30,6 +30,18 @@ function buildWhatsappUrl(item) {
   const encargoAtraso = jurosAtraso + multaAtraso;
   const valorAtualizado = item.amount + encargoAtraso;
 
+  // Valor de renovação: mesma regra de disponibilidade do modal de
+  // recebimento (openReceberModal) — só contratos de parcela única com
+  // renovação permitida. É só o juros da parcela/ciclo (interestPortion),
+  // + o mesmo encargo de atraso já sugerido acima quando em atraso — o
+  // cliente informado paga isso pra "rolar" o vencimento em vez de quitar.
+  const contract = item.contract || {};
+  const canRenew = contract.allows_renewal && Number(contract.installments_count) === 1;
+  const interestPortion = item.type === 'installment'
+    ? (Number((item.raw || {}).interest_share || 0) - Number((item.raw || {}).interest_paid_partial || 0))
+    : (Number((item.raw || {}).full_debt_amount || 0) - Number(contract.principal_amount || 0));
+  const valorRenovacao = interestPortion + encargoAtraso;
+
   const atencao = diasAtraso > 0
     ? `Efetue o pagamento da sua parcela atrasada (${diasAtraso} dia${diasAtraso > 1 ? 's' : ''} de atraso)`
     : 'Sua parcela vence hoje — efetue o pagamento para evitar atraso';
@@ -48,6 +60,7 @@ function buildWhatsappUrl(item) {
     `*Valor da Parcela:* ${formatMoney(item.amount)}`,
     diasAtraso > 0 && encargoAtraso > 0 ? `*Juros + multa por atraso:* ${formatMoney(encargoAtraso)}` : null,
     diasAtraso > 0 && encargoAtraso > 0 ? `*Valor atualizado a pagar:* ${formatMoney(valorAtualizado)}` : null,
+    canRenew ? `*Valor para renovar (só juros):* ${formatMoney(valorRenovacao)}` : null,
     `*Data Vencimento:* ${formatDateShortYear(item.due_date)}`,
     `*Chave Pix:* ${(App.settings && App.settings.company_pix_key) || '—'}`,
     '',
