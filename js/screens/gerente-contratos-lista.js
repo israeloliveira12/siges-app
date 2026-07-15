@@ -176,6 +176,36 @@ async function renderGerenteContratoDetalhe(params) {
         <thead><tr><th>Nº</th><th>Vencimento</th><th>Capital</th><th>Juros</th><th>Total</th><th>Status</th><th></th></tr></thead>
         <tbody>
           ${(installments || []).map((i) => {
+            // Parcela já renovada (contrato de parcela única): em vez de
+            // mostrar o registro congelado da parcela original, a linha
+            // passa a refletir o ELO ATUAL da cadeia de renovação (o ciclo
+            // que ainda não foi renovado de novo — sempre existe só um).
+            // Isso substitui a antiga tabela "Ciclos de renovação" (removida
+            // por ser redundante com "Pagamentos recebidos" — cada
+            // renovação já vira uma linha lá) e devolve o botão "Receber"
+            // pra cá, no mesmo lugar de sempre, como se fosse a 1ª parcela.
+            const currentCycle = i.status === 'renovada' ? (cycles || []).find((c) => c.status !== 'renovada') : null;
+            if (currentCycle) {
+              const st = effectiveInstallmentStatus(currentCycle.status, currentCycle.new_due_date);
+              const capital = Number(contract.principal_amount);
+              const total = Number(currentCycle.full_debt_amount);
+              const juros = total - capital;
+              return `
+              <tr>
+                <td data-label="Nº">${i.sequence_number}</td>
+                <td data-label="Vencimento">${formatDate(currentCycle.new_due_date)}</td>
+                <td data-label="Capital" class="mono">${formatMoney(capital)}</td>
+                <td data-label="Juros" class="mono">${formatMoney(juros)}</td>
+                <td data-label="Total" class="mono">${formatMoney(total)}</td>
+                <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
+                <td data-label="">
+                  ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada') ? `
+                    <button class="btn btn-accent btn-sm receive-cycle-btn" data-id="${currentCycle.id}">Receber</button>
+                  ` : ''}
+                </td>
+              </tr>
+            `;
+            }
             const st = effectiveInstallmentStatus(i.status, i.due_date);
             const isPartial = st !== 'paga' && (i.principal_paid_partial > 0 || i.interest_paid_partial > 0);
             return `
@@ -200,42 +230,33 @@ async function renderGerenteContratoDetalhe(params) {
       </table>
     </div>
 
-    ${(cycles || []).length ? `
-    <div class="card mt-14">
-      <h3>Ciclos de renovação</h3>
-      <table class="data-table table-scroll mt-8">
-        <thead><tr><th>Ciclo</th><th>Juros pago</th><th>Dívida renovada</th><th>Novo vencimento</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-          ${cycles.map((c) => `
-            <tr>
-              <td data-label="Ciclo">${c.cycle_number}</td>
-              <td data-label="Juros pago" class="mono">${formatMoney(c.interest_only_amount)}</td>
-              <td data-label="Dívida renovada" class="mono">${formatMoney(c.full_debt_amount)}</td>
-              <td data-label="Novo vencimento">${formatDate(c.new_due_date)}</td>
-              <td data-label="Status">${(() => { const st = effectiveInstallmentStatus(c.status, c.new_due_date); return statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st]); })()}</td>
-              <td data-label="">${(c.status === 'pendente' || c.status === 'atrasada') ? `<button class="btn btn-accent btn-sm receive-cycle-btn" data-id="${c.id}">Receber</button>` : ''}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>` : ''}
-
     <div class="card mt-14">
       <h3>Pagamentos recebidos</h3>
       ${(payments || []).length ? `
       <table class="data-table table-scroll mt-8">
-        <thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Taxa de entrada</th><th>Lucro líquido</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Vencimento</th><th>Tipo</th><th>Valor</th><th>Taxa de entrada</th><th>Lucro líquido</th><th></th></tr></thead>
         <tbody>
-          ${payments.map((pay) => `
+          ${payments.map((pay) => {
+            // Vencimento do pagamento: derivado do registro relacionado
+            // (parcela ou ciclo), já carregado nesta tela — sem query extra.
+            // Pra "renovacao_juros"/"quitacao_final" (ligados a um ciclo),
+            // isso é justamente o "Novo vencimento" que a antiga tabela
+            // "Ciclos de renovação" mostrava — preservado aqui pra não
+            // perder essa informação quando aquela tabela foi removida.
+            const dueDate = pay.installment_id
+              ? ((installments || []).find((i) => i.id === pay.installment_id) || {}).due_date
+              : ((cycles || []).find((c) => c.id === pay.renewal_cycle_id) || {}).new_due_date;
+            return `
             <tr>
               <td data-label="Data">${formatDateUTC(pay.received_at)}</td>
+              <td data-label="Vencimento">${dueDate ? formatDate(dueDate) : '—'}</td>
               <td data-label="Tipo">${{ quitacao_parcela: 'Quitação', renovacao_juros: 'Renovação (juros)', quitacao_final: 'Quitação final' }[pay.payment_kind]}</td>
               <td data-label="Valor" class="mono">${formatMoney(pay.amount_received)}</td>
               <td data-label="Taxa de entrada" class="mono">${pay.has_operational_fee ? formatMoney(pay.operational_fee_amount) : '—'}</td>
               <td data-label="Lucro líquido" class="mono">${formatMoney(pay.net_profit)}</td>
               <td data-label=""><button class="icon-btn edit-payment-fee-btn" data-id="${pay.id}" title="Editar taxa de entrada">${Icons.edit}</button></td>
             </tr>
-          `).join('')}
+          `; }).join('')}
         </tbody>
       </table>` : `<p class="text-sm text-soft mt-8">Nenhum pagamento registrado ainda.</p>`}
     </div>
