@@ -98,23 +98,35 @@ function paintClienteIndicacoes(root, allContracts, installments, cycles, namesB
             const st = effectiveInstallmentStatus(i.status, i.due_date);
             const remaining = i.amount_due - i.principal_paid_partial - i.interest_paid_partial;
             const isPartial = st !== 'paga' && (i.principal_paid_partial > 0 || i.interest_paid_partial > 0);
+            // Parcela já renovada: ela é sempre a 1ª entidade da cadeia de
+            // renovação, então o rótulo é fixo "Renovação 1" — e o valor
+            // exibido é o juros que foi de fato pago NAQUELA renovação
+            // (gravado no ciclo pra onde ela foi, não no amount_due da
+            // própria parcela, que é o valor CHEIO contratual original).
+            const renewedCycle = st === 'renovada' && i.renewed_into_cycle_id ? cyc.find((r) => r.id === i.renewed_into_cycle_id) : null;
+            const rowLabel = renewedCycle ? 'Renovação 1' : i.sequence_number;
+            const displayValue = renewedCycle ? renewedCycle.interest_only_amount : i.amount_due;
             const late = st === 'atrasada' ? estimateLateCharge(remaining, i.due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
             return `
             <tr>
-              <td data-label="Parcela">${i.sequence_number}</td>
+              <td data-label="Parcela">${rowLabel}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
-              <td data-label="Valor"><div><div class="mono">${formatMoney(i.amount_due)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(remaining)}</div>` : ''}${late && (late.jurosAtraso > 0 || late.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</div></td>
+              <td data-label="Valor"><div><div class="mono">${formatMoney(displayValue)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(remaining)}</div>` : ''}${late && (late.jurosAtraso > 0 || late.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</div></td>
               <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
             </tr>
           `; }).join('')}
           ${cyc.map((r) => {
             const st = effectiveInstallmentStatus(r.status, r.new_due_date);
-            // Ciclo renovado (foi pra frente de novo): o valor desta linha é
-            // o que foi PAGO nessa renovação (só juros) — não a dívida cheia
-            // que rolou pro próximo ciclo. Só a quitação final (status paga)
-            // mostra o valor cheio, porque foi aí que ele foi pago de fato.
-            const cycleValue = st === 'renovada' ? r.interest_only_amount : r.full_debt_amount;
-            const rowLabel = st === 'paga' ? 'Quitação' : 'Renovação ' + r.cycle_number;
+            // Rótulo/valor por POSIÇÃO na cadeia, não pela identidade do
+            // próprio ciclo — a parcela original ocupou "Renovação 1", então
+            // cada ciclo desloca +1 (cycle_number 1 vira "Renovação 2" etc).
+            // Se ainda 'renovada' (não é o último elo), o valor é o juros
+            // pago na PRÓXIMA renovação da cadeia (localizada via
+            // previous_cycle_id), não o do próprio ciclo. O último elo
+            // (pendente/atrasada/paga) vira só "1" — valor cheio como sempre.
+            const nextCycle = st === 'renovada' ? cyc.find((other) => other.previous_cycle_id === r.id) : null;
+            const cycleValue = nextCycle ? nextCycle.interest_only_amount : r.full_debt_amount;
+            const rowLabel = st === 'renovada' ? 'Renovação ' + (r.cycle_number + 1) : '1';
             const cycleLate = st === 'atrasada' ? estimateLateCharge(cycleValue, r.new_due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
             return `
             <tr>
