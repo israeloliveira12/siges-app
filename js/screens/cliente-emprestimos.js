@@ -30,11 +30,30 @@ async function renderClienteEmprestimos() {
   paintClienteEmprestimos(root, allContracts, installments || [], cycles || []);
 }
 
+// Menor data de vencimento ainda em aberto (pendente/atrasada) de um contrato
+// — usada só pra ordenar a aba "Em aberto" (atrasado/vence primeiro no topo),
+// mesmo padrão já usado em cliente-indicacoes.js.
+function nextDueDateFor(contractId, installments, cycles) {
+  const dates = [];
+  (installments || []).forEach((i) => { if (i.contract_id === contractId && (i.status === 'pendente' || i.status === 'atrasada')) dates.push(i.due_date); });
+  (cycles || []).forEach((r) => { if (r.contract_id === contractId && (r.status === 'pendente' || r.status === 'atrasada')) dates.push(r.new_due_date); });
+  dates.sort();
+  return dates[0] || null;
+}
+
 function paintClienteEmprestimos(root, allContracts, installments, cycles) {
   const contracts = allContracts.filter((c) => {
     const isFinalizado = c.status === 'quitado' || c.status === 'perda';
     return clienteEmprestimosTab === 'aberto' ? !isFinalizado : isFinalizado;
   });
+
+  if (clienteEmprestimosTab === 'aberto') {
+    contracts.sort((a, b) => {
+      const da = nextDueDateFor(a.id, installments, cycles) || '9999-12-31';
+      const db = nextDueDateFor(b.id, installments, cycles) || '9999-12-31';
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+  }
 
   const tabsHtml = `
     <div class="flex gap-8">
