@@ -224,14 +224,16 @@ async function renderGerenteContratoDetalhe(params) {
       <h3>Pagamentos recebidos</h3>
       ${(payments || []).length ? `
       <table class="data-table table-scroll mt-8">
-        <thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Lucro líquido</th></tr></thead>
+        <thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Taxa de entrada</th><th>Lucro líquido</th><th></th></tr></thead>
         <tbody>
           ${payments.map((pay) => `
             <tr>
               <td data-label="Data">${formatDateUTC(pay.received_at)}</td>
               <td data-label="Tipo">${{ quitacao_parcela: 'Quitação', renovacao_juros: 'Renovação (juros)', quitacao_final: 'Quitação final' }[pay.payment_kind]}</td>
               <td data-label="Valor" class="mono">${formatMoney(pay.amount_received)}</td>
+              <td data-label="Taxa de entrada" class="mono">${pay.has_operational_fee ? formatMoney(pay.operational_fee_amount) : '—'}</td>
               <td data-label="Lucro líquido" class="mono">${formatMoney(pay.net_profit)}</td>
+              <td data-label=""><button class="icon-btn edit-payment-fee-btn" data-id="${pay.id}" title="Editar taxa de entrada">${Icons.edit}</button></td>
             </tr>
           `).join('')}
         </tbody>
@@ -271,6 +273,12 @@ async function renderGerenteContratoDetalhe(params) {
   });
   root.querySelectorAll('.receive-cycle-btn').forEach((btn) => {
     btn.onclick = () => openReceberModal({ sourceType: 'renewal_cycle', id: btn.dataset.id, contract }, () => renderGerenteContratoDetalhe(params));
+  });
+  root.querySelectorAll('.edit-payment-fee-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const pay = (payments || []).find((x) => x.id === btn.dataset.id);
+      openEditPaymentFeeModal(pay, () => renderGerenteContratoDetalhe(params));
+    };
   });
 }
 
@@ -435,6 +443,68 @@ function openEditInstallmentModal(installment, onDone) {
     logAudit('parcela_editada', `Parcela ${installment.sequence_number} reagendada/editada`, { installment_id: installment.id });
     close();
     showToast('Parcela atualizada.');
+    if (typeof onDone === 'function') onDone();
+  };
+}
+
+// Taxa de entrada fica gravada no PAGAMENTO (payments.operational_fee_amount),
+// não na parcela — por isso é um modal separado, editando o registro do
+// pagamento já recebido, não a parcela em si. Corrigir esse valor recalcula
+// `net_profit` automaticamente (coluna gerada), então relatórios/lucro
+// líquido já enxergam o ajuste sem precisar tocar em mais nenhum lugar.
+function openEditPaymentFeeModal(payment, onDone) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-head"><h3>Editar taxa de entrada</h3><button class="icon-btn" id="epf-close">${Icons.x}</button></div>
+      <div class="modal-body">
+        <div id="epf-feedback"></div>
+        <p class="text-sm text-soft">Pagamento de ${formatMoney(payment.amount_received)} recebido em ${formatDateUTC(payment.received_at)}.</p>
+        <div class="toggle-row mt-14">
+          <label class="switch"><input type="checkbox" id="epf-toggle" ${payment.has_operational_fee ? 'checked' : ''}><span class="track"></span></label>
+          <span>Cobrar taxa operacional de entrada neste pagamento?</span>
+        </div>
+        <div class="field mt-14 ${payment.has_operational_fee ? '' : 'hidden'}" id="epf-amount-field">
+          <label>Valor da taxa de entrada (R$)</label>
+          <input type="text" id="epf-amount">
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="epf-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="epf-save">Salvar</button>
+      </div>
+    </div>`;
+  document.getElementById('app').appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#epf-close').onclick = close;
+  overlay.querySelector('#epf-cancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  const amountInput = overlay.querySelector('#epf-amount');
+  setMoneyValue(amountInput, payment.operational_fee_amount);
+  attachMoneyMask(amountInput);
+  const toggle = overlay.querySelector('#epf-toggle');
+  toggle.onchange = () => overlay.querySelector('#epf-amount-field').classList.toggle('hidden', !toggle.checked);
+
+  overlay.querySelector('#epf-save').onclick = async () => {
+    const btn = overlay.querySelector('#epf-save');
+    btn.disabled = true;
+    const hasFee = toggle.checked;
+    const amount = hasFee ? getMoneyValue(amountInput) : 0;
+    const { error } = await supa.rpc('update_payment_fee', {
+      p_payment_id: payment.id,
+      p_has_operational_fee: hasFee,
+      p_operational_fee_amount: amount,
+    });
+    if (error) {
+      overlay.querySelector('#epf-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    logAudit('pagamento_editado', `Taxa de entrada ajustada para ${formatMoney(amount)} no pagamento de ${formatMoney(payment.amount_received)}`, { payment_id: payment.id });
+    close();
+    showToast('Taxa de entrada atualizada.');
     if (typeof onDone === 'function') onDone();
   };
 }

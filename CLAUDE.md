@@ -355,6 +355,40 @@ end;
 $$;
 ```
 
+## Editar taxa de entrada de um pagamento já recebido (2026-07-14, `migration_025`)
+
+Seguindo direto do pedido anterior (editar parcela em qualquer status): usuário percebeu que ainda não dava pra corrigir a taxa operacional de ENTRADA cobrada num pagamento já recebido daquela parcela.
+
+- **Por que é um modal separado, não um campo a mais no "Editar/reagendar parcela"**: a taxa de entrada fica gravada em `payments.operational_fee_amount`/`has_operational_fee`, não em `installments` — é cobrada por PAGAMENTO, não pela parcela em si (uma parcela pode ter 0, 1 ou vários pagamentos parciais, cada um com sua própria taxa). Editar isso pela tabela errada não faria sentido.
+- **`gerente-contratos-lista.js`**: a tabela "Pagamentos recebidos" (no detalhe do contrato) ganhou a coluna "Taxa de entrada" e um botão de editar por linha. `openEditPaymentFeeModal(payment, onDone)` abre um popup com toggle (cobrar taxa? sim/não) + campo de valor, chamando a nova RPC `update_payment_fee`.
+- **`update_payment_fee(p_payment_id, p_has_operational_fee, p_operational_fee_amount)`** (SQL, `migration_025`): atualiza os 2 campos direto em `payments`. Como `net_profit` é coluna gerada (`interest_component - operational_fee_amount`), o ajuste já reflete automaticamente em todo relatório/lucro líquido que soma `net_profit` — não precisou tocar em nenhum outro lugar.
+- Ação nova de auditoria: `pagamento_editado` (adicionada em `AUDIT_ACTION_LABELS`, `gerente-auditoria.js`).
+- `sw.js` em `v42`.
+
+**Migration a rodar manualmente no SQL Editor do Supabase:**
+
+```sql
+create or replace function update_payment_fee(
+  p_payment_id uuid,
+  p_has_operational_fee boolean,
+  p_operational_fee_amount numeric
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  if not exists (select 1 from payments where id = p_payment_id) then raise exception 'NOT_FOUND'; end if;
+
+  update payments set
+    has_operational_fee = p_has_operational_fee,
+    operational_fee_amount = coalesce(p_operational_fee_amount, 0)
+  where id = p_payment_id;
+end;
+$$;
+```
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

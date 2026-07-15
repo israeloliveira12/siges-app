@@ -8,6 +8,7 @@ const AUDIT_ACTION_LABELS = {
   contrato_editado: 'Contrato editado',
   contrato_excluido: 'Contrato excluído',
   parcela_editada: 'Parcela editada',
+  pagamento_editado: 'Pagamento editado',
   pagamento_recebido: 'Pagamento recebido',
   renovacao_registrada: 'Renovação registrada',
   cliente_criado: 'Cliente criado',

@@ -1429,6 +1429,31 @@ begin
 end;
 $$;
 
+-- Editar a taxa operacional de ENTRADA de um pagamento já recebido —
+-- diferente de update_contract (que edita a taxa de SAÍDA, uma vez por
+-- contrato), essa taxa é cobrada por PAGAMENTO e fica em payments, não em
+-- installments. net_profit (coluna gerada) recalcula sozinho ao mudar
+-- operational_fee_amount, então relatórios/lucro líquido já refletem o ajuste.
+create or replace function update_payment_fee(
+  p_payment_id uuid,
+  p_has_operational_fee boolean,
+  p_operational_fee_amount numeric
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  if not exists (select 1 from payments where id = p_payment_id) then raise exception 'NOT_FOUND'; end if;
+
+  update payments set
+    has_operational_fee = p_has_operational_fee,
+    operational_fee_amount = coalesce(p_operational_fee_amount, 0)
+  where id = p_payment_id;
+end;
+$$;
+
 -- Excluir um contrato inteiro (e todo o histórico ligado a ele)
 create or replace function delete_contract(p_contract_id uuid)
 returns void
