@@ -96,7 +96,60 @@ function addExtratoFooter(doc, companyName) {
   }
 }
 
-async function gerarExtratoPDF({ contract, installments, clientProfile, score, companyName }) {
+// Monta as linhas do extrato — parcela(s) normal(is) quando o contrato nunca
+// foi renovado (multi-parcela sempre cai aqui, já que renovação só existe pra
+// parcela única), ou a cadeia completa (parcela + ciclos, relabeled por
+// posição) quando já houve 1+ renovação — mesmo critério já usado em
+// cliente-emprestimos.js/cliente-indicacoes.js, pra não divergir do que o
+// cliente já vê na tela.
+function buildExtratoRows(installments, cycles) {
+  if (!cycles || !cycles.length) {
+    return installments.map((i) => ({
+      label: String(i.sequence_number),
+      vencimento: i.due_date,
+      dataPgto: i.paid_at,
+      valor: Number(i.amount_due),
+      status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[i.status] || i.status,
+    }));
+  }
+  const installment = installments[0];
+  const rows = [];
+  if (installment.status === 'renovada') {
+    const nextCyc = cycles.find((c) => c.id === installment.renewed_into_cycle_id);
+    rows.push({
+      label: 'Renovação 1', vencimento: installment.due_date,
+      dataPgto: nextCyc ? nextCyc.created_at : null,
+      valor: nextCyc ? Number(nextCyc.interest_only_amount) : Number(installment.amount_due),
+      status: 'Renovada',
+    });
+  } else {
+    rows.push({
+      label: String(installment.sequence_number), vencimento: installment.due_date,
+      dataPgto: installment.paid_at, valor: Number(installment.amount_due),
+      status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada' }[installment.status] || installment.status,
+    });
+  }
+  cycles.slice().sort((a, b) => a.cycle_number - b.cycle_number).forEach((c) => {
+    if (c.status === 'renovada') {
+      const nextCyc = cycles.find((other) => other.previous_cycle_id === c.id);
+      rows.push({
+        label: 'Renovação ' + (c.cycle_number + 1), vencimento: c.new_due_date,
+        dataPgto: nextCyc ? nextCyc.created_at : null,
+        valor: nextCyc ? Number(nextCyc.interest_only_amount) : Number(c.full_debt_amount),
+        status: 'Renovada',
+      });
+    } else {
+      rows.push({
+        label: '1', vencimento: c.new_due_date,
+        dataPgto: c.paid_at, valor: Number(c.full_debt_amount),
+        status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada' }[c.status] || c.status,
+      });
+    }
+  });
+  return rows;
+}
+
+async function gerarExtratoPDF({ contract, installments, cycles, clientProfile, score, companyName }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const NAVY = [11, 65, 107];
@@ -149,17 +202,37 @@ async function gerarExtratoPDF({ contract, installments, clientProfile, score, c
   doc.setDrawColor(...LINE);
   doc.line(20, 52, 190, 52);
 
-  const paid = installments.filter((i) => i.status === 'paga');
-  const remaining = installments.filter((i) => i.status !== 'paga');
-  const totalDue = installments.reduce((s, i) => s + Number(i.amount_due), 0);
-  const totalPaid = paid.reduce((s, i) => s + Number(i.amount_due), 0);
+  const rows = buildExtratoRows(installments, cycles);
+  const hasChain = cycles && cycles.length > 0;
 
-  // Resumo — três colunas de texto simples, sem blocos coloridos
-  const summary = [
-    { label: 'DÍVIDA TOTAL', value: formatMoney(totalDue) },
-    { label: 'VALOR PAGO', value: formatMoney(totalPaid) },
-    { label: 'PARCELAS RESTANTES', value: `${remaining.length} de ${installments.length}` },
-  ];
+  // Resumo — três colunas de texto simples, sem blocos coloridas. Contrato
+  // nunca renovado (ou multi-parcela, que nunca tem ciclos) usa o resumo de
+  // sempre; contrato de parcela única já renovado usa um resumo baseado na
+  // cadeia inteira (dívida original, total já pago somando todas as
+  // renovações, e a situação atual), já que "parcelas restantes" não faz
+  // sentido pra um contrato que só tem 1 parcela na vida.
+  let summary;
+  if (hasChain) {
+    const lastRow = rows[rows.length - 1];
+    const isQuitado = lastRow.status === 'Paga';
+    const totalPago = rows.reduce((s, r, idx) => (idx < rows.length - 1 ? s + r.valor : s + (isQuitado ? r.valor : 0)), 0);
+    const saldoAberto = isQuitado ? 0 : lastRow.valor;
+    summary = [
+      { label: 'DÍVIDA ORIGINAL', value: formatMoney(installments[0].amount_due) },
+      { label: 'TOTAL JÁ PAGO', value: formatMoney(totalPago) },
+      { label: isQuitado ? 'SITUAÇÃO' : 'SALDO EM ABERTO', value: isQuitado ? 'Quitado' : formatMoney(saldoAberto) },
+    ];
+  } else {
+    const paid = installments.filter((i) => i.status === 'paga');
+    const remaining = installments.filter((i) => i.status !== 'paga');
+    const totalDue = installments.reduce((s, i) => s + Number(i.amount_due), 0);
+    const totalPaid = paid.reduce((s, i) => s + Number(i.amount_due), 0);
+    summary = [
+      { label: 'DÍVIDA TOTAL', value: formatMoney(totalDue) },
+      { label: 'VALOR PAGO', value: formatMoney(totalPaid) },
+      { label: 'PARCELAS RESTANTES', value: `${remaining.length} de ${installments.length}` },
+    ];
+  }
   const colW = 170 / 3;
   summary.forEach((c, i) => {
     const x = 20 + i * colW;
@@ -182,7 +255,7 @@ async function gerarExtratoPDF({ contract, installments, clientProfile, score, c
   doc.setFontSize(8);
   doc.setTextColor(...INK_SOFT);
   const cols = [20, 40, 76, 112, 143, 176];
-  ['Nº', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
+  ['Parcela', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
   doc.setDrawColor(...NAVY);
   doc.setLineWidth(0.4);
   doc.line(20, y + 2.5, 190, y + 2.5);
@@ -191,14 +264,14 @@ async function gerarExtratoPDF({ contract, installments, clientProfile, score, c
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(20, 33, 43);
-  installments.forEach((inst, idx) => {
+  rows.forEach((r) => {
     if (y > 270) {
       doc.addPage();
       y = 24;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8);
       doc.setTextColor(...INK_SOFT);
-      ['Nº', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
+      ['Parcela', 'Vencimento', 'Data pgto', 'Valor', 'Status', ''].forEach((h, i) => doc.text(h, cols[i], y));
       doc.setDrawColor(...NAVY);
       doc.line(20, y + 2.5, 190, y + 2.5);
       y += 10;
@@ -206,12 +279,11 @@ async function gerarExtratoPDF({ contract, installments, clientProfile, score, c
       doc.setFontSize(9);
       doc.setTextColor(20, 33, 43);
     }
-    const statusLabel = { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[inst.status];
-    doc.text(String(inst.sequence_number), cols[0], y);
-    doc.text(formatDate(inst.due_date), cols[1], y);
-    doc.text(inst.paid_at ? formatDateUTC(inst.paid_at) : '—', cols[2], y);
-    doc.text(formatMoney(inst.amount_due), cols[3], y);
-    doc.text(statusLabel, cols[4], y);
+    doc.text(r.label, cols[0], y);
+    doc.text(formatDate(r.vencimento), cols[1], y);
+    doc.text(r.dataPgto ? formatDateUTC(r.dataPgto) : '—', cols[2], y);
+    doc.text(formatMoney(r.valor), cols[3], y);
+    doc.text(r.status, cols[4], y);
     doc.setDrawColor(240, 242, 240);
     doc.setLineWidth(0.2);
     doc.line(20, y + 2.5, 190, y + 2.5);

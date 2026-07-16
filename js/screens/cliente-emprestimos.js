@@ -146,10 +146,11 @@ function paintClienteEmprestimos(root, allContracts, installments, cycles) {
     btn.onclick = async () => {
       const contract = contracts.find((c) => c.id === btn.dataset.id);
       const inst = (installments || []).filter((i) => i.contract_id === contract.id);
+      const cyc = (cycles || []).filter((r) => r.contract_id === contract.id);
       btn.disabled = true;
       try {
         await gerarExtratoPDF({
-          contract, installments: inst,
+          contract, installments: inst, cycles: cyc,
           clientProfile: { full_name: App.profile.full_name, cpf: App.profile.cpf },
           score: App.client ? App.client.score : null,
           companyName: (App.settings && App.settings.company_name) || 'Siges Serviços Financeiros',

@@ -267,7 +267,7 @@ async function renderGerenteContratoDetalhe(params) {
   document.getElementById('print-extrato-btn').onclick = async () => {
     const { data: clientData } = await supa.from('clients').select('score').eq('profile_id', contract.client_id).maybeSingle();
     await gerarExtratoPDF({
-      contract, installments: installments || [], clientProfile: p,
+      contract, installments: installments || [], cycles: cycles || [], clientProfile: p,
       score: clientData ? clientData.score : null,
       companyName: (App.settings && App.settings.company_name) || 'Siges Serviços Financeiros',
     });
