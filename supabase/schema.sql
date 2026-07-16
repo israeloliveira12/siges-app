@@ -501,6 +501,13 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
+  -- Trava a linha do cliente ANTES de somar o saldo em aberto — sem isso,
+  -- duas criações de contrato concorrentes (dois gerentes, ou duplo-clique)
+  -- podiam, juntas, ultrapassar o limite mesmo cada uma passando na
+  -- checagem isoladamente (race condition clássica check-then-act). Mesmo
+  -- padrão de defesa já usado em receive_payment/renew_installment pra
+  -- parcela/ciclo, replicado aqui pro cliente.
+  perform 1 from clients where profile_id = new.client_id for update;
   if not check_credit_limit(new.client_id, new.principal_amount) then
     raise exception 'CREDIT_LIMIT_EXCEEDED';
   end if;
@@ -524,7 +531,8 @@ as $$
 declare
   v_limit numeric;
 begin
-  select credit_limit into v_limit from clients where profile_id = new.client_id;
+  -- Mesma trava de corrida do trigger acima, agora pro fluxo de solicitação.
+  select credit_limit into v_limit from clients where profile_id = new.client_id for update;
   if (client_outstanding_principal(new.client_id) + new.requested_amount) > coalesce(v_limit, 0) then
     raise exception 'CREDIT_LIMIT_EXCEEDED';
   end if;
@@ -592,6 +600,8 @@ declare
   total_interest numeric(12,2);
   principal_per numeric(12,2);
   interest_per numeric(12,2);
+  principal_accum numeric(12,2) := 0;
+  interest_accum numeric(12,2) := 0;
   step interval;
   i integer;
 begin
@@ -607,8 +617,20 @@ begin
   for i in 1..p_installments_count loop
     sequence_number := i;
     due_date := p_first_installment_date + (step * (i - 1));
-    principal_share := principal_per;
-    interest_share := interest_per;
+    -- A última parcela absorve o resto do arredondamento (método do maior
+    -- resto) — sem isso, `round(principal/count,2)` fixo em toda parcela
+    -- podia perder/sobrar centavos que nunca eram atribuídos a nenhuma
+    -- parcela (ex: R$1.000 ÷ 3 = R$333,33 × 3 = R$999,99, faltando R$0,01
+    -- pra bater com principal_amount do contrato).
+    if i = p_installments_count then
+      principal_share := p_principal - principal_accum;
+      interest_share := total_interest - interest_accum;
+    else
+      principal_share := principal_per;
+      interest_share := interest_per;
+      principal_accum := principal_accum + principal_per;
+      interest_accum := interest_accum + interest_per;
+    end if;
     return next;
   end loop;
 end;
@@ -644,6 +666,7 @@ as $$
 declare
   v_contract_id uuid;
   v_row jsonb;
+  v_principal_sum numeric;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN: apenas gerentes podem criar contratos';
@@ -665,6 +688,13 @@ begin
 
   if p_installments_override is not null then
     for v_row in select * from jsonb_array_elements(p_installments_override) loop
+      -- Defesa em profundidade: o wizard já trava capital/juros negativos no
+      -- JS, mas a RPC é pública (security definer) e não deveria confiar só
+      -- na UI pra isso — parcela com juros negativo apareceria como lucro
+      -- negativo mais tarde, sem nenhum aviso.
+      if (v_row->>'principal_share')::numeric < 0 or (v_row->>'interest_share')::numeric < 0 then
+        raise exception 'INVALID_AMOUNT';
+      end if;
       insert into installments (contract_id, sequence_number, due_date, principal_share, interest_share)
       values (
         v_contract_id,
@@ -678,6 +708,17 @@ begin
     insert into installments (contract_id, sequence_number, due_date, principal_share, interest_share)
     select v_contract_id, sequence_number, due_date, principal_share, interest_share
     from calc_installments_preview(p_principal_amount, p_interest_rate, p_installments_count, p_due_type, p_first_installment_date, p_custom_interval_days);
+  end if;
+
+  -- Reconciliação: a soma do capital das parcelas geradas/editadas precisa
+  -- bater com o capital do contrato (dentro de uma tolerância de centavos
+  -- de arredondamento) — sem isso, um valor digitado errado no wizard (ou
+  -- um override malformado) desalinha o capital total sem nenhum aviso,
+  -- inflando/reduzindo artificialmente o limite de crédito consumido por
+  -- esse contrato (client_outstanding_principal soma as parcelas em aberto).
+  select coalesce(sum(principal_share), 0) into v_principal_sum from installments where contract_id = v_contract_id;
+  if abs(v_principal_sum - p_principal_amount) > greatest(0.02 * p_installments_count, 0.02) then
+    raise exception 'PRINCIPAL_MISMATCH';
   end if;
 
   if p_origin_request_id is not null then
@@ -856,6 +897,10 @@ begin
     raise exception 'INSTALLMENT_NOT_PAYABLE';
   end if;
 
+  if coalesce(p_late_charge_amount, 0) < 0 then
+    raise exception 'INVALID_AMOUNT';
+  end if;
+
   v_remaining_interest := v_installment.interest_share - v_installment.interest_paid_partial;
   v_remaining_principal := v_installment.principal_share - v_installment.principal_paid_partial;
   v_remaining_total := v_remaining_interest + v_remaining_principal;
@@ -951,12 +996,18 @@ declare
   v_client_id uuid;
   v_step interval;
   v_status installment_status;
+  v_installments_count integer;
+  v_allows_renewal boolean;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
 
   if p_interest_only_amount < 0 then
+    raise exception 'INVALID_AMOUNT';
+  end if;
+
+  if coalesce(p_late_charge_amount, 0) < 0 then
     raise exception 'INVALID_AMOUNT';
   end if;
 
@@ -995,8 +1046,19 @@ begin
     raise exception 'INSTALLMENT_NOT_PAYABLE';
   end if;
 
-  select lc.due_type, lc.client_id, lc.custom_interval_days into v_due_type, v_client_id, v_custom_days
+  select lc.due_type, lc.client_id, lc.custom_interval_days, lc.installments_count, lc.allows_renewal
+    into v_due_type, v_client_id, v_custom_days, v_installments_count, v_allows_renewal
     from loan_contracts lc where lc.id = v_contract_id;
+
+  -- Renovação só é permitida em contratos de parcela única com o flag
+  -- habilitado — a RPC nunca validava isso no servidor, só a UI escondia o
+  -- botão (openReceberModal só monta a aba "Renovar" quando canRenew=true);
+  -- um cliente técnico chamando a RPC direto conseguiria renovar qualquer
+  -- contrato multi-parcela, deixando a relação entre as demais parcelas e o
+  -- ciclo renovado ambígua (ver decisão documentada em CLAUDE.md).
+  if v_installments_count <> 1 or not coalesce(v_allows_renewal, false) then
+    raise exception 'RENEWAL_NOT_ALLOWED';
+  end if;
 
   v_full_debt := coalesce(v_full_debt, v_principal + v_interest);
 
@@ -1040,8 +1102,13 @@ begin
     coalesce(p_received_at, current_date)
   ) returning id into v_payment_id;
 
+  -- Inclui 'perda' de propósito: um contrato marcado em cobrança que ainda
+  -- assim recebe uma renovação volta a ficar em_aberto — sem isso, ele
+  -- continuava invisível pra client_outstanding_principal/_balance (que
+  -- filtram só em_aberto/atrasado), subestimando o limite de crédito
+  -- consumido pelo cliente mesmo com uma dívida ativa sendo paga de novo.
   update loan_contracts set status = 'em_aberto', updated_at = now()
-    where id = v_contract_id and status in ('em_aberto', 'atrasado');
+    where id = v_contract_id and status in ('em_aberto', 'atrasado', 'perda');
 
   insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body)
   values (v_client_id, 'renovacao_registrada', 'in_app', v_contract_id,
@@ -1091,6 +1158,10 @@ begin
   -- marcados como quitados mesmo sem o valor real ter entrado, inflando o
   -- lucro registrado nos relatórios (que gravavam o valor CHEIO esperado,
   -- não o que realmente veio em p_amount_received).
+  if coalesce(p_late_charge_amount, 0) < 0 then
+    raise exception 'INVALID_AMOUNT';
+  end if;
+
   v_full_amount_due := v_cycle.full_debt_amount + coalesce(p_late_charge_amount, 0);
   if p_amount_received <= 0 or abs(p_amount_received - v_full_amount_due) > 0.01 then
     raise exception 'INVALID_AMOUNT';
@@ -1142,6 +1213,18 @@ begin
 
   update renewal_cycles set status = 'atrasada'
     where status = 'pendente' and new_due_date < current_date;
+
+  -- Contrato multi-parcela nunca voltava de 'atrasado' pra 'em_aberto' depois
+  -- que a parcela atrasada era quitada (só renew_installment fazia esse
+  -- retorno, e renovação só existe pra parcela única) — um contrato de 3
+  -- parcelas que atrasava uma vez ficava com status 'atrasado' PERMANENTE
+  -- mesmo depois de todas as parcelas em dia, distorcendo qualquer filtro/
+  -- relatório que confie no status do contrato (em vez de olhar as parcelas
+  -- individualmente, como o resto do sistema já faz por convenção).
+  update loan_contracts lc set status = 'em_aberto', updated_at = now()
+    where status = 'atrasado'
+      and not exists (select 1 from installments i where i.contract_id = lc.id and i.status = 'atrasada')
+      and not exists (select 1 from renewal_cycles rc where rc.contract_id = lc.id and rc.status = 'atrasada');
 
   update loan_contracts lc set status = 'atrasado', updated_at = now()
     where status = 'em_aberto' and (
@@ -1405,6 +1488,9 @@ security definer set search_path = public
 as $$
 declare
   v_installment installments%rowtype;
+  v_installments_count integer;
+  v_principal_amount numeric;
+  v_principal_sum numeric;
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
 
@@ -1426,6 +1512,21 @@ begin
     principal_share = p_principal_share,
     interest_share = p_interest_share
   where id = p_installment_id;
+
+  -- Reconciliação: mesmo raciocínio de create_loan_contract — a soma do
+  -- capital de todas as parcelas do contrato precisa continuar batendo com
+  -- o capital contratado, dentro de uma tolerância de centavos de
+  -- arredondamento. Sem isso, um typo no valor da parcela (ex: 5000 em vez
+  -- de 500) muda silenciosamente o capital total do contrato, distorcendo
+  -- o limite de crédito consumido (client_outstanding_principal) sem
+  -- nenhum aviso pro admin.
+  select installments_count, principal_amount into v_installments_count, v_principal_amount
+    from loan_contracts where id = v_installment.contract_id;
+  select coalesce(sum(principal_share), 0) into v_principal_sum
+    from installments where contract_id = v_installment.contract_id;
+  if abs(v_principal_sum - v_principal_amount) > greatest(0.02 * v_installments_count, 0.02) then
+    raise exception 'PRINCIPAL_MISMATCH';
+  end if;
 end;
 $$;
 

@@ -67,7 +67,7 @@ async function openReceberModal(source, onDone) {
           ${exitFeeAmount > 0 ? `<p class="text-sm text-soft mt-8">Taxa de saída deste contrato: ${formatMoney(exitFeeAmount)} (já cobrada na criação do contrato — não entra na conta deste recebimento).</p>` : ''}
           <div class="field mt-8">
             <label>Data do pagamento</label>
-            <input type="date" id="r-received-at" value="${todayISO()}">
+            <input type="date" id="r-received-at" value="${todayISO()}" max="${todayISO()}">
           </div>
 
           ${canRenew ? `
@@ -355,6 +355,8 @@ async function openReceberModal(source, onDone) {
         ? 'Esta parcela/ciclo já foi recebido ou renovado (provavelmente em outra aba ou por outro administrador). Atualize a tela.'
         : (e.message || '').includes('INVALID_AMOUNT')
         ? 'Valor inválido para este recebimento — confira o valor e tente novamente.'
+        : (e.message || '').includes('RENEWAL_NOT_ALLOWED')
+        ? 'Este contrato não permite renovação (só contratos de parcela única com renovação habilitada podem renovar).'
         : (e.message || String(e));
       feedback.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
       btn.disabled = false;

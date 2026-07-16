@@ -154,7 +154,7 @@ function paintWizardStep2() {
       <div class="form-section-title">Valor e datas</div>
       <div class="field-row">
         <div class="field"><label>Valor emprestado — dívida-base (R$)</label><input type="text" id="w-principal" value=""></div>
-        <div class="field"><label>Data do contrato</label><input type="date" id="w-contract-date" value="${wiz.contract_date}"></div>
+        <div class="field"><label>Data do contrato</label><input type="date" id="w-contract-date" value="${wiz.contract_date}" max="${todayISO()}"></div>
         <div class="field"><label>Data da 1ª parcela</label><input type="date" id="w-first-date" value="${wiz.first_installment_date}"></div>
       </div>
 
@@ -341,10 +341,18 @@ function paintWizardStep3() {
       attachMoneyMask(el);
       el.oninput = () => {
         const idx = el.dataset.idx;
-        const newTotal = getMoneyValue(el);
+        const principal = Number(wiz.installmentsPreview[idx].principal_share);
+        let newTotal = getMoneyValue(el);
         // capital é fixo (parte do valor emprestado) — juros absorve a
-        // diferença quando o gerente edita o valor total da parcela.
-        wiz.installmentsPreview[idx].interest_share = Math.round((newTotal - Number(wiz.installmentsPreview[idx].principal_share)) * 100) / 100;
+        // diferença quando o gerente edita o valor total da parcela. Se o
+        // gerente digitar um total abaixo do próprio capital, juros ficaria
+        // negativo (viraria "lucro negativo" silencioso no relatório) — trava
+        // o total no mínimo igual ao capital e corrige o campo na tela.
+        if (newTotal < principal) {
+          newTotal = principal;
+          setMoneyValue(el, newTotal);
+        }
+        wiz.installmentsPreview[idx].interest_share = Math.round((newTotal - principal) * 100) / 100;
       };
     });
   }

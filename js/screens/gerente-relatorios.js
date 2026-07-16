@@ -18,7 +18,13 @@ function periodoRange() {
     return { start: relatoriosAno + '-01-01', end: (Number(relatoriosAno) + 1) + '-01-01', bucket: 'mes' };
   }
   const start = relatoriosMes + '-01';
-  const end = addDaysISO(new Date(Number(relatoriosMes.slice(0, 4)), Number(relatoriosMes.slice(5, 7)), 0).toISOString().slice(0, 10), 1);
+  // Último dia do mês via getDate() (lê o calendário LOCAL, sem conversão de
+  // fuso) — a versão anterior passava por .toISOString() (sempre UTC), que
+  // em qualquer fuso negativo (ex: Brasil) jogava a meia-noite local um dia
+  // pra trás, fazendo o relatório de "mês" perder o último dia do mês.
+  const lastDay = new Date(Number(relatoriosMes.slice(0, 4)), Number(relatoriosMes.slice(5, 7)), 0).getDate();
+  const lastDayISO = relatoriosMes + '-' + String(lastDay).padStart(2, '0');
+  const end = addDaysISO(lastDayISO, 1);
   return { start, end, bucket: 'dia' };
 }
 
@@ -121,7 +127,11 @@ function bucketLabel(key, bucket) {
 function paintLucroAnalitico(payments, contracts, bucket) {
   const body = document.getElementById('relatorios-body');
   const byBucketProfit = groupByBucket(payments, 'received_at', ['net_profit', 'principal_component', 'amount_received'], bucket);
-  const byBucketFees = groupByBucket(contracts, 'contract_date', ['operational_fee_amount'], bucket);
+  // Defesa em profundidade: só soma taxa de saída de contratos com o flag
+  // has_operational_fee ativo — na prática o valor já vem zerado quando o
+  // flag está desligado (JS sempre zera ao salvar), mas não vale a pena
+  // confiar cegamente nisso num relatório financeiro agregado.
+  const byBucketFees = groupByBucket(contracts.filter((c) => c.has_operational_fee), 'contract_date', ['operational_fee_amount'], bucket);
   const keys = [...new Set([...Object.keys(byBucketProfit), ...Object.keys(byBucketFees)])].sort();
 
   const netFor = (k) => (byBucketProfit[k] ? byBucketProfit[k].net_profit : 0) - (byBucketFees[k] ? byBucketFees[k].operational_fee_amount : 0);
@@ -162,8 +172,8 @@ function paintFluxoCaixa(payments, contracts, bucket) {
   const body = document.getElementById('relatorios-body');
   const recebido = payments.reduce((s, p) => s + Number(p.amount_received), 0);
   const aporte = contracts.reduce((s, c) => s + Number(c.total_disbursed_amount), 0);
-  const exitFees = contracts.reduce((s, c) => s + Number(c.operational_fee_amount), 0);
-  const entryFees = payments.reduce((s, p) => s + Number(p.operational_fee_amount), 0);
+  const exitFees = contracts.filter((c) => c.has_operational_fee).reduce((s, c) => s + Number(c.operational_fee_amount), 0);
+  const entryFees = payments.filter((p) => p.has_operational_fee).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
   const lucroLiquido = payments.reduce((s, p) => s + Number(p.interest_component), 0) - exitFees - entryFees;
 
   const byBucketIn = groupByBucket(payments, 'received_at', ['amount_received'], bucket);
@@ -196,8 +206,8 @@ function paintRelatorioAnalitico(payments, contracts) {
   const entradas = payments.reduce((s, p) => s + Number(p.amount_received), 0);
   const saidas = contracts.reduce((s, c) => s + Number(c.principal_amount), 0);
   const juros = payments.reduce((s, p) => s + Number(p.interest_component), 0);
-  const exitFees = contracts.reduce((s, c) => s + Number(c.operational_fee_amount), 0);
-  const entryFees = payments.reduce((s, p) => s + Number(p.operational_fee_amount), 0);
+  const exitFees = contracts.filter((c) => c.has_operational_fee).reduce((s, c) => s + Number(c.operational_fee_amount), 0);
+  const entryFees = payments.filter((p) => p.has_operational_fee).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
 
   body.innerHTML = `
     <div class="grid grid-2">

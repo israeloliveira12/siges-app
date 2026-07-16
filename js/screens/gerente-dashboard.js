@@ -50,15 +50,20 @@ async function renderGerenteDashboard() {
     { data: exitFeesPrevPeriod, error: e11 },
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
-    supa.from('payments').select('amount_received, net_profit').gte('received_at', monthStart),
+    // .lte(today): sem limite superior, um pagamento lançado com data futura
+    // por engano (received_at editável manualmente no modal de recebimento)
+    // inflava o "lucro do mês"/"recebido no mês" antes mesmo do dia chegar —
+    // "mês corrente" deve sempre significar "até hoje", nunca "até o fim do
+    // mês", já que o resto do dashboard já trata hoje como o corte real.
+    supa.from('payments').select('amount_received, net_profit').gte('received_at', monthStart).lte('received_at', today),
     supa.from('payments').select('amount_received, net_profit').gte('received_at', prevMonthStart).lte('received_at', prevMonthEnd),
     supa.from('loan_contracts').select('status, created_at'),
     supa.from('payments').select('amount_received, received_at').gte('received_at', trend30Start),
     supa.from('loan_requests').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
     supa.from('installments').select('amount_due, due_date, status, principal_share, interest_share, principal_paid_partial, interest_paid_partial, loan_contracts!installments_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
     supa.from('renewal_cycles').select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
-    supa.from('payments').select('operational_fee_amount').eq('has_operational_fee', true).gte('received_at', monthStart),
-    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', monthStart),
+    supa.from('payments').select('operational_fee_amount').eq('has_operational_fee', true).gte('received_at', monthStart).lte('received_at', today),
+    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', monthStart).lte('contract_date', today),
     supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', prevMonthStart).lte('contract_date', prevMonthEnd),
   ]);
 

@@ -456,6 +456,8 @@ function openEditInstallmentModal(installment, onDone) {
     if (error) {
       const msg = (error.message || '').includes('AMOUNT_BELOW_ALREADY_PAID')
         ? 'Capital ou juros não podem ficar abaixo do valor já pago parcialmente nesta parcela.'
+        : (error.message || '').includes('PRINCIPAL_MISMATCH')
+        ? 'O novo capital desta parcela faz a soma do capital de todas as parcelas do contrato divergir demais do valor contratado. Confira o valor antes de salvar.'
         : error.message;
       document.getElementById('ei-feedback').innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
       btn.disabled = false;
