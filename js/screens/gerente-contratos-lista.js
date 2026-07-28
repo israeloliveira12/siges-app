@@ -196,30 +196,41 @@ async function renderGerenteContratoDetalhe(params) {
                 <td data-label="Vencimento">${formatDate(currentCycle.new_due_date)}</td>
                 <td data-label="Capital" class="mono">${formatMoney(capital)}</td>
                 <td data-label="Juros" class="mono">${formatMoney(juros)}</td>
-                <td data-label="Total" class="mono">${formatMoney(total)}</td>
-                <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
+                <td data-label="Total"><div><div class="mono">${formatMoney(total)}</div>${st === 'perda' ? `<div class="text-sm" style="color:var(--bad)">Perda reconhecida: ${formatMoney(currentCycle.principal_lost)}</div>` : ''}</div></td>
+                <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', perda: 'Perda' }[st])}</td>
                 <td data-label="">
-                  ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada') ? `
-                    <button class="btn btn-accent btn-sm receive-cycle-btn" data-id="${currentCycle.id}">Receber</button>
-                  ` : ''}
+                  <div class="flex gap-8">
+                    ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada') ? `
+                      <button class="btn btn-accent btn-sm receive-cycle-btn" data-id="${currentCycle.id}">Receber</button>
+                      <button class="btn btn-outline btn-sm mark-loss-btn" style="color:var(--bad)" data-type="cycle" data-id="${currentCycle.id}" data-amount="${capital}" data-label="Renovação ${currentCycle.cycle_number}">Marcar como perda</button>
+                    ` : ''}
+                    ${currentCycle.status === 'perda' ? `
+                      <button class="btn btn-outline btn-sm revert-loss-btn" data-type="cycle" data-id="${currentCycle.id}" data-label="Renovação ${currentCycle.cycle_number}">Reverter perda</button>
+                    ` : ''}
+                  </div>
                 </td>
               </tr>
             `;
             }
             const st = effectiveInstallmentStatus(i.status, i.due_date);
             const isPartial = st !== 'paga' && (i.principal_paid_partial > 0 || i.interest_paid_partial > 0);
+            const lossAmount = Math.max(0, Number(i.principal_share) - Number(i.principal_paid_partial || 0));
             return `
             <tr>
               <td data-label="Nº">${i.sequence_number}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
               <td data-label="Capital" class="mono">${formatMoney(i.principal_share)}</td>
               <td data-label="Juros" class="mono">${formatMoney(i.interest_share)}</td>
-              <td data-label="Total"><div><div class="mono">${formatMoney(i.amount_due)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}</div></td>
-              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[st])}</td>
+              <td data-label="Total"><div><div class="mono">${formatMoney(i.amount_due)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(i.amount_due - i.principal_paid_partial - i.interest_paid_partial)}</div>` : ''}${st === 'perda' ? `<div class="text-sm" style="color:var(--bad)">Perda reconhecida: ${formatMoney(i.principal_lost)}</div>` : ''}</div></td>
+              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada', perda: 'Perda' }[st])}</td>
               <td data-label="">
                 <div class="flex gap-8">
                   ${(i.status === 'pendente' || i.status === 'atrasada') ? `
                     <button class="btn btn-accent btn-sm receive-inst-btn" data-id="${i.id}">Receber</button>
+                    <button class="btn btn-outline btn-sm mark-loss-btn" style="color:var(--bad)" data-type="installment" data-id="${i.id}" data-amount="${lossAmount}" data-label="Parcela ${i.sequence_number}">Marcar como perda</button>
+                  ` : ''}
+                  ${i.status === 'perda' ? `
+                    <button class="btn btn-outline btn-sm revert-loss-btn" data-type="installment" data-id="${i.id}" data-label="Parcela ${i.sequence_number}">Reverter perda</button>
                   ` : ''}
                   <button class="icon-btn edit-inst-btn" data-id="${i.id}" title="Editar/reagendar parcela">${Icons.edit}</button>
                 </div>
@@ -294,6 +305,40 @@ async function renderGerenteContratoDetalhe(params) {
   });
   root.querySelectorAll('.receive-cycle-btn').forEach((btn) => {
     btn.onclick = () => openReceberModal({ sourceType: 'renewal_cycle', id: btn.dataset.id, contract }, () => renderGerenteContratoDetalhe(params));
+  });
+  root.querySelectorAll('.mark-loss-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const isCycle = btn.dataset.type === 'cycle';
+      openLossActionModal({
+        title: 'Marcar como perda',
+        message: `Confirma marcar "<strong>${escapeHtml(btn.dataset.label)}</strong>" do contrato #${contract.contract_number} como perda? <strong>${formatMoney(Number(btn.dataset.amount))}</strong> de capital não recuperado será abatido do lucro líquido do mês. Se o cliente pagar depois, use "Reverter perda" pra corrigir.`,
+        confirmLabel: 'Marcar como perda',
+        rpcName: isCycle ? 'mark_cycle_loss' : 'mark_installment_loss',
+        rpcParam: isCycle ? { p_cycle_id: btn.dataset.id } : { p_installment_id: btn.dataset.id },
+        auditAction: 'perda_manual',
+        auditMessage: `${btn.dataset.label} do contrato #${contract.contract_number} marcada como perda (${formatMoney(Number(btn.dataset.amount))})`,
+        contractId: contract.id,
+        successMessage: 'Marcado como perda.',
+        onDone: () => renderGerenteContratoDetalhe(params),
+      });
+    };
+  });
+  root.querySelectorAll('.revert-loss-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const isCycle = btn.dataset.type === 'cycle';
+      openLossActionModal({
+        title: 'Reverter perda',
+        message: `Confirma reverter a perda de "<strong>${escapeHtml(btn.dataset.label)}</strong>" do contrato #${contract.contract_number}? Ela volta a aparecer no Cobrar normalmente. O abatimento já contabilizado no lucro do mês em que a perda foi reconhecida não é alterado retroativamente.`,
+        confirmLabel: 'Reverter perda',
+        rpcName: isCycle ? 'revert_cycle_loss' : 'revert_installment_loss',
+        rpcParam: isCycle ? { p_cycle_id: btn.dataset.id } : { p_installment_id: btn.dataset.id },
+        auditAction: 'perda_revertida',
+        auditMessage: `Perda revertida em ${btn.dataset.label} do contrato #${contract.contract_number}`,
+        contractId: contract.id,
+        successMessage: 'Perda revertida.',
+        onDone: () => renderGerenteContratoDetalhe(params),
+      });
+    };
   });
   root.querySelectorAll('.edit-payment-fee-btn').forEach((btn) => {
     btn.onclick = () => {
@@ -528,6 +573,45 @@ function openEditPaymentFeeModal(payment, onDone) {
     logAudit('pagamento_editado', `Taxa de entrada ajustada para ${formatMoney(amount)} no pagamento de ${formatMoney(payment.amount_received)}`, { payment_id: payment.id });
     close();
     showToast('Taxa de entrada atualizada.');
+    if (typeof onDone === 'function') onDone();
+  };
+}
+
+// Modal genérico de confirmação pra marcar/reverter perda numa parcela ou
+// ciclo específico — mesmas 4 RPCs (mark/revert × installment/cycle) usam
+// esse único modal, só trocando título/mensagem/RPC/auditoria.
+function openLossActionModal({ title, message, confirmLabel, rpcName, rpcParam, auditAction, auditMessage, contractId, successMessage, onDone }) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head"><h3 style="color:var(--bad)">${title}</h3><button class="icon-btn" id="lm-close">${Icons.x}</button></div>
+      <div class="modal-body">
+        <p class="text-sm">${message}</p>
+        <div id="lm-feedback" class="mt-8"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="lm-cancel">Cancelar</button>
+        <button class="btn btn-danger" id="lm-confirm">${confirmLabel}</button>
+      </div>
+    </div>`;
+  document.getElementById('app').appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#lm-close').onclick = close;
+  overlay.querySelector('#lm-cancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  overlay.querySelector('#lm-confirm').onclick = async () => {
+    const btn = overlay.querySelector('#lm-confirm');
+    btn.disabled = true;
+    const { error } = await supa.rpc(rpcName, rpcParam);
+    if (error) {
+      overlay.querySelector('#lm-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    logAudit(auditAction, auditMessage, { contract_id: contractId });
+    close();
+    showToast(successMessage);
     if (typeof onDone === 'function') onDone();
   };
 }

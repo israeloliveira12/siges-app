@@ -86,19 +86,25 @@ async function renderGerenteRelatorios() {
 
   const { start, end, bucket } = periodoRange();
 
-  const [{ data: payments, error: pe1 }, { data: contracts, error: pe2 }] = await Promise.all([
+  const [{ data: payments, error: pe1 }, { data: contracts, error: pe2 }, { data: lostInstallments, error: pe3 }, { data: lostCycles, error: pe4 }] = await Promise.all([
     supa.from('payments').select('*').gte('received_at', start).lt('received_at', end),
     supa.from('loan_contracts').select('*').gte('contract_date', start).lt('contract_date', end),
+    // Perda reconhecida no período — sempre por loss_recognized_at (quando a
+    // parcela/ciclo foi de fato baixado como perda), nunca due_date/
+    // created_at, mesmo critério já usado no Dashboard.
+    supa.from('installments').select('principal_lost, loss_recognized_at').eq('status', 'perda').gte('loss_recognized_at', start).lt('loss_recognized_at', end),
+    supa.from('renewal_cycles').select('principal_lost, loss_recognized_at').eq('status', 'perda').gte('loss_recognized_at', start).lt('loss_recognized_at', end),
   ]);
-  if (pe1 || pe2) {
-    console.error('Erro ao carregar relatório:', pe1 || pe2);
+  if (pe1 || pe2 || pe3 || pe4) {
+    console.error('Erro ao carregar relatório:', pe1 || pe2 || pe3 || pe4);
     body.innerHTML = `<p class="auth-error">Não foi possível carregar o relatório agora. Recarregue a página ou tente novamente em instantes.</p>`;
     return;
   }
+  const losses = [...(lostInstallments || []), ...(lostCycles || [])];
 
-  if (relatoriosTab === 'lucro') paintLucroAnalitico(payments || [], contracts || [], bucket);
-  else if (relatoriosTab === 'fluxo') paintFluxoCaixa(payments || [], contracts || [], bucket);
-  else paintRelatorioAnalitico(payments || [], contracts || []);
+  if (relatoriosTab === 'lucro') paintLucroAnalitico(payments || [], contracts || [], bucket, losses);
+  else if (relatoriosTab === 'fluxo') paintFluxoCaixa(payments || [], contracts || [], bucket, losses);
+  else paintRelatorioAnalitico(payments || [], contracts || [], losses);
 }
 
 function bucketKey(dateStr, bucket) {
@@ -124,7 +130,7 @@ function bucketLabel(key, bucket) {
   return key.slice(8, 10);
 }
 
-function paintLucroAnalitico(payments, contracts, bucket) {
+function paintLucroAnalitico(payments, contracts, bucket, losses) {
   const body = document.getElementById('relatorios-body');
   const byBucketProfit = groupByBucket(payments, 'received_at', ['net_profit', 'principal_component', 'amount_received'], bucket);
   // Defesa em profundidade: só soma taxa de saída de contratos com o flag
@@ -132,9 +138,10 @@ function paintLucroAnalitico(payments, contracts, bucket) {
   // flag está desligado (JS sempre zera ao salvar), mas não vale a pena
   // confiar cegamente nisso num relatório financeiro agregado.
   const byBucketFees = groupByBucket(contracts.filter((c) => c.has_operational_fee), 'contract_date', ['operational_fee_amount'], bucket);
-  const keys = [...new Set([...Object.keys(byBucketProfit), ...Object.keys(byBucketFees)])].sort();
+  const byBucketLoss = groupByBucket(losses || [], 'loss_recognized_at', ['principal_lost'], bucket);
+  const keys = [...new Set([...Object.keys(byBucketProfit), ...Object.keys(byBucketFees), ...Object.keys(byBucketLoss)])].sort();
 
-  const netFor = (k) => (byBucketProfit[k] ? byBucketProfit[k].net_profit : 0) - (byBucketFees[k] ? byBucketFees[k].operational_fee_amount : 0);
+  const netFor = (k) => (byBucketProfit[k] ? byBucketProfit[k].net_profit : 0) - (byBucketFees[k] ? byBucketFees[k].operational_fee_amount : 0) - (byBucketLoss[k] ? byBucketLoss[k].principal_lost : 0);
   const totalLucro = keys.reduce((s, k) => s + netFor(k), 0);
 
   const todayKey = bucketKey(todayISO(), bucket);
@@ -154,7 +161,7 @@ function paintLucroAnalitico(payments, contracts, bucket) {
       <div class="card stat-card"><div class="label">${bucket === 'mes' ? 'Mês' : 'Dia'} mais lucrativo</div><div class="value" style="font-size:15px">${melhorDia ? bucketLabel(melhorDia, bucket) + ' · ' + formatMoney(netFor(melhorDia)) : '—'}</div></div>
     </div>
     <div class="card mt-14">
-      <h3>Lucro por período (juros − taxa de saída dos contratos − taxas de entrada dos pagamentos)</h3>
+      <h3>Lucro por período (juros − taxa de saída dos contratos − taxas de entrada dos pagamentos − capital perdido)</h3>
       <div class="mt-8">${series.length ? barChartSVG(series, { color: CHART_COLORS.accent, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem movimento neste período.</p>'}</div>
     </div>
     <div class="card mt-14" style="padding:0">
@@ -168,13 +175,14 @@ function paintLucroAnalitico(payments, contracts, bucket) {
   `;
 }
 
-function paintFluxoCaixa(payments, contracts, bucket) {
+function paintFluxoCaixa(payments, contracts, bucket, losses) {
   const body = document.getElementById('relatorios-body');
   const recebido = payments.reduce((s, p) => s + Number(p.amount_received), 0);
   const aporte = contracts.reduce((s, c) => s + Number(c.total_disbursed_amount), 0);
   const exitFees = contracts.filter((c) => c.has_operational_fee).reduce((s, c) => s + Number(c.operational_fee_amount), 0);
   const entryFees = payments.filter((p) => p.has_operational_fee).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
-  const lucroLiquido = payments.reduce((s, p) => s + Number(p.interest_component), 0) - exitFees - entryFees;
+  const perdas = (losses || []).reduce((s, l) => s + Number(l.principal_lost || 0), 0);
+  const lucroLiquido = payments.reduce((s, p) => s + Number(p.interest_component), 0) - exitFees - entryFees - perdas;
 
   const byBucketIn = groupByBucket(payments, 'received_at', ['amount_received'], bucket);
   const byBucketOut = groupByBucket(contracts, 'contract_date', ['total_disbursed_amount'], bucket);
@@ -186,7 +194,7 @@ function paintFluxoCaixa(payments, contracts, bucket) {
     <div class="grid grid-3 kpi-grid-3">
       <div class="card stat-card"><div class="label">Aporte no período (contrato + taxa de saída)</div><div class="value mono">${formatMoney(aporte)}</div></div>
       <div class="card stat-card"><div class="label">Recebido no período</div><div class="value mono">${formatMoney(recebido)}</div></div>
-      <div class="card stat-card"><div class="label">Lucro líquido (juros − taxas)</div><div class="value mono">${formatMoney(lucroLiquido)}</div></div>
+      <div class="card stat-card"><div class="label">Lucro líquido (juros − taxas − perdas)</div><div class="value mono">${formatMoney(lucroLiquido)}</div></div>
     </div>
     <div class="grid grid-2 mt-14">
       <div class="card">
@@ -201,13 +209,14 @@ function paintFluxoCaixa(payments, contracts, bucket) {
   `;
 }
 
-function paintRelatorioAnalitico(payments, contracts) {
+function paintRelatorioAnalitico(payments, contracts, losses) {
   const body = document.getElementById('relatorios-body');
   const entradas = payments.reduce((s, p) => s + Number(p.amount_received), 0);
   const saidas = contracts.reduce((s, c) => s + Number(c.principal_amount), 0);
   const juros = payments.reduce((s, p) => s + Number(p.interest_component), 0);
   const exitFees = contracts.filter((c) => c.has_operational_fee).reduce((s, c) => s + Number(c.operational_fee_amount), 0);
   const entryFees = payments.filter((p) => p.has_operational_fee).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
+  const perdas = (losses || []).reduce((s, l) => s + Number(l.principal_lost || 0), 0);
 
   body.innerHTML = `
     <div class="grid grid-2">
@@ -228,7 +237,8 @@ function paintRelatorioAnalitico(payments, contracts) {
           <div class="stat-card"><div class="label">Juros recebidos (bruto)</div><div class="value mono">${formatMoney(juros)}</div></div>
           <div class="stat-card"><div class="label">Taxas de saída (contratos)</div><div class="value mono">${formatMoney(exitFees)}</div></div>
           <div class="stat-card"><div class="label">Taxas de entrada (recebimentos)</div><div class="value mono">${formatMoney(entryFees)}</div></div>
-          <div class="stat-card"><div class="label">Lucro líquido total</div><div class="value mono">${formatMoney(juros - exitFees - entryFees)}</div></div>
+          <div class="stat-card"><div class="label">Capital em perda</div><div class="value mono">${formatMoney(perdas)}</div></div>
+          <div class="stat-card"><div class="label">Lucro líquido total</div><div class="value mono">${formatMoney(juros - exitFees - entryFees - perdas)}</div></div>
         </div>
       </div>
     </div>

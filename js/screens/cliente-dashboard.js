@@ -42,13 +42,14 @@ async function renderClienteDashboard() {
 
   root.innerHTML = `
     <h2 style="margin-bottom:16px">Olá, ${escapeHtml(firstName)}!</h2>
-    <div class="grid grid-3 kpi-grid-3">
-      <div class="card stat-card">
-        <div class="label">Limite disponível</div>
-        <div class="value mono">${formatMoney(available)}</div>
-        <div class="bar-wrap mt-8"><div class="bar-fill ${pct >= 100 ? 'over' : ''}" style="width:${pct}%"></div></div>
-        <div class="hint mt-8">${formatMoney(used)} usado de ${formatMoney(limit)}</div>
-      </div>
+    <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
+      <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Limite disponível</div>
+      <div class="mono" style="font-size:32px;font-weight:800;margin-top:6px">${formatMoney(available)}</div>
+      <div class="bar-wrap mt-8" style="background:rgba(255,255,255,.16)"><div class="bar-fill ${pct >= 100 ? 'over' : ''}" style="width:${pct}%"></div></div>
+      <div style="font-size:12px;margin-top:8px;opacity:.8">${formatMoney(used)} usado de ${formatMoney(limit)}</div>
+    </div>
+
+    <div class="grid grid-2 kpi-grid-2 mt-14">
       <div class="card stat-card">
         <div class="label">Seu score</div>
         <div class="value mono">${score}</div>
@@ -61,14 +62,14 @@ async function renderClienteDashboard() {
       </div>
     </div>
 
-    <div class="grid grid-2 mt-14">
-      <a href="#/cliente/solicitar" class="card" style="text-decoration:none;display:flex;align-items:center;gap:12px" onclick="event.preventDefault();router.navigate('#/cliente/solicitar')">
-        <span class="icon-btn" style="background:var(--brand-soft);color:var(--brand);border:none">${Icons.plus}</span>
-        <div><strong>Solicitar empréstimo</strong><div class="text-sm text-soft">Escolha um valor e envie para aprovação</div></div>
+    <div class="quick-actions-grid mt-14">
+      <a href="#/cliente/solicitar" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/cliente/solicitar')">
+        <span class="circle">${Icons.plus}</span>
+        <span>Solicitar</span>
       </a>
-      <a href="#/cliente/emprestimos" class="card" style="text-decoration:none;display:flex;align-items:center;gap:12px" onclick="event.preventDefault();router.navigate('#/cliente/emprestimos')">
-        <span class="icon-btn" style="background:var(--accent-soft);color:var(--accent);border:none">${Icons.contract}</span>
-        <div><strong>Meus empréstimos</strong><div class="text-sm text-soft">Parcelas, vencimentos e renovações</div></div>
+      <a href="#/cliente/emprestimos" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/cliente/emprestimos')">
+        <span class="circle">${Icons.contract}</span>
+        <span>Empréstimos</span>
       </a>
     </div>
   `;

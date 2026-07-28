@@ -35,6 +35,8 @@ async function renderGerenteDashboard() {
   const prevMonthLastDay = new Date(prevMonthRef.getFullYear(), prevMonthRef.getMonth() + 1, 0).getDate();
   const prevMonthSameDay = Math.min(dayOfMonth, prevMonthLastDay);
   const prevMonthEnd = prevMonthRef.getFullYear() + '-' + String(prevMonthRef.getMonth() + 1).padStart(2, '0') + '-' + String(prevMonthSameDay).padStart(2, '0');
+  const tomorrow = addDaysISO(today, 1);
+  const prevMonthEndExclusive = addDaysISO(prevMonthEnd, 1);
 
   const [
     { data: paymentsToday, error: e1 },
@@ -48,6 +50,10 @@ async function renderGerenteDashboard() {
     { data: entryFeesMonth, error: e9 },
     { data: exitFeesMonth, error: e10 },
     { data: exitFeesPrevPeriod, error: e11 },
+    { data: lostInstallmentsMonth, error: e12 },
+    { data: lostCyclesMonth, error: e13 },
+    { data: lostInstallmentsPrevPeriod, error: e14 },
+    { data: lostCyclesPrevPeriod, error: e15 },
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     // .lte(today): sem limite superior, um pagamento lançado com data futura
@@ -65,9 +71,17 @@ async function renderGerenteDashboard() {
     supa.from('payments').select('operational_fee_amount').eq('has_operational_fee', true).gte('received_at', monthStart).lte('received_at', today),
     supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', monthStart).lte('contract_date', today),
     supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', prevMonthStart).lte('contract_date', prevMonthEnd),
+    // Capital em perda — parcelas/ciclos reconhecidos como perda (automática
+    // ou manual) NO MÊS, pelo campo loss_recognized_at (nunca due_date nem
+    // created_at, que não representam quando a perda foi de fato
+    // contabilizada). Abate do lucro líquido do mês, igual à taxa de saída.
+    supa.from('installments').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', monthStart).lt('loss_recognized_at', tomorrow),
+    supa.from('renewal_cycles').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', monthStart).lt('loss_recognized_at', tomorrow),
+    supa.from('installments').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', prevMonthStart).lt('loss_recognized_at', prevMonthEndExclusive),
+    supa.from('renewal_cycles').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', prevMonthStart).lt('loss_recognized_at', prevMonthEndExclusive),
   ]);
 
-  const loadErrors = [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11].filter(Boolean);
+  const loadErrors = [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15].filter(Boolean);
   if (loadErrors.length) {
     console.error('Erro ao carregar dados do dashboard:', loadErrors);
     root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar os dados do dashboard agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
@@ -103,8 +117,14 @@ async function renderGerenteDashboard() {
   // Corrigido usando `contract_date` aqui também, igual aos relatórios.
   const taxaSaidaMes = sum(exitFeesMonth, 'operational_fee_amount');
   const taxaSaidaPrevPeriod = sum(exitFeesPrevPeriod, 'operational_fee_amount');
-  const lucroMes = sum(paymentsMonth, 'net_profit') - taxaSaidaMes;
-  const lucroPrevPeriod = sum(paymentsPrevPeriod, 'net_profit') - taxaSaidaPrevPeriod;
+  // Capital em perda no mês — soma o capital não recuperado de toda parcela/
+  // ciclo reconhecido como perda (automática pelo cron ou manual pelo botão
+  // "Marcar como perda") dentro do período. Abate do lucro líquido, igual à
+  // taxa de saída — é dinheiro que saiu do caixa e não vai mais voltar.
+  const perdaMes = sum(lostInstallmentsMonth, 'principal_lost') + sum(lostCyclesMonth, 'principal_lost');
+  const perdaPrevPeriod = sum(lostInstallmentsPrevPeriod, 'principal_lost') + sum(lostCyclesPrevPeriod, 'principal_lost');
+  const lucroMes = sum(paymentsMonth, 'net_profit') - taxaSaidaMes - perdaMes;
+  const lucroPrevPeriod = sum(paymentsPrevPeriod, 'net_profit') - taxaSaidaPrevPeriod - perdaPrevPeriod;
   const vencidosHoje = (dueSoon || []).filter((i) => i.due_date === today);
   // Compara due_date direto (não confia só na coluna status) — o cron que
   // marca status='atrasada' roda 1x/dia, então uma parcela vencida há poucas
@@ -252,14 +272,23 @@ async function renderGerenteDashboard() {
   }
 
   root.innerHTML = `
-    <div class="card" style="background:var(--brand-dark);color:#fff;border:none;padding:22px 24px">
+    <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>
       <div class="mono" style="font-size:32px;font-weight:800;margin-top:6px">${formatMoney(lucroMes)}</div>
       <div style="font-size:13px;margin-top:8px;opacity:.95">${trendBadgeHtml(lucroMes, lucroPrevPeriod, true)} <span style="opacity:.8">vs. mesmo período do mês passado</span></div>
-      <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)</div>
+      <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)${perdaMes > 0 ? ` + ${formatMoney(perdaMes)} em capital perdido` : ''}</div>
     </div>
 
-    <div class="grid grid-2 kpi-grid-2 mt-14">
+    <div class="quick-actions-grid mt-14">
+      <a href="#/gerente/cobrar" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/cobrar')"><span class="circle">${Icons.alarm}</span><span>Cobrar</span></a>
+      <a href="#/gerente/contratos" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/contratos')"><span class="circle">${Icons.contract}</span><span>Contratos</span></a>
+      <a href="#/gerente/score" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/score')"><span class="circle">${Icons.score}</span><span>Score</span></a>
+      <a href="#/gerente/relatorios" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/relatorios')"><span class="circle">${Icons.chart}</span><span>Relatórios</span></a>
+      <a href="#/gerente/clientes" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/clientes')"><span class="circle">${Icons.users}</span><span>Clientes</span></a>
+      <a href="#/gerente/auditoria" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/auditoria')"><span class="circle">${Icons.audit}</span><span>Auditoria</span></a>
+    </div>
+
+    <div class="grid grid-3 kpi-grid-3 mt-14">
       <div class="card stat-card">
         <div class="label">Carteira ativa (capital emprestado)</div>
         <div class="value mono">${formatMoney(carteiraAtiva)}</div>
@@ -269,6 +298,11 @@ async function renderGerenteDashboard() {
         <div class="label">Carteira em atraso</div>
         <div class="value mono" style="color:${pctCarteiraAtraso >= 20 ? 'var(--bad)' : 'var(--ink)'}">${formatNumber(pctCarteiraAtraso, 1)}%</div>
         <div class="text-sm text-soft mt-8">${formatMoney(carteiraEmAtraso)} do capital ativo em atraso</div>
+      </div>
+      <div class="card stat-card" style="border-top:3px solid ${perdaMes > 0 ? 'var(--bad)' : 'var(--line)'}">
+        <div class="label">Capital em perda (mês)</div>
+        <div class="value mono" style="color:${perdaMes > 0 ? 'var(--bad)' : 'var(--ink)'}">${formatMoney(perdaMes)}</div>
+        <div class="text-sm text-soft mt-8">Já abatido do lucro líquido do mês</div>
       </div>
     </div>
 

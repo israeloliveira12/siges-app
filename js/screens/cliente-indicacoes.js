@@ -112,7 +112,7 @@ function paintClienteIndicacoes(root, allContracts, installments, cycles, namesB
               <td data-label="Parcela">${rowLabel}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
               <td data-label="Valor"><div><div class="mono">${formatMoney(displayValue)}</div>${isPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(Number(i.principal_paid_partial) + Number(i.interest_paid_partial))} · resta ${formatMoney(remaining)}</div>` : ''}${late && (late.jurosAtraso > 0 || late.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</div></td>
-              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
+              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', perda: 'Perda' }[st])}</td>
             </tr>
           `; }).join('')}
           ${cyc.map((r) => {
@@ -133,7 +133,7 @@ function paintClienteIndicacoes(root, allContracts, installments, cycles, namesB
               <td data-label="Parcela">${rowLabel}</td>
               <td data-label="Vencimento">${formatDate(r.new_due_date)}</td>
               <td data-label="Valor"><div><div class="mono">${formatMoney(cycleValue)}</div>${cycleLate && (cycleLate.jurosAtraso > 0 || cycleLate.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${cycleLate.diasAtraso}d): ${formatMoney(cycleLate.total)}</div>` : ''}</div></td>
-              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada' }[st])}</td>
+              <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', perda: 'Perda' }[st])}</td>
             </tr>
           `; }).join('')}
         </tbody>

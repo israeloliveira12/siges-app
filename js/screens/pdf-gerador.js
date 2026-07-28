@@ -109,7 +109,7 @@ function buildExtratoRows(installments, cycles) {
       vencimento: i.due_date,
       dataPgto: i.paid_at,
       valor: Number(i.amount_due),
-      status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada' }[i.status] || i.status,
+      status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', cancelada: 'Cancelada', perda: 'Perda' }[i.status] || i.status,
     }));
   }
   const installment = installments[0];
@@ -126,7 +126,7 @@ function buildExtratoRows(installments, cycles) {
     rows.push({
       label: String(installment.sequence_number), vencimento: installment.due_date,
       dataPgto: installment.paid_at, valor: Number(installment.amount_due),
-      status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada' }[installment.status] || installment.status,
+      status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', perda: 'Perda' }[installment.status] || installment.status,
     });
   }
   cycles.slice().sort((a, b) => a.cycle_number - b.cycle_number).forEach((c) => {
@@ -142,7 +142,7 @@ function buildExtratoRows(installments, cycles) {
       rows.push({
         label: '1', vencimento: c.new_due_date,
         dataPgto: c.paid_at, valor: Number(c.full_debt_amount),
-        status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada' }[c.status] || c.status,
+        status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', perda: 'Perda' }[c.status] || c.status,
       });
     }
   });

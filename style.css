@@ -40,10 +40,22 @@
   --good-dark: #1E8A5F;
   --bad-dark: #B8433A;
   --accent-dark: #1E9A95;
+  /* Navy quase preto — usado nos cartões "hero" de destaque (Lucro líquido
+     do Dashboard, Score do cliente), na nav flutuante do celular e reforça a
+     sidebar do computador. Mais escuro que --brand-dark de propósito, pra
+     dar o mesmo contraste "app fintech" da referência (Limiar) sem trocar
+     --brand-dark em si (usado em botões/estados que não devem escurecer
+     tanto assim). Token fixo — não muda entre os temas claro/escuro. */
+  --hero-dark: #05141F;
 
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Consolas, monospace;
   --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --radius: 12px;
+  /* 12px → 16px (rodada de redesign inspirada na Limiar, 2026-07-27) — cantos
+     mais arredondados nos cards/modais em geral. .auth-card (login) tem
+     override explícito logo abaixo pra continuar com 12px — o login fica
+     intocado de propósito em qualquer rodada de design, mesma regra já
+     usada pras cores do modo escuro. */
+  --radius: 16px;
   --radius-sm: 8px;
   --shadow: 0 1px 2px rgba(8, 20, 30, .06), 0 1px 1px rgba(8, 20, 30, .04);
 
@@ -232,6 +244,33 @@ button { cursor: pointer; }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-score-summary { grid-template-columns: 260px 1fr; align-items: stretch; }
+
+/* Grade de atalhos circulares (Dashboard do gerente/cliente) — mesma ideia
+   da fileira "Receber/Pagar/Câmbio" da referência (Limiar): ícone num
+   círculo + rótulo embaixo, várias colunas que se distribuem sozinhas
+   (auto-fit) então funciona igual com 2 atalhos (cliente) ou 6 (gerente). */
+.quick-actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 14px 4px; text-align: center; }
+.quick-action-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  text-decoration: none; color: var(--ink-soft); font-size: 11px; font-weight: 600;
+  background: none; border: none; cursor: pointer; font-family: inherit; padding: 0;
+}
+.quick-action-btn .circle {
+  width: 48px; height: 48px; border-radius: 50%;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: center; color: var(--brand);
+}
+.quick-action-btn .circle svg { width: 20px; height: 20px; }
+.quick-action-btn:hover .circle { border-color: var(--brand); color: var(--brand); }
+
+/* Círculo colorido de status à esquerda do nome, em listas no estilo
+   "extrato" (Cobrar) — mesmo padrão visual da referência (Limiar), cor
+   comunica urgência (vermelho = atrasado, navy = vence hoje/normal). */
+.row-dot {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12px; font-weight: 700;
+}
 
 .stat-card { padding: 14px 16px; }
 .stat-card .label { font-size: 12px; color: var(--ink-soft); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
@@ -460,7 +499,10 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 --------------------------------------------------------------------------- */
 
 .auth-shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--brand-dark); padding: 20px; }
-.auth-card { width: 100%; max-width: 380px; background: #fff; border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0,0,0,.35); padding: 30px 26px; }
+/* border-radius fixo em 12px (não var(--radius)) — o login fica intocado em
+   qualquer rodada de redesign, mesma regra já usada pras cores do modo
+   escuro (.auth-card/.auth-shell nunca escurecem). */
+.auth-card { width: 100%; max-width: 380px; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.35); padding: 30px 26px; }
 .auth-logo { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 22px; }
 .auth-logo svg, .auth-logo img { width: 52px; height: 52px; }
 .auth-logo .name { font-weight: 800; font-size: 20px; }
@@ -542,21 +584,26 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 
 @media (max-width: 960px) {
   .sidebar { display: none; }
-  .main { padding: 14px; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .main { padding: 14px; padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
   .grid-score-summary { grid-template-columns: 1fr; }
 
+  /* Cápsula flutuante (não mais barra reta colada na borda) — mesma lista de
+     itens/rotas de sempre, só o invólucro visual muda: margem nas laterais +
+     no fundo, cantos bem arredondados e sombra de profundidade, inspirado no
+     nav flutuante da referência (Limiar). Nenhum item foi removido — "Mais"
+     continua abrindo a mesma folha de sempre. */
   .tabbar-mobile {
-    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-    background: var(--brand-dark); padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
-    border-top: 1px solid rgba(255,255,255,.08);
+    display: flex; position: fixed; left: 14px; right: 14px; bottom: 14px; z-index: 30;
+    background: var(--hero-dark); padding: 6px 4px; border-radius: 27px;
+    box-shadow: 0 8px 20px rgba(5, 20, 31, .35);
   }
   .tabbar-mobile .nav-link {
-    flex: 1; flex-direction: column; gap: 3px; padding: 6px 2px; font-size: 10.5px; text-align: center;
-    color: rgba(255,255,255,.7);
+    flex: 1; flex-direction: column; gap: 2px; padding: 8px 2px; font-size: 9.5px; text-align: center;
+    color: rgba(255,255,255,.62); border-radius: 20px;
   }
   .tabbar-mobile .nav-link svg { width: 19px; height: 19px; }
-  .tabbar-mobile .nav-link.active { background: none; color: var(--accent); }
+  .tabbar-mobile .nav-link.active { background: rgba(255,255,255,.14); color: #fff; }
   .tabbar-mobile button.nav-link { background: none; border: none; cursor: pointer; font-family: inherit; }
 
   .mobile-more-backdrop {
@@ -566,8 +613,8 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .mobile-more-menu {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
     position: fixed; left: 8px; right: 8px;
-    bottom: calc(70px + env(safe-area-inset-bottom));
-    z-index: 36; background: var(--panel); border-radius: 14px; padding: 10px;
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    z-index: 36; background: var(--panel); border-radius: 18px; padding: 10px;
     box-shadow: 0 -6px 24px rgba(20, 33, 43, .18);
   }
   .mobile-more-menu .nav-link {

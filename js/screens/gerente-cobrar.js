@@ -128,9 +128,15 @@ async function renderGerenteCobrar() {
             const waUrl = buildWhatsappUrl(i);
             const late = estimateLateCharge(i.amount, i.due_date, Number((i.contract || {}).late_interest_percent || 0), Number((i.contract || {}).late_fee_percent || 0));
             const encargo = late.jurosAtraso + late.multaAtraso;
+            const isOverdue = i.due_date < today;
             return `
             <tr>
-              <td data-label="Cliente"><div>${escapeHtml(p.full_name || '—')}<div class="text-sm text-soft">${escapeHtml(formatCpf(p.cpf || '') || '')}</div></div></td>
+              <td data-label="Cliente">
+                <div class="flex items-center gap-8">
+                  <span class="row-dot" style="background:${isOverdue ? 'var(--bad)' : 'var(--brand)'}">${isOverdue ? '!' : '↓'}</span>
+                  <div>${escapeHtml(p.full_name || '—')}<div class="text-sm text-soft">${escapeHtml(formatCpf(p.cpf || '') || '')}</div></div>
+                </div>
+              </td>
               <td data-label="Contrato"><a href="#/gerente/contratos/${(i.contract || {}).id}" class="reference-link">#${(i.contract || {}).contract_number}</a> · ${i.seq}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
               <td data-label="Valor"><div class="mono">${formatMoney(i.amount)}</div>${encargo > 0 ? `<div class="text-sm mono" style="color:var(--bad)">Com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</td>

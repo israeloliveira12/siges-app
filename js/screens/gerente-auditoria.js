@@ -23,6 +23,8 @@ const AUDIT_ACTION_LABELS = {
   login_falho: 'Login falhou',
   logout: 'Logoff',
   emprestimo_solicitado: 'Empréstimo solicitado',
+  perda_manual: 'Parcela marcada como perda',
+  perda_revertida: 'Perda revertida',
   erro_sistema: 'Erro do sistema',
 };
 
@@ -31,7 +33,7 @@ function auditActionLabel(action) {
 }
 
 function auditActionBadgeColor(action) {
-  if (action === 'erro_sistema' || action === 'login_falho' || action.includes('excluido') || action === 'cliente_rejeitado') return 'var(--bad)';
+  if (action === 'erro_sistema' || action === 'login_falho' || action.includes('excluido') || action === 'cliente_rejeitado' || action === 'perda_manual') return 'var(--bad)';
   if (action.includes('criado') || action === 'cliente_aprovado' || action === 'pagamento_recebido' || action === 'renovacao_registrada' || action === 'login_sucesso') return 'var(--good)';
   return 'var(--ink-soft)';
 }

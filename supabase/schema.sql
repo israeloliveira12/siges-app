@@ -12,7 +12,7 @@ create extension if not exists "pgcrypto";
 create type user_role as enum ('gerente', 'cliente');
 create type request_status as enum ('pendente', 'aprovada', 'reprovada');
 create type contract_status as enum ('em_aberto', 'atrasado', 'quitado', 'perda');
-create type installment_status as enum ('pendente', 'paga', 'atrasada', 'renovada', 'cancelada');
+create type installment_status as enum ('pendente', 'paga', 'atrasada', 'renovada', 'cancelada', 'perda');
 create type due_type as enum ('mensal', 'quinzenal', 'semanal', 'personalizado');
 create type notification_channel as enum ('email', 'push', 'whatsapp', 'in_app');
 create type notification_event as enum (
@@ -144,6 +144,14 @@ create table installments (
   status installment_status not null default 'pendente',
   paid_at timestamptz,
   renewed_into_cycle_id uuid,
+  -- capital ainda não recuperado no momento em que a parcela foi reconhecida
+  -- como perda (automática pelo cron, ou manual pelo botão) — não é o
+  -- principal_share cheio, e sim o que sobrava depois de qualquer pagamento
+  -- parcial já recebido. loss_recognized_at define o MÊS em que a perda é
+  -- abatida do lucro (nunca created_at/due_date, que não representam quando
+  -- a perda foi de fato reconhecida).
+  principal_lost numeric(12,2) not null default 0,
+  loss_recognized_at timestamptz,
   created_at timestamptz not null default now(),
   unique (contract_id, sequence_number)
 );
@@ -162,6 +170,10 @@ create table renewal_cycles (
   new_due_date date not null,
   status installment_status not null default 'pendente',
   paid_at timestamptz,
+  -- ciclo nunca reduz capital ("juros repete") — o capital perdido, se
+  -- reconhecido como perda, é sempre loan_contracts.principal_amount inteiro.
+  principal_lost numeric(12,2) not null default 0,
+  loss_recognized_at timestamptz,
   created_by uuid not null references profiles(id),
   created_at timestamptz not null default now(),
   unique (contract_id, cycle_number)
@@ -860,6 +872,45 @@ begin
 end;
 $$;
 
+-- 5.6b Sincroniza o status do CONTRATO a partir do estado real das suas
+-- parcelas/ciclos — reabre quem tem pendência em dia (em_aberto), atrasa
+-- quem tem pendência vencida (atrasado), e fecha (quitado ou perda, se
+-- alguma parcela/ciclo foi perdido) quem não tem mais nada pendente/
+-- atrasado. Função única reusada por refresh_overdue_status() (cron diário),
+-- receive_payment/receive_cycle_payment (quitação) e as RPCs de marcar/
+-- reverter perda — evita duplicar essa lógica em 5 lugares diferentes.
+create or replace function recompute_contract_status(p_contract_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_has_atrasada boolean;
+  v_has_open boolean;
+  v_has_loss boolean;
+  v_new_status contract_status;
+begin
+  select
+    exists(select 1 from installments where contract_id = p_contract_id and status = 'atrasada')
+      or exists(select 1 from renewal_cycles where contract_id = p_contract_id and status = 'atrasada'),
+    exists(select 1 from installments where contract_id = p_contract_id and status in ('pendente', 'atrasada'))
+      or exists(select 1 from renewal_cycles where contract_id = p_contract_id and status in ('pendente', 'atrasada'))
+    into v_has_atrasada, v_has_open;
+
+  if v_has_open then
+    v_new_status := case when v_has_atrasada then 'atrasado' else 'em_aberto' end;
+  else
+    select exists(select 1 from installments where contract_id = p_contract_id and status = 'perda')
+        or exists(select 1 from renewal_cycles where contract_id = p_contract_id and status = 'perda')
+      into v_has_loss;
+    v_new_status := case when v_has_loss then 'perda' else 'quitado' end;
+  end if;
+
+  update loan_contracts set status = v_new_status, updated_at = now()
+    where id = p_contract_id and status <> v_new_status;
+end;
+$$;
+
 -- 5.7 Receber pagamento (quitação total ou parcial de uma parcela)
 create or replace function receive_payment(
   p_installment_id uuid,
@@ -886,7 +937,6 @@ declare
   v_pay_principal numeric;
   v_pay_late numeric;
   v_after_interest numeric;
-  v_remaining_count integer;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
@@ -942,15 +992,7 @@ begin
 
   if v_remaining_total - p_amount_received <= 0.01 then
     update installments set status = 'paga', paid_at = coalesce(p_received_at, current_date) where id = p_installment_id;
-
-    select count(*) into v_remaining_count from installments
-      where contract_id = v_contract.id and status in ('pendente', 'atrasada');
-
-    if v_remaining_count = 0 and not exists (
-      select 1 from renewal_cycles where contract_id = v_contract.id and status in ('pendente', 'atrasada')
-    ) then
-      update loan_contracts set status = 'quitado', updated_at = now() where id = v_contract.id;
-    end if;
+    perform recompute_contract_status(v_contract.id);
 
     insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body)
     values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id, p_installment_id,
@@ -1140,7 +1182,6 @@ declare
   v_interest numeric;
   v_full_amount_due numeric;
   v_payment_id uuid;
-  v_remaining integer;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
@@ -1183,13 +1224,7 @@ begin
   ) returning id into v_payment_id;
 
   update renewal_cycles set status = 'paga', paid_at = coalesce(p_received_at, current_date) where id = p_cycle_id;
-
-  select count(*) into v_remaining from installments
-    where contract_id = v_contract.id and status in ('pendente', 'atrasada');
-
-  if v_remaining = 0 then
-    update loan_contracts set status = 'quitado', updated_at = now() where id = v_contract.id;
-  end if;
+  perform recompute_contract_status(v_contract.id);
 
   insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body)
   values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id,
@@ -1207,6 +1242,7 @@ security definer set search_path = public
 as $$
 declare
   v_client_id uuid;
+  v_contract_id uuid;
 begin
   update installments set status = 'atrasada'
     where status = 'pendente' and due_date < current_date;
@@ -1214,35 +1250,38 @@ begin
   update renewal_cycles set status = 'atrasada'
     where status = 'pendente' and new_due_date < current_date;
 
-  -- Contrato multi-parcela nunca voltava de 'atrasado' pra 'em_aberto' depois
-  -- que a parcela atrasada era quitada (só renew_installment fazia esse
-  -- retorno, e renovação só existe pra parcela única) — um contrato de 3
-  -- parcelas que atrasava uma vez ficava com status 'atrasado' PERMANENTE
-  -- mesmo depois de todas as parcelas em dia, distorcendo qualquer filtro/
-  -- relatório que confie no status do contrato (em vez de olhar as parcelas
-  -- individualmente, como o resto do sistema já faz por convenção).
-  update loan_contracts lc set status = 'em_aberto', updated_at = now()
-    where status = 'atrasado'
-      and not exists (select 1 from installments i where i.contract_id = lc.id and i.status = 'atrasada')
-      and not exists (select 1 from renewal_cycles rc where rc.contract_id = lc.id and rc.status = 'atrasada');
+  -- Perda automática — marca a PARCELA/CICLO específico que ultrapassou o
+  -- prazo configurado (loss_days_threshold), não mais o contrato inteiro:
+  -- outras parcelas do mesmo contrato continuam intocadas (decisão explícita
+  -- do usuário, 2026-07-27 — "perda da parcela específica"). O valor
+  -- perdido é o capital ainda não recuperado daquela parcela/ciclo. Isso
+  -- roda ANTES da sincronização de status do contrato logo abaixo, pra um
+  -- contrato cuja única pendência acabou de virar perda não ser promovido
+  -- por engano pra 'em_aberto' (não existe mais 'atrasada' nele) em vez de
+  -- corretamente fechar como 'perda'.
+  update installments set
+    status = 'perda',
+    principal_lost = greatest(0, principal_share - principal_paid_partial),
+    loss_recognized_at = now()
+  where status = 'atrasada'
+    and due_date < current_date - (select loss_days_threshold from system_settings);
 
-  update loan_contracts lc set status = 'atrasado', updated_at = now()
-    where status = 'em_aberto' and (
-      exists (select 1 from installments i where i.contract_id = lc.id and i.status = 'atrasada')
-      or exists (select 1 from renewal_cycles rc where rc.contract_id = lc.id and rc.status = 'atrasada')
-    );
+  update renewal_cycles rc set
+    status = 'perda',
+    principal_lost = coalesce((select lc.principal_amount from loan_contracts lc where lc.id = rc.contract_id), 0),
+    loss_recognized_at = now()
+  where status = 'atrasada'
+    and new_due_date < current_date - (select loss_days_threshold from system_settings);
 
-  update loan_contracts lc set status = 'perda', updated_at = now()
-    where status = 'atrasado' and (
-      exists (
-        select 1 from installments i where i.contract_id = lc.id and i.status = 'atrasada'
-          and i.due_date < current_date - (select loss_days_threshold from system_settings)
-      )
-      or exists (
-        select 1 from renewal_cycles rc where rc.contract_id = lc.id and rc.status = 'atrasada'
-          and rc.new_due_date < current_date - (select loss_days_threshold from system_settings)
-      )
-    );
+  -- Sincroniza o status de cada contrato ainda aberto a partir do estado
+  -- real das suas parcelas/ciclos (em_aberto/atrasado/quitado/perda) — uma
+  -- função só (recompute_contract_status), reusada também pelas RPCs de
+  -- recebimento e de marcar/reverter perda, substitui as 3 atualizações que
+  -- existiam soltas aqui antes.
+  for v_contract_id in select id from loan_contracts where status in ('em_aberto', 'atrasado')
+  loop
+    perform recompute_contract_status(v_contract_id);
+  end loop;
 
   -- Recalcula o score de todo cliente com contrato atrasado ou em perda, para
   -- o score refletir o estado atual mesmo sem nenhum recebimento novo (senão
@@ -1252,6 +1291,117 @@ begin
   loop
     perform recalculate_client_score(v_client_id);
   end loop;
+end;
+$$;
+
+-- 5.9b Marcar/reverter perda manualmente numa parcela ou ciclo específico —
+-- mesmo efeito da perda automática do cron (ver refresh_overdue_status),
+-- só que disparado pelo gerente a qualquer momento (não precisa esperar o
+-- prazo configurado). "Reverter" é o caminho de recuperação: se o cliente
+-- pagar depois de já reconhecida a perda, o gerente reverte a parcela/ciclo
+-- específico (ela volta a aparecer no Cobrar normalmente) e o pagamento
+-- entra como lucro no mês em que realmente aconteceu — nunca reabre
+-- retroativamente o mês em que a perda já foi contabilizada.
+create or replace function mark_installment_loss(p_installment_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_installment installments%rowtype;
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+
+  select * into v_installment from installments where id = p_installment_id for update;
+  if v_installment.id is null then raise exception 'NOT_FOUND'; end if;
+  if v_installment.status not in ('pendente', 'atrasada') then
+    raise exception 'INSTALLMENT_NOT_PAYABLE';
+  end if;
+
+  update installments set
+    status = 'perda',
+    principal_lost = greatest(0, principal_share - principal_paid_partial),
+    loss_recognized_at = now()
+  where id = p_installment_id;
+
+  perform recompute_contract_status(v_installment.contract_id);
+end;
+$$;
+
+create or replace function revert_installment_loss(p_installment_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_installment installments%rowtype;
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+
+  select * into v_installment from installments where id = p_installment_id for update;
+  if v_installment.id is null then raise exception 'NOT_FOUND'; end if;
+  if v_installment.status <> 'perda' then raise exception 'NOT_IN_LOSS'; end if;
+
+  update installments set
+    status = case when due_date < current_date then 'atrasada' else 'pendente' end,
+    principal_lost = 0,
+    loss_recognized_at = null
+  where id = p_installment_id;
+
+  perform recompute_contract_status(v_installment.contract_id);
+end;
+$$;
+
+create or replace function mark_cycle_loss(p_cycle_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_cycle renewal_cycles%rowtype;
+  v_principal numeric;
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+
+  select * into v_cycle from renewal_cycles where id = p_cycle_id for update;
+  if v_cycle.id is null then raise exception 'NOT_FOUND'; end if;
+  if v_cycle.status not in ('pendente', 'atrasada') then
+    raise exception 'INSTALLMENT_NOT_PAYABLE';
+  end if;
+
+  select principal_amount into v_principal from loan_contracts where id = v_cycle.contract_id;
+
+  update renewal_cycles set
+    status = 'perda',
+    principal_lost = coalesce(v_principal, 0),
+    loss_recognized_at = now()
+  where id = p_cycle_id;
+
+  perform recompute_contract_status(v_cycle.contract_id);
+end;
+$$;
+
+create or replace function revert_cycle_loss(p_cycle_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_cycle renewal_cycles%rowtype;
+begin
+  if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+
+  select * into v_cycle from renewal_cycles where id = p_cycle_id for update;
+  if v_cycle.id is null then raise exception 'NOT_FOUND'; end if;
+  if v_cycle.status <> 'perda' then raise exception 'NOT_IN_LOSS'; end if;
+
+  update renewal_cycles set
+    status = case when new_due_date < current_date then 'atrasada' else 'pendente' end,
+    principal_lost = 0,
+    loss_recognized_at = null
+  where id = p_cycle_id;
+
+  perform recompute_contract_status(v_cycle.contract_id);
 end;
 $$;
 
@@ -1510,7 +1660,12 @@ begin
   update installments set
     due_date = p_due_date,
     principal_share = p_principal_share,
-    interest_share = p_interest_share
+    interest_share = p_interest_share,
+    -- Se a parcela já foi reconhecida como perda, o valor perdido precisa
+    -- acompanhar a correção do capital — senão uma edição posterior (ex:
+    -- corrigir um valor digitado errado) deixaria o abate do lucro
+    -- registrado num mês antigo desatualizado em relação ao capital real.
+    principal_lost = case when status = 'perda' then greatest(0, p_principal_share - v_installment.principal_paid_partial) else principal_lost end
   where id = p_installment_id;
 
   -- Reconciliação: mesmo raciocínio de create_loan_contract — a soma do
