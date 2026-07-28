@@ -21,6 +21,8 @@ const AUDIT_ACTION_LABELS = {
   gerente_editado: 'Gerente editado',
   login_sucesso: 'Login realizado',
   login_falho: 'Login falhou',
+  logout: 'Logoff',
+  emprestimo_solicitado: 'Empréstimo solicitado',
   erro_sistema: 'Erro do sistema',
 };
 
@@ -100,7 +102,7 @@ function paintAuditoria(root, { logs, summary }) {
       <p class="text-sm text-soft">Trilha das ações importantes do sistema — mostrando os ${logs.length} eventos mais recentes.</p>
     </div>
 
-    <div class="grid grid-3 mt-14">
+    <div class="grid grid-3 kpi-grid-3 mt-14">
       <div class="card stat-card"><div class="label">Ações na última hora</div><div class="value mono">${summary.lastHourCount}</div></div>
       <div class="card stat-card"><div class="label">Logins hoje</div><div class="value mono">${summary.loginsHojeCount}</div></div>
       <div class="card stat-card"><div class="label">Falhas de login hoje</div><div class="value mono" style="${summary.falhasHojeCount > 0 ? 'color:var(--bad)' : ''}">${summary.falhasHojeCount}</div></div>

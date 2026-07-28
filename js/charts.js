@@ -188,7 +188,16 @@ function barChartSVG(series, opts = {}) {
 }
 
 function donutChartSVG(segments, opts = {}) {
-  const size = opts.size || 180, thickness = opts.thickness || 26;
+  // Diferente dos outros charts (linha/barra/área), esse nunca recebia
+  // chartSize() dos chamadores — o SVG saía sempre 180x180 fixo, mesmo width/
+  // height (não percentual), então nunca encolhia de verdade no celular. Um
+  // card estreito (~300px) com viewBox 180 ainda "cabe" tecnicamente, mas
+  // fica desproporcional/grande perto dos outros elementos compactos da
+  // tela — default menor no celular replica o mesmo cuidado que chartSize()
+  // já dá aos outros tipos de gráfico.
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+  const size = opts.size || (isMobile ? 128 : 180);
+  const thickness = opts.thickness || Math.round(size / 6.9);
   const fmt = opts.valueFormatter || formatMoney;
   const r = (size - thickness) / 2, cx = size / 2, cy = size / 2;
   const circumference = 2 * Math.PI * r;
@@ -201,7 +210,7 @@ function donutChartSVG(segments, opts = {}) {
     acc += len;
     return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${thickness}" stroke-dasharray="${dasharray}" stroke-dashoffset="${dashoffset}" transform="rotate(-90 ${cx} ${cy})"><title>${escapeHtml(s.label)}: ${escapeHtml(fmt(s.value))} (${formatNumber((s.value / total) * 100, 0)}%)</title></circle>`;
   }).join('');
-  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="max-width:100%;height:auto;flex:none">
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CHART_COLORS.line}" stroke-width="${thickness}"/>
     ${arcs}
   </svg>`;

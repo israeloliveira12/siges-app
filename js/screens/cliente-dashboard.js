@@ -42,7 +42,7 @@ async function renderClienteDashboard() {
 
   root.innerHTML = `
     <h2 style="margin-bottom:16px">Olá, ${escapeHtml(firstName)}!</h2>
-    <div class="grid grid-3">
+    <div class="grid grid-3 kpi-grid-3">
       <div class="card stat-card">
         <div class="label">Limite disponível</div>
         <div class="value mono">${formatMoney(available)}</div>

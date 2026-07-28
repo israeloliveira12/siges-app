@@ -215,7 +215,7 @@ async function renderClienteScoreDetalheGerente(clientId) {
         <button class="btn btn-primary btn-sm" id="recalc-one">${Icons.renew} Recalcular</button>
       </div>
     </div>
-    <div class="grid grid-3 mt-14">
+    <div class="grid grid-3 kpi-grid-3 mt-14">
       <div class="card stat-card"><div class="label">Pagas em dia</div><div class="value mono">${pct(onTime.length, paid.length)}%</div><div class="hint">${onTime.length} de ${paid.length} parcelas</div></div>
       <div class="card stat-card"><div class="label">Pagas com atraso</div><div class="value mono">${pct(late.length, paid.length)}%</div></div>
       <div class="card stat-card"><div class="label">Total de parcelas pagas</div><div class="value mono">${paid.length}</div></div>

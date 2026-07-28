@@ -34,7 +34,7 @@ async function renderClienteScore() {
       ${scoreTierBadge(client ? client.score_tier : 'Bom')}
       <p class="text-sm text-soft mt-14">Pagar em dia (ou adiantado) é o que mais aumenta seu score. Atrasos reduzem sua pontuação.</p>
     </div>
-    <div class="grid grid-2 mt-14">
+    <div class="grid grid-2 kpi-grid-2 mt-14">
       <div class="card stat-card"><div class="label">Parcelas pagas em dia</div><div class="value mono">${pct(onTime.length, paid.length)}%</div></div>
       <div class="card stat-card"><div class="label">Total de parcelas pagas</div><div class="value mono">${paid.length}</div></div>
     </div>

@@ -57,7 +57,7 @@ async function renderGerenteDashboard() {
     // mês", já que o resto do dashboard já trata hoje como o corte real.
     supa.from('payments').select('amount_received, net_profit').gte('received_at', monthStart).lte('received_at', today),
     supa.from('payments').select('amount_received, net_profit').gte('received_at', prevMonthStart).lte('received_at', prevMonthEnd),
-    supa.from('loan_contracts').select('status, created_at'),
+    supa.from('loan_contracts').select('status, created_at, contract_date'),
     supa.from('payments').select('amount_received, received_at').gte('received_at', trend30Start),
     supa.from('loan_requests').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
     supa.from('installments').select('amount_due, due_date, status, principal_share, interest_share, principal_paid_partial, interest_paid_partial, loan_contracts!installments_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
@@ -123,7 +123,12 @@ async function renderGerenteDashboard() {
   (contractsStatus || []).forEach((c) => { statusCounts[c.status] = (statusCounts[c.status] || 0) + 1; });
   const openContracts = statusCounts.em_aberto + statusCounts.atrasado;
   const finishedContracts = statusCounts.quitado + statusCounts.perda;
-  const newThisMonth = (contractsStatus || []).filter((c) => String(c.created_at).slice(0, 7) === today.slice(0, 7)).length;
+  // Conta por contract_date (data do contrato firmado), não created_at (data
+  // do registro no sistema) — um contrato retroativo lançado hoje mas com
+  // data de contrato do mês passado não deve aparecer como "novo do mês".
+  // Mesmo critério já usado pra bucketar lucro/taxa de saída por mês (ver
+  // achado QA-12 no CLAUDE.md sobre não misturar contract_date/created_at).
+  const newThisMonth = (contractsStatus || []).filter((c) => String(c.contract_date).slice(0, 7) === today.slice(0, 7)).length;
 
   // Carteira ativa — capital (não saldo com juros) ainda emprestado, ou seja,
   // não recuperado ainda. Parcelas: principal_share menos o que já foi pago
@@ -254,7 +259,7 @@ async function renderGerenteDashboard() {
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)</div>
     </div>
 
-    <div class="grid grid-2 dash-grid-2 mt-14">
+    <div class="grid grid-2 kpi-grid-2 mt-14">
       <div class="card stat-card">
         <div class="label">Carteira ativa (capital emprestado)</div>
         <div class="value mono">${formatMoney(carteiraAtiva)}</div>
@@ -267,7 +272,7 @@ async function renderGerenteDashboard() {
       </div>
     </div>
 
-    <div class="grid grid-4 dash-grid-4 mt-14">
+    <div class="grid grid-4 kpi-grid-4 mt-14">
       <div class="card stat-card stat-card-compact">
         <div class="label">Recebido hoje</div>
         <div class="value mono">${formatMoney(recebidoHoje)}</div>
@@ -308,7 +313,7 @@ async function renderGerenteDashboard() {
     </div>
 
     <h3 class="mt-20">Visão geral dos contratos</h3>
-    <div class="grid grid-3 dash-grid-3 mt-14">
+    <div class="grid grid-3 kpi-grid-3 mt-14">
       <div class="card stat-card stat-card-compact overview-card" onclick="router.navigate('#/gerente/contratos')">
         <div class="label">Em andamento</div>
         <div class="value mono">${openContracts || 0}</div>

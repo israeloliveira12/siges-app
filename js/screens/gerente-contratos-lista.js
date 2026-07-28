@@ -151,7 +151,7 @@ async function renderGerenteContratoDetalhe(params) {
           <button class="btn btn-outline btn-sm" id="delete-contract-btn" style="color:var(--bad)">${Icons.trash} Excluir contrato</button>
         </div>
       </div>
-      <div class="grid grid-4 mt-14">
+      <div class="grid grid-4 kpi-grid-4 mt-14">
         <div class="stat-card"><div class="label">Aporte (dívida-base)</div><div class="value mono">${formatMoney(contract.principal_amount)}</div></div>
         <div class="stat-card"><div class="label">Juros</div><div class="value mono">${formatNumber(contract.interest_rate, 2)}%</div></div>
         <div class="stat-card"><div class="label">Pago total</div><div class="value mono">${formatMoney(totalPago)}</div></div>

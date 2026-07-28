@@ -147,7 +147,7 @@ function paintLucroAnalitico(payments, contracts, bucket) {
   const series = keys.map((k) => ({ label: bucketLabel(k, bucket), value: netFor(k) }));
 
   body.innerHTML = `
-    <div class="grid grid-4">
+    <div class="grid grid-4 kpi-grid-4">
       <div class="card stat-card"><div class="label">Lucro total no período</div><div class="value mono">${formatMoney(totalLucro)}</div></div>
       <div class="card stat-card"><div class="label">Retorno hoje (capital)</div><div class="value mono">${formatMoney(retornoHoje)}</div></div>
       <div class="card stat-card"><div class="label">Lucro hoje</div><div class="value mono">${formatMoney(lucroHoje)}</div></div>
@@ -183,7 +183,7 @@ function paintFluxoCaixa(payments, contracts, bucket) {
   const seriesOut = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketOut[k] || { total_disbursed_amount: 0 }).total_disbursed_amount }));
 
   body.innerHTML = `
-    <div class="grid grid-3">
+    <div class="grid grid-3 kpi-grid-3">
       <div class="card stat-card"><div class="label">Aporte no período (contrato + taxa de saída)</div><div class="value mono">${formatMoney(aporte)}</div></div>
       <div class="card stat-card"><div class="label">Recebido no período</div><div class="value mono">${formatMoney(recebido)}</div></div>
       <div class="card stat-card"><div class="label">Lucro líquido (juros − taxas)</div><div class="value mono">${formatMoney(lucroLiquido)}</div></div>
@@ -222,7 +222,7 @@ function paintRelatorioAnalitico(payments, contracts) {
       </div>
       <div class="card">
         <h3>Resumo</h3>
-        <div class="grid grid-2 mt-14">
+        <div class="grid grid-2 kpi-grid-2 mt-14">
           <div class="stat-card"><div class="label">Entradas (recebimentos)</div><div class="value mono">${formatMoney(entradas)}</div></div>
           <div class="stat-card"><div class="label">Saídas (novo crédito)</div><div class="value mono">${formatMoney(saidas)}</div></div>
           <div class="stat-card"><div class="label">Juros recebidos (bruto)</div><div class="value mono">${formatMoney(juros)}</div></div>
@@ -256,6 +256,12 @@ function paintLancamentosFuturos(installments, cycles) {
       contractNumber: (c.loan_contracts || {}).contract_number, contractId: c.contract_id,
     })),
   ];
+
+  // Remove atrasados — eles já aparecem no menu Cobrar; "Lançamentos
+  // Futuros" deve mostrar só o que ainda vai vencer (hoje em diante).
+  // Compara a data direto (não confia só no status, que só é atualizado
+  // 1x/dia pelo cron) — mesmo padrão usado no resto do sistema.
+  items = items.filter((i) => i.data >= today);
 
   if (futurosTipo !== 'todos') items = items.filter((i) => i.tipo === futurosTipo);
   if (futurosDataLimite) items = items.filter((i) => i.data <= futurosDataLimite);

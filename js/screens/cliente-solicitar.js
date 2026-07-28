@@ -135,6 +135,7 @@ async function renderClienteSolicitar() {
       notifyEvent('solicitacao_criada', null,
         'Nova solicitação de empréstimo',
         `${userDisplayName()} solicitou ${formatMoney(amount)}.`);
+      logAudit('emprestimo_solicitado', `${userDisplayName()} solicitou empréstimo de ${formatMoney(amount)}`, { amount });
       showToast('Solicitação enviada! O administrador foi notificado.');
       await renderClienteSolicitar();
     } catch (e2) {

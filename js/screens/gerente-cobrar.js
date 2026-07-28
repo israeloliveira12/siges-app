@@ -83,8 +83,8 @@ async function renderGerenteCobrar() {
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received').gte('received_at', monthStart),
-    supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(contract_number, allows_renewal, installments_count, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
-    supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(contract_number, allows_renewal, installments_count, principal_amount, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone)))').in('status', ['pendente', 'atrasada']),
+    supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(id, contract_number, allows_renewal, installments_count, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone, cpf)))').in('status', ['pendente', 'atrasada']),
+    supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(id, contract_number, allows_renewal, installments_count, principal_amount, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone, cpf)))').in('status', ['pendente', 'atrasada']),
   ]);
 
   if (e1 || e2 || e3 || e4) {
@@ -130,8 +130,8 @@ async function renderGerenteCobrar() {
             const encargo = late.jurosAtraso + late.multaAtraso;
             return `
             <tr>
-              <td data-label="Cliente"><div>${escapeHtml(p.full_name || '—')}<div class="text-sm text-soft">${escapeHtml(p.phone || '')}</div></div></td>
-              <td data-label="Contrato">#${(i.contract || {}).contract_number} · ${i.seq}</td>
+              <td data-label="Cliente"><div>${escapeHtml(p.full_name || '—')}<div class="text-sm text-soft">${escapeHtml(formatCpf(p.cpf || '') || '')}</div></div></td>
+              <td data-label="Contrato"><a href="#/gerente/contratos/${(i.contract || {}).id}" class="reference-link">#${(i.contract || {}).contract_number}</a> · ${i.seq}</td>
               <td data-label="Vencimento">${formatDate(i.due_date)}</td>
               <td data-label="Valor"><div class="mono">${formatMoney(i.amount)}</div>${encargo > 0 ? `<div class="text-sm mono" style="color:var(--bad)">Com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</td>
               <td data-label="">
@@ -147,7 +147,7 @@ async function renderGerenteCobrar() {
   }
 
   root.innerHTML = `
-    <div class="grid grid-4">
+    <div class="grid grid-4 kpi-grid-4">
       <div class="card stat-card"><div class="label">Recebido hoje</div><div class="value mono">${formatMoney(sum(paymentsToday, 'amount_received'))}</div></div>
       <div class="card stat-card"><div class="label">Recebido no mês</div><div class="value mono">${formatMoney(sum(paymentsMonth, 'amount_received'))}</div></div>
       <div class="card stat-card"><div class="label">Vence hoje</div><div class="value mono">${vencidosHoje.length}</div></div>

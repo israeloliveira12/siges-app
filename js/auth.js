@@ -10,6 +10,13 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let authHandled = false;
+// Supabase Auth costuma emitir 'SIGNED_IN' mais de uma vez pro mesmo login
+// (ex: uma vez ao resolver signInWithPassword, outra pela sincronização
+// interna entre abas/localStorage) — sem essa trava, cada disparo extra
+// gravava um novo log_audit_event idêntico, poluindo a Auditoria com vários
+// "Login realizado" seguidos pro mesmo acesso. Só reseta com reload de
+// página (login novo sempre passa por handleSignOut -> location.reload()).
+let signInLogged = false;
 
 async function withAuthButtonsDisabled(ids, fn) {
   const btns = ids.map((id) => document.getElementById(id)).filter(Boolean);
@@ -84,6 +91,13 @@ async function onAuthenticated(session) {
   subscribeNotifications();
   registerPushIfSupported();
   maybeRunAutoBackup();
+  // Recalcula os scores de todos os clientes toda vez que o gerente abre o
+  // sistema (login ou reload com sessão válida) — em background, sem travar
+  // a UI. O botão "Recalcular todos" em gerente-score.js continua existindo
+  // pra forçar um recálculo manual a qualquer momento.
+  if (isGerente()) {
+    supa.rpc('recalculate_all_scores').catch(() => { /* falha silenciosa — o botão manual continua disponível */ });
+  }
 
   if (location.hash === '' || location.hash === '#/login' || location.hash === '#/') {
     router.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
@@ -123,7 +137,8 @@ function initAuth() {
     if (event === 'PASSWORD_RECOVERY') { renderResetPasswordModal(); return; }
     // 'SIGNED_IN' só dispara em login de verdade (senha ou Google) — não em
     // restauração de sessão ao recarregar a página (isso é 'INITIAL_SESSION').
-    if (event === 'SIGNED_IN' && session) {
+    if (event === 'SIGNED_IN' && session && !signInLogged) {
+      signInLogged = true;
       logAudit('login_sucesso', `Login realizado por ${session.user.email || session.user.id}`, { user_id: session.user.id });
     }
     handleAuthEvent(session);
@@ -197,6 +212,11 @@ async function doPasswordReset(email) {
 }
 
 async function handleSignOut() {
+  // Registra ANTES de signOut() — depois disso auth.uid() vira null no
+  // servidor e o evento apareceria como "Anônimo" na Auditoria.
+  if (App.session) {
+    await logAudit('logout', `Logoff realizado por ${App.session.user.email || App.session.user.id}`, { user_id: App.session.user.id });
+  }
   await supa.auth.signOut();
   // Descarta qualquer resposta de API cacheada pelo service worker — evita
   // que, num dispositivo compartilhado, o próximo usuário a logar reaproveite
