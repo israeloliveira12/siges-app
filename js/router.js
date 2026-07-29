@@ -72,6 +72,12 @@ const router = {
     if (screenEl) screenEl.classList.add('active');
 
     document.getElementById('topbar-title').textContent = config.title || '';
+    // Eyebrow pequeno acima do título — deriva do papel (gerente/cliente),
+    // sempre disponível sem precisar de um segundo campo de texto por rota.
+    // Fecha a lacuna do padrão "eyebrow + título grande" do mockup aprovado
+    // (2026-07-28) sem precisar reescrever o título de cada uma das ~17 telas.
+    const eyebrowEl = document.getElementById('topbar-eyebrow');
+    if (eyebrowEl) eyebrowEl.textContent = config.role === 'gerente' ? 'Painel do gerente' : 'Painel do cliente';
     updateActiveNavLinks(this.currentPath);
 
     if (typeof config.render === 'function') config.render(params);

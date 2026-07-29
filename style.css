@@ -215,12 +215,18 @@ button { cursor: pointer; }
 .main-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 
 .topbar {
-  height: 60px; flex: none;
+  height: 68px; flex: none;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 22px; background: var(--panel); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 20;
 }
-.topbar-title { font-size: 16px; font-weight: 700; }
+/* Padrão "eyebrow + título grande" (fechando a lacuna do mockup, 2026-07-28)
+   — pequena legenda em caixa-alta acima do título, que agora é maior/mais
+   pesado, na mesma linguagem visual dos cabeçalhos "COBRANÇA / Vencimentos"
+   da referência (Limiar). */
+.topbar-title-wrap { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; }
+.topbar-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); }
+.topbar-title { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 
 .main {
@@ -231,11 +237,17 @@ button { cursor: pointer; }
    Cards / painéis
 --------------------------------------------------------------------------- */
 
+/* Sem box-shadow de propósito (rodada de redesign 2026-07-28, fechando a
+   lacuna do mockup aprovado) — o cartão "silencioso" (só borda fina, sem
+   sombra) é o que dá a sensação mais limpa da referência (Limiar); o antigo
+   var(--shadow) ficava com um ar mais datado ao lado do resto do redesign
+   (hero escuro, radius maior, atalhos circulares). --shadow continua
+   existindo como token pra uso pontual de elevação em hover (.overview-card)
+   e no .auth-tab do login, que não fazem parte deste redesign. */
 .card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
   padding: 16px 18px;
 }
 
@@ -257,7 +269,7 @@ button { cursor: pointer; }
 }
 .quick-action-btn .circle {
   width: 48px; height: 48px; border-radius: 50%;
-  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid var(--line);
   display: flex; align-items: center; justify-content: center; color: var(--brand);
 }
 .quick-action-btn .circle svg { width: 20px; height: 20px; }
@@ -270,6 +282,23 @@ button { cursor: pointer; }
   width: 28px; height: 28px; border-radius: 50%; flex: none;
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 12px; font-weight: 700;
+}
+
+/* Linha de lista no formato "extrato" (Cobrar) — cartão por linha (não mais
+   tabela), fechando a lacuna do mockup aprovado (2026-07-28). Reusa
+   .auth-tabs/.auth-tab (já usadas em Relatórios/Receber) pro seletor em
+   pílula acima da lista. */
+.extrato-row {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 12px 14px; display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+}
+.extrato-row .name { font-size: 13.5px; font-weight: 600; }
+.extrato-row .tag { font-size: 11.5px; color: var(--ink-soft); margin-top: 1px; }
+.extrato-row .amt-wrap { margin-left: auto; text-align: right; flex: none; }
+.extrato-row .amt { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14.5px; }
+@media (max-width: 640px) {
+  .extrato-row { flex-wrap: wrap; }
+  .extrato-row .amt-wrap { width: 100%; margin-left: 40px; text-align: left; margin-top: 8px; }
 }
 
 .stat-card { padding: 14px 16px; }
@@ -542,7 +571,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   z-index: 50;
 }
 @media (max-width: 480px) {
-  .notif-panel { position: fixed; left: 12px; right: 12px; top: 60px; width: auto; max-width: none; }
+  .notif-panel { position: fixed; left: 12px; right: 12px; top: 68px; width: auto; max-width: none; }
 }
 .notif-item { padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .notif-item:last-child { border-bottom: none; }

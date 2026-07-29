@@ -44,7 +44,7 @@ async function renderClienteDashboard() {
     <h2 style="margin-bottom:16px">Olá, ${escapeHtml(firstName)}!</h2>
     <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Limite disponível</div>
-      <div class="mono" style="font-size:32px;font-weight:800;margin-top:6px">${formatMoney(available)}</div>
+      <div class="mono" style="font-size:38px;font-weight:800;margin-top:6px;letter-spacing:-0.01em">${formatMoney(available)}</div>
       <div class="bar-wrap mt-8" style="background:rgba(255,255,255,.16)"><div class="bar-fill ${pct >= 100 ? 'over' : ''}" style="width:${pct}%"></div></div>
       <div style="font-size:12px;margin-top:8px;opacity:.8">${formatMoney(used)} usado de ${formatMoney(limit)}</div>
     </div>

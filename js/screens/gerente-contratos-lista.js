@@ -81,7 +81,7 @@ async function renderGerenteContratosLista() {
             return `
             <tr class="contract-row" data-id="${c.id}" style="cursor:pointer">
               <td data-label="Contrato">#${c.contract_number}</td>
-              <td data-label="Cliente"><div class="flex items-center gap-8">${avatarHtml((c.clients.profiles || {}).full_name, 26)}<span>${escapeHtml((c.clients.profiles || {}).full_name || '—')}</span></div></td>
+              <td data-label="Cliente"><div class="flex items-center gap-8"><span class="row-dot" style="width:10px;height:10px;background:${{ em_aberto: 'var(--brand)', atrasado: 'var(--bad)', quitado: 'var(--good)', perda: 'var(--bad)' }[c.status] || 'var(--line)'}"></span>${avatarHtml((c.clients.profiles || {}).full_name, 26)}<span>${escapeHtml((c.clients.profiles || {}).full_name || '—')}</span></div></td>
               <td data-label="Aporte" class="mono mobile-hide">${formatMoney(c.principal_amount)}</td>
               <td data-label="Dívida atual" class="mono">${formatMoney(outstanding)}</td>
               <td data-label="Juros" class="mobile-hide">${formatNumber(c.interest_rate, 2)}%</td>

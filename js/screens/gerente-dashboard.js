@@ -274,7 +274,7 @@ async function renderGerenteDashboard() {
   root.innerHTML = `
     <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>
-      <div class="mono" style="font-size:32px;font-weight:800;margin-top:6px">${formatMoney(lucroMes)}</div>
+      <div class="mono" style="font-size:38px;font-weight:800;margin-top:6px;letter-spacing:-0.01em">${formatMoney(lucroMes)}</div>
       <div style="font-size:13px;margin-top:8px;opacity:.95">${trendBadgeHtml(lucroMes, lucroPrevPeriod, true)} <span style="opacity:.8">vs. mesmo período do mês passado</span></div>
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)${perdaMes > 0 ? ` + ${formatMoney(perdaMes)} em capital perdido` : ''}</div>
     </div>

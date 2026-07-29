@@ -2,6 +2,13 @@
    Gerente — Cobrar: vencimentos de hoje e atrasados
    ============================================================================ */
 
+// Módulo-level (sobrevive a repaints) — qual aba da lista única está ativa.
+// Substituiu as duas seções fixas ("Vence hoje"/"Atrasados" empilhadas) por
+// uma lista só com abas em pílula, fechando a lacuna do mockup aprovado
+// (2026-07-28) — o gerente ainda enxerga os dois grupos, só que como filtro
+// da mesma lista, não duas tabelas separadas.
+let cobrarTab = 'todos';
+
 function formatDateShortYear(iso) {
   if (!iso) return '—';
   const [y, m, d] = String(iso).slice(0, 10).split('-');
@@ -117,40 +124,41 @@ async function renderGerenteCobrar() {
   const atrasados = items.filter((i) => i.due_date < today).sort((a, b) => a.due_date.localeCompare(b.due_date));
   const dividaTotal = sum(atrasados, 'amount');
 
+  function rowHtml(i) {
+    const p = ((i.contract || {}).clients || {}).profiles || {};
+    const waUrl = buildWhatsappUrl(i);
+    const late = estimateLateCharge(i.amount, i.due_date, Number((i.contract || {}).late_interest_percent || 0), Number((i.contract || {}).late_fee_percent || 0));
+    const encargo = late.jurosAtraso + late.multaAtraso;
+    const isOverdue = i.due_date < today;
+    return `
+      <div class="extrato-row">
+        <span class="row-dot" style="background:${isOverdue ? 'var(--bad)' : 'var(--brand)'}">${isOverdue ? '!' : '↓'}</span>
+        <div style="min-width:0">
+          <div class="name">${escapeHtml(p.full_name || '—')}</div>
+          <div class="tag">${escapeHtml(formatCpf(p.cpf || '') || '')} · <a href="#/gerente/contratos/${(i.contract || {}).id}" class="reference-link">#${(i.contract || {}).contract_number}</a> · ${i.seq} · vence ${formatDate(i.due_date)}</div>
+        </div>
+        <div class="amt-wrap">
+          <div class="amt">${formatMoney(i.amount)}</div>
+          ${encargo > 0 ? `<div class="text-sm mono" style="color:var(--bad)">Com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}
+          <div class="flex gap-8 mt-8" style="justify-content:flex-end">
+            <button class="btn btn-accent btn-sm cobrar-item-btn" data-type="${i.type}" data-id="${i.id}">Receber</button>
+            ${waUrl ? `<a class="btn btn-outline btn-sm" href="${waUrl}" target="_blank" rel="noopener" title="Cobrar via WhatsApp">${Icons.alarm} WhatsApp</a>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }
+
   function listBlock(list, emptyMsg) {
     if (!list.length) return `<div class="empty-state">${Icons.check}<p>${emptyMsg}</p></div>`;
-    return `
-      <table class="data-table table-scroll">
-        <thead><tr><th>Cliente</th><th>Contrato</th><th>Vencimento</th><th>Valor</th><th></th></tr></thead>
-        <tbody>
-          ${list.map((i) => {
-            const p = ((i.contract || {}).clients || {}).profiles || {};
-            const waUrl = buildWhatsappUrl(i);
-            const late = estimateLateCharge(i.amount, i.due_date, Number((i.contract || {}).late_interest_percent || 0), Number((i.contract || {}).late_fee_percent || 0));
-            const encargo = late.jurosAtraso + late.multaAtraso;
-            const isOverdue = i.due_date < today;
-            return `
-            <tr>
-              <td data-label="Cliente">
-                <div class="flex items-center gap-8">
-                  <span class="row-dot" style="background:${isOverdue ? 'var(--bad)' : 'var(--brand)'}">${isOverdue ? '!' : '↓'}</span>
-                  <div>${escapeHtml(p.full_name || '—')}<div class="text-sm text-soft">${escapeHtml(formatCpf(p.cpf || '') || '')}</div></div>
-                </div>
-              </td>
-              <td data-label="Contrato"><a href="#/gerente/contratos/${(i.contract || {}).id}" class="reference-link">#${(i.contract || {}).contract_number}</a> · ${i.seq}</td>
-              <td data-label="Vencimento">${formatDate(i.due_date)}</td>
-              <td data-label="Valor"><div class="mono">${formatMoney(i.amount)}</div>${encargo > 0 ? `<div class="text-sm mono" style="color:var(--bad)">Com atraso (${late.diasAtraso}d): ${formatMoney(late.total)}</div>` : ''}</td>
-              <td data-label="">
-                <div class="flex gap-8">
-                  <button class="btn btn-accent btn-sm cobrar-item-btn" data-type="${i.type}" data-id="${i.id}">Receber</button>
-                  ${waUrl ? `<a class="btn btn-outline btn-sm" href="${waUrl}" target="_blank" rel="noopener" title="Cobrar via WhatsApp">${Icons.alarm} WhatsApp</a>` : ''}
-                </div>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
+    return list.map(rowHtml).join('');
   }
+
+  // Lista única (todos os itens, atrasados primeiro por vencimento) filtrada
+  // pela aba ativa — mesmo conjunto de dados que antes, só que numa lista só
+  // em vez de duas tabelas empilhadas.
+  const todosOrdenados = [...atrasados, ...vencidosHoje];
+  const listaAtiva = cobrarTab === 'hoje' ? vencidosHoje : cobrarTab === 'atrasados' ? atrasados : todosOrdenados;
+  const emptyMsg = cobrarTab === 'hoje' ? 'Nenhum vencimento hoje.' : cobrarTab === 'atrasados' ? 'Nenhum contrato em atraso.' : 'Nenhuma cobrança em aberto.';
 
   root.innerHTML = `
     <div class="grid grid-4 kpi-grid-4">
@@ -161,15 +169,18 @@ async function renderGerenteCobrar() {
     </div>
 
     <div class="card mt-14">
-      <h3>Vence hoje (${vencidosHoje.length})</h3>
-      <div class="mt-8">${listBlock(vencidosHoje, 'Nenhum vencimento hoje.')}</div>
-    </div>
-
-    <div class="card mt-14" style="border-color:var(--bad)">
-      <h3 style="color:var(--bad)">Atrasados (${atrasados.length}) — total ${formatMoney(dividaTotal)}</h3>
-      <div class="mt-8">${listBlock(atrasados, 'Nenhum contrato em atraso.')}</div>
+      <div class="auth-tabs" style="max-width:360px">
+        <button class="auth-tab ${cobrarTab === 'todos' ? 'active' : ''}" id="cobrar-tab-todos">Tudo (${todosOrdenados.length})</button>
+        <button class="auth-tab ${cobrarTab === 'hoje' ? 'active' : ''}" id="cobrar-tab-hoje">Vence hoje (${vencidosHoje.length})</button>
+        <button class="auth-tab ${cobrarTab === 'atrasados' ? 'active' : ''}" id="cobrar-tab-atrasados">Atrasados (${atrasados.length})</button>
+      </div>
+      <div class="mt-14">${listBlock(listaAtiva, emptyMsg)}</div>
     </div>
   `;
+
+  document.getElementById('cobrar-tab-todos').onclick = () => { cobrarTab = 'todos'; renderGerenteCobrar(); };
+  document.getElementById('cobrar-tab-hoje').onclick = () => { cobrarTab = 'hoje'; renderGerenteCobrar(); };
+  document.getElementById('cobrar-tab-atrasados').onclick = () => { cobrarTab = 'atrasados'; renderGerenteCobrar(); };
 
   root.querySelectorAll('.cobrar-item-btn').forEach((btn) => {
     btn.onclick = () => {
