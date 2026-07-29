@@ -135,7 +135,8 @@ async function renderGerenteCobrar() {
         <span class="row-dot" style="background:${isOverdue ? 'var(--bad)' : 'var(--brand)'}">${isOverdue ? '!' : '↓'}</span>
         <div style="min-width:0">
           <div class="name">${escapeHtml(p.full_name || '—')}</div>
-          <div class="tag">${escapeHtml(formatCpf(p.cpf || '') || '')} · <a href="#/gerente/contratos/${(i.contract || {}).id}" class="reference-link">#${(i.contract || {}).contract_number}</a> · ${i.seq} · vence ${formatDate(i.due_date)}</div>
+          <div class="meta">${escapeHtml(formatCpf(p.cpf || '') || '')} · ${i.seq} · vence ${formatDate(i.due_date)}</div>
+          <a href="#/gerente/contratos/${(i.contract || {}).id}" class="tag">#${(i.contract || {}).contract_number}</a>
         </div>
         <div class="amt-wrap">
           <div class="amt">${formatMoney(i.amount)}</div>
