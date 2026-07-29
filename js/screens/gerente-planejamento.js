@@ -186,23 +186,16 @@ function paintPlanejamento(root, state) {
               <span class="text-sm mono" style="font-weight:700">${formatMoney(subtotal)}</span>
             </button>
             <div class="${expanded ? '' : 'hidden'}" style="padding:0 2px 12px 30px">
-              <table class="data-table table-scroll">
-                <thead><tr><th>Nome</th><th>Valor</th><th></th></tr></thead>
-                <tbody>
-                  ${rows.map((d) => `
-                    <tr>
-                      <td data-label="Nome">${escapeHtml(d.name)}</td>
-                      <td data-label="Valor" class="mono">${formatMoney(d.amount)}</td>
-                      <td>
-                        <div class="flex items-center gap-6">
-                          <button class="icon-btn edit-debt-btn" data-id="${d.id}" title="Editar">${Icons.edit}</button>
-                          <button class="icon-btn del-debt-btn" data-id="${d.id}" title="Excluir">${Icons.trash}</button>
-                        </div>
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+              ${rows.map((d) => `
+                <div class="extrato-row">
+                  <div style="min-width:0;flex:1"><div class="name">${escapeHtml(d.name)}</div></div>
+                  <div class="amt-wrap" style="display:flex;align-items:center;gap:10px">
+                    <div class="amt">${formatMoney(d.amount)}</div>
+                    <button class="icon-btn edit-debt-btn" data-id="${d.id}" title="Editar">${Icons.edit}</button>
+                    <button class="icon-btn del-debt-btn" data-id="${d.id}" title="Excluir">${Icons.trash}</button>
+                  </div>
+                </div>
+              `).join('')}
             </div>
           </div>`;
         }).join('')}

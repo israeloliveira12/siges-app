@@ -71,7 +71,7 @@ function paintClientesScreen() {
             const waUrl = phoneDigits ? `https://wa.me/${phoneDigits.startsWith('55') ? phoneDigits : '55' + phoneDigits}` : null;
             return `
             <tr>
-              <td data-label="Nome"><div class="flex items-center gap-8">${avatarHtml(p.full_name, 28)}<strong>${escapeHtml(p.full_name || '—')}</strong></div></td>
+              <td data-label="Nome"><div class="flex items-center gap-8"><span class="status-dot" style="background:${p.active === false ? 'var(--ink-soft)' : (c.approval_status === 'aprovado' ? 'var(--good)' : c.approval_status === 'pendente' ? 'var(--warn)' : 'var(--bad)')}"></span>${avatarHtml(p.full_name, 28)}<strong>${escapeHtml(p.full_name || '—')}</strong></div></td>
               <td data-label="CPF" class="mono">${escapeHtml(formatCpf(p.cpf || '') || '—')}</td>
               <td data-label="Contato" class="mobile-hide"><div><div>${escapeHtml(p.email || '')}</div><div class="text-sm text-soft">${escapeHtml(formatPhoneBR(p.phone || ''))}</div></div></td>
               <td data-label="Limite" class="mono mobile-hide">${formatMoney(c.credit_limit)}</td>

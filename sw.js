@@ -4,7 +4,7 @@
    .js/.css, e suba CACHE_NAME quando a lista mudar de forma significativa.
    ============================================================================ */
 
-const CACHE_NAME = 'siges-cache-v52';
+const CACHE_NAME = 'siges-cache-v53';
 
 const FILES_TO_CACHE = [
   './',
@@ -44,6 +44,7 @@ const FILES_TO_CACHE = [
   './js/main.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './fonts/inter-var-latin.woff2',
 ];
 
 self.addEventListener('install', (event) => {

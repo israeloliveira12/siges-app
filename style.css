@@ -2,6 +2,29 @@
    SIGES — Design tokens e estilos globais
    ============================================================================ */
 
+/* Fonte própria auto-hospedada (Inter, SIL Open Font License — ver
+   fonts/LICENSE.txt), 2026-07-29 — antes o sistema usava só a pilha de
+   fontes do sistema operacional. Variable font (peso 100-900 num arquivo
+   só), subset "latin" (U+0000-00FF + pontuação/símbolos comuns) — cobre
+   sozinho todo acento/cedilha do português (á, ã, ç, õ, ê etc. vivem no
+   bloco Latin-1 Supplement, U+00C0-00FF). Testado com
+   document.fonts.load() carregando o alfabeto acentuado inteiro — confirma
+   que um subset "latin-ext" (pensado pra vietnamita/turco/croata) nunca
+   seria usado neste app só em português, então nem foi baixado, evitando
+   ~85KB mortos no repositório. Qualquer caractere fora deste subset (raro,
+   ex: símbolos matemáticos) cai de volta pro próximo item da pilha
+   --sans automaticamente — comportamento padrão de subsetting de fonte,
+   não uma falha. font-display:swap evita texto invisível enquanto a fonte
+   carrega — mostra a fonte do sistema até trocar. */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./fonts/inter-var-latin.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   --bg: #F4F6F7;
   --panel: #FFFFFF;
@@ -49,7 +72,7 @@
   --hero-dark: #05141F;
 
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Consolas, monospace;
-  --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --sans: "Inter Variable", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   /* 12px → 16px (rodada de redesign inspirada na Limiar, 2026-07-27) — cantos
      mais arredondados nos cards/modais em geral. .auth-card (login) tem
      override explícito logo abaixo pra continuar com 12px — o login fica
@@ -262,7 +285,6 @@ button { cursor: pointer; }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
-.grid-score-summary { grid-template-columns: 260px 1fr; align-items: stretch; }
 
 /* Grade de atalhos circulares (Dashboard do gerente/cliente) — mesma ideia
    da fileira "Receber/Pagar/Câmbio" da referência (Limiar): ícone num
@@ -278,6 +300,7 @@ button { cursor: pointer; }
   width: 48px; height: 48px; border-radius: 50%;
   background: var(--panel); border: 1px solid var(--line);
   display: flex; align-items: center; justify-content: center; color: var(--brand);
+  transition: border-color .15s, color .15s;
 }
 .quick-action-btn .circle svg { width: 20px; height: 20px; }
 .quick-action-btn:hover .circle { border-color: var(--brand); color: var(--brand); }
@@ -291,6 +314,21 @@ button { cursor: pointer; }
   color: #fff; font-size: 12px; font-weight: 700;
 }
 
+/* Ponto de status compacto (sem texto dentro) — versão pequena do .row-dot,
+   pra listas onde o círculo só precisa comunicar cor/status ao lado de um
+   nome (Clientes, Solicitações, Auditoria), sem virar um badge grande. */
+.status-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+
+/* Card "hero" da tela Score (2026-07-29) — junta os 3 KPIs + rosca num
+   bloco só, fundo --hero-dark. .text-soft é uma classe aplicada DIRETO nos
+   spans da legenda do donut (donutLegendHtml, charts.js) — uma regra de
+   classe sempre vence sobre `color` herdado do ancestral, então sem este
+   override os valores da legenda ficariam var(--ink-soft) (escuro no tema
+   claro) sobre fundo quase preto, ilegível. Mesmo cuidado já documentado
+   pros cards "spotlight" (--good-dark/--bad-dark), aqui aplicado a texto
+   em vez de fundo. */
+.score-hero .text-soft { color: rgba(255, 255, 255, .65) !important; }
+
 /* Linha de lista no formato "extrato" (Cobrar) — cartão por linha (não mais
    tabela), fechando a lacuna do mockup aprovado (2026-07-28). Reusa
    .auth-tabs/.auth-tab (já usadas em Relatórios/Receber) pro seletor em
@@ -299,7 +337,13 @@ button { cursor: pointer; }
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
   padding: 12px 14px; display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
   max-width: 100%; box-sizing: border-box;
+  transition: border-color .15s, box-shadow .15s;
 }
+/* Microinteração sutil (2026-07-29) — o cartão em si não é clicável (só os
+   botões Receber/WhatsApp dentro dele são), mas o leve destaque no hover
+   ainda ajuda a "escanear" a lista com o mouse, mesma linguagem de affordance
+   já usada em .overview-card/.quick-action-btn. */
+.extrato-row:hover { border-color: var(--brand); box-shadow: var(--shadow); }
 .extrato-row .name { font-size: 13.5px; font-weight: 600; }
 .extrato-row .meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; overflow-wrap: break-word; }
 /* Pílula de referência (nº do contrato) — mesmo padrão do mockup aprovado,
@@ -640,7 +684,6 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .sidebar { display: none; }
   .main { padding: 14px; padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
-  .grid-score-summary { grid-template-columns: 1fr; }
 
   /* Cápsula flutuante (não mais barra reta colada na borda) — mesma lista de
      itens/rotas de sempre, só o invólucro visual muda: margem nas laterais +
@@ -732,4 +775,16 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .modal-overlay { padding: 0; align-items: stretch; }
   .modal { max-width: 100%; width: 100%; min-height: 100%; border-radius: 0; display: flex; flex-direction: column; }
   .modal-body { flex: 1 1 auto; overflow-y: auto; }
+}
+
+/* Respeita a preferência de "menos movimento" do sistema operacional —
+   desliga qualquer transição/animação do app (hover de cartão, toast,
+   wizard-step etc.) sem precisar duplicar regra por regra. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
