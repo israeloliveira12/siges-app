@@ -279,15 +279,6 @@ async function renderGerenteDashboard() {
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)${perdaMes > 0 ? ` + ${formatMoney(perdaMes)} em capital perdido` : ''}</div>
     </div>
 
-    <div class="quick-actions-grid mt-14">
-      <a href="#/gerente/cobrar" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/cobrar')"><span class="circle">${Icons.alarm}</span><span>Cobrar</span></a>
-      <a href="#/gerente/contratos" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/contratos')"><span class="circle">${Icons.contract}</span><span>Contratos</span></a>
-      <a href="#/gerente/score" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/score')"><span class="circle">${Icons.score}</span><span>Score</span></a>
-      <a href="#/gerente/relatorios" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/relatorios')"><span class="circle">${Icons.chart}</span><span>Relatórios</span></a>
-      <a href="#/gerente/clientes" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/clientes')"><span class="circle">${Icons.users}</span><span>Clientes</span></a>
-      <a href="#/gerente/auditoria" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/gerente/auditoria')"><span class="circle">${Icons.audit}</span><span>Auditoria</span></a>
-    </div>
-
     <div class="grid grid-3 kpi-grid-3 mt-14">
       <div class="card stat-card">
         <div class="label">Carteira ativa (capital emprestado)</div>

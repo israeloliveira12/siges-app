@@ -88,21 +88,32 @@ async function onAuthenticated(session) {
   document.getElementById('auth-screen').classList.remove('active');
 
   renderShellForRole();
-  subscribeNotifications();
-  registerPushIfSupported();
-  maybeRunAutoBackup();
+
+  // A tela pedida (dashboard no login, ou a mesma tela de antes num F5) é
+  // renderizada ANTES de qualquer efeito colateral "bônus" (notificações em
+  // tempo real, push, backup automático, recálculo de score) — bug real
+  // corrigido (2026-07-29): se um desses efeitos lançasse uma exceção
+  // síncrona (ex: subscribeNotifications() montando o canal realtime), o
+  // resto de onAuthenticated() nunca chegava a este ponto e a tela ficava em
+  // branco até o usuário clicar manualmente num menu (o que chama
+  // router.navigate() por um caminho totalmente independente deste). Cada
+  // efeito colateral abaixo agora roda isolado em seu próprio try/catch, pra
+  // nenhum deles nunca mais poder impedir a tela de aparecer.
+  if (location.hash === '' || location.hash === '#/login' || location.hash === '#/') {
+    router.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
+  } else {
+    router.handleHashChange();
+  }
+
+  try { subscribeNotifications(); } catch (e) { console.warn('subscribeNotifications falhou:', e); }
+  try { registerPushIfSupported(); } catch (e) { /* registerPushIfSupported já trata os próprios erros */ }
+  try { maybeRunAutoBackup(); } catch (e) { /* maybeRunAutoBackup já trata os próprios erros */ }
   // Recalcula os scores de todos os clientes toda vez que o gerente abre o
   // sistema (login ou reload com sessão válida) — em background, sem travar
   // a UI. O botão "Recalcular todos" em gerente-score.js continua existindo
   // pra forçar um recálculo manual a qualquer momento.
   if (isGerente()) {
     supa.rpc('recalculate_all_scores').catch(() => { /* falha silenciosa — o botão manual continua disponível */ });
-  }
-
-  if (location.hash === '' || location.hash === '#/login' || location.hash === '#/') {
-    router.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
-  } else {
-    router.handleHashChange();
   }
 }
 
@@ -193,8 +204,14 @@ async function doSignUp(email, password, profileData) {
     options: { data: profileData || {} },
   });
   if (error) { setAuthError(traduzErroAuth(error)); return; }
+  // Sem exigir confirmação de e-mail (desativada no painel do Supabase,
+  // 2026-07-29): o sistema confia no e-mail que o cliente digitou e manda
+  // o cadastro direto pra fila de aprovação do gerente — a validação real
+  // de identidade é a aprovação manual, não um link de confirmação. Se
+  // `data.session` ainda vier nulo (ex: confirmação ainda não desativada no
+  // projeto Supabase), a mensagem também não menciona e-mail — só aprovação.
   if (!data.session) {
-    setAuthMessage('Conta criada! Confirme seu e-mail e aguarde a aprovação de um administrador para poder entrar.');
+    setAuthMessage('Conta criada! Aguarde a aprovação de um administrador para poder entrar.');
   }
 }
 

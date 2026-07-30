@@ -288,6 +288,7 @@ async function renderGerenteContratoDetalhe(params) {
     gerarNotasPromissoriasPDF({
       contract, installments: installments || [], clientProfile: p,
       companyName: (App.settings && App.settings.company_name) || 'Siges Serviços Financeiros',
+      companyCity: (App.settings && App.settings.company_city) || '',
     });
   };
 

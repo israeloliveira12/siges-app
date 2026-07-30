@@ -38,6 +38,9 @@ async function renderGerenteConfiguracoes() {
             <span class="help">Aparece nas mensagens de cobrança enviadas ao cliente.</span>
           </div>
         </div>
+        <div class="field"><label>Cidade (praça)</label><input type="text" id="cfg-company-city" placeholder="Ex: Manaus" value="${escapeHtml(settings.company_city || '')}">
+          <span class="help">Usada como "praça de [cidade]" no texto das notas promissórias.</span>
+        </div>
       </div>
 
       <div class="card mt-14">
@@ -172,6 +175,7 @@ async function renderGerenteConfiguracoes() {
       company_name: document.getElementById('cfg-company-name').value.trim(),
       company_whatsapp: document.getElementById('cfg-company-whatsapp').value.replace(/\D/g, '') || null,
       company_pix_key: document.getElementById('cfg-company-pix').value.trim() || null,
+      company_city: document.getElementById('cfg-company-city').value.trim() || null,
       critical_days_threshold: parseInt(document.getElementById('cfg-critical-days').value || '15', 10),
       loss_days_threshold: parseInt(document.getElementById('cfg-loss-days').value || '60', 10),
       default_exit_fee_percent: Number(document.getElementById('cfg-exit-fee').value || 0),

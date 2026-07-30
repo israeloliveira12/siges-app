@@ -14,6 +14,7 @@ const NAV_ITEMS = {
   gerente: [
     { route: 'gerente/dashboard', label: 'Dashboard', icon: 'dashboard' },
     { route: 'gerente/cobrar', label: 'Cobrar', icon: 'alarm' },
+    { route: 'gerente/lancamentos', label: 'Lançamentos Futuros', icon: 'calendar' },
     { route: 'gerente/contratos', label: 'Contratos', icon: 'contract' },
     { route: 'gerente/solicitacoes', label: 'Solicitações', icon: 'inbox' },
     { route: 'gerente/clientes', label: 'Clientes', icon: 'users' },

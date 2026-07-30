@@ -4,7 +4,7 @@
    .js/.css, e suba CACHE_NAME quando a lista mudar de forma significativa.
    ============================================================================ */
 
-const CACHE_NAME = 'siges-cache-v53';
+const CACHE_NAME = 'siges-cache-v54';
 
 const FILES_TO_CACHE = [
   './',
@@ -34,6 +34,7 @@ const FILES_TO_CACHE = [
   './js/screens/gerente-contratos-lista.js',
   './js/screens/gerente-contrato-receber.js',
   './js/screens/gerente-cobrar.js',
+  './js/screens/gerente-lancamentos.js',
   './js/screens/gerente-relatorios.js',
   './js/screens/gerente-score.js',
   './js/screens/gerente-planejamento.js',

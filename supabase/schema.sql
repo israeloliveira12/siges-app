@@ -254,6 +254,7 @@ create table system_settings (
   company_name text not null default 'Siges Serviços Financeiros',
   company_whatsapp text,
   company_pix_key text,
+  company_city text, -- "praça" usada no texto das notas promissórias (ex: "Manaus")
   backup_auto_enabled boolean not null default false,
   backup_frequency text not null default 'diario', -- diario | semanal | quinzenal | mensal | personalizado
   backup_custom_days integer,

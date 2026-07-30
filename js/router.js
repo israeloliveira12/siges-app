@@ -8,33 +8,6 @@ function registerRoute(path, config) {
   ROUTES[path] = config;
 }
 
-// Eyebrow contextual por seção (2026-07-29) — antes era só "Painel do
-// gerente"/"Painel do cliente" repetido em toda tela; agora cada grupo de
-// rotas ganha uma categoria específica, mesma linguagem dos cabeçalhos
-// "COBRANÇA / Vencimentos" da referência (Limiar). Chave é sempre os 2
-// primeiros segmentos do path (ex: 'gerente/contratos/:id' -> 'gerente/contratos'),
-// então uma rota com :id reusa o mesmo eyebrow da lista. Fallback genérico
-// por papel pra qualquer rota nova que não tenha entrada aqui ainda.
-const EYEBROW_BY_SECTION = {
-  'gerente/dashboard': 'Painel',
-  'gerente/cobrar': 'Cobrança',
-  'gerente/solicitacoes': 'Cobrança',
-  'gerente/contratos': 'Contratos',
-  'gerente/clientes': 'Pessoas',
-  'gerente/gerentes': 'Pessoas',
-  'gerente/score': 'Pessoas',
-  'gerente/relatorios': 'Financeiro',
-  'gerente/planejamento': 'Financeiro',
-  'gerente/auditoria': 'Sistema',
-  'gerente/configuracoes': 'Sistema',
-  'cliente/dashboard': 'Início',
-  'cliente/solicitar': 'Empréstimo',
-  'cliente/emprestimos': 'Empréstimo',
-  'cliente/indicacoes': 'Empréstimo',
-  'cliente/score': 'Pessoal',
-  'cliente/notificacoes': 'Pessoal',
-};
-
 const router = {
   currentPath: null,
   currentParams: {},
@@ -99,15 +72,6 @@ const router = {
     if (screenEl) screenEl.classList.add('active');
 
     document.getElementById('topbar-title').textContent = config.title || '';
-    // Eyebrow pequeno acima do título — contextual por seção (ver
-    // EYEBROW_BY_SECTION acima), com fallback genérico por papel pra
-    // qualquer rota nova sem entrada no mapa ainda.
-    const eyebrowEl = document.getElementById('topbar-eyebrow');
-    if (eyebrowEl) {
-      const sectionKey = segments.slice(0, 2).join('/');
-      eyebrowEl.textContent = EYEBROW_BY_SECTION[sectionKey]
-        || (config.role === 'gerente' ? 'Painel do gerente' : 'Painel do cliente');
-    }
     updateActiveNavLinks(this.currentPath);
 
     if (typeof config.render === 'function') config.render(params);

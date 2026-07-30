@@ -13,54 +13,81 @@ function slugifyFilePart(text) {
     .toLowerCase();
 }
 
-// Desenha uma nota promissória na página ATUAL do doc (não cria/salva nada) —
-// usada para montar um único PDF com várias páginas, uma por parcela.
-function drawPromissoriaPage(doc, { contract, installment, clientProfile, companyName }) {
+// Desenha uma nota promissória num bloco compacto, a partir de blockY (topo
+// do bloco) — 3 blocos cabem por página (ver gerarNotasPromissoriasPDF).
+// Não referencia número de contrato no texto (pedido do usuário, 2026-07-29
+// — a nota não deve vincular o devedor a um número de contrato interno,
+// só ao valor/data/parcela); "Endereço:" fica sempre em branco, sem linha,
+// pra ser preenchido/assinado manualmente pelo devedor.
+function drawPromissoriaBlock(doc, blockY, { installment, installmentsCount, clientProfile, companyName, companyCity }) {
   const dueDate = new Date(installment.due_date + 'T00:00:00');
+  const left = 20, right = 190;
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.text('NOTA PROMISSÓRIA', 20, 25);
-  doc.setFontSize(11);
-  doc.text(`Contrato nº: ${contract.contract_number}`, 20, 32);
-  doc.text(`Parcela: ${installment.sequence_number} de ${contract.installments_count}`, 20, 38);
-
-  doc.setFontSize(11);
-  doc.text(`Vencimento: ${formatDate(installment.due_date)}`, 140, 25);
+  doc.setFontSize(13);
+  doc.text('NOTA PROMISSÓRIA', left, blockY + 6);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(`Vencimento: ${formatDate(installment.due_date)}`, right, blockY + 1, { align: 'right' });
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.text(formatMoney(installment.amount_due), 140, 32);
+  doc.text(formatMoney(installment.amount_due), right, blockY + 8, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  const texto = `Ao(s) ${dueDate.getDate()} dia(s) do mês de ${MESES_PT[dueDate.getMonth()]} do ano de ${dueDate.getFullYear()} pagarei por esta única via de NOTA PROMISSÓRIA a ${companyName}, a quantia de ${formatMoney(installment.amount_due)} (${valueByExtenso(installment.amount_due)}), correspondente à ${installment.sequence_number}/${contract.installments_count} parcela do contrato nº ${contract.contract_number}, com vencimento em ${formatDate(installment.due_date)}.`;
+  doc.setFontSize(8.5);
+  const praca = companyCity ? `, na praça de ${companyCity},` : ',';
+  const texto = `Ao(s) ${dueDate.getDate()} dia(s) do mês de ${MESES_PT[dueDate.getMonth()]} do ano de ${dueDate.getFullYear()} pagarei por esta única via de NOTA PROMISSÓRIA a ${companyName}${praca} a quantia de ${formatMoney(installment.amount_due)} (${valueByExtenso(installment.amount_due)}), correspondente à ${installment.sequence_number}/${installmentsCount}ª parcela, com vencimento em ${formatDate(installment.due_date)}.`;
   const lines = doc.splitTextToSize(texto, 170);
-  doc.text(lines, 20, 55);
+  doc.text(lines, left, blockY + 13);
 
-  const afterTextY = 55 + lines.length * 6 + 20;
+  let y = blockY + 13 + lines.length * 4 + 5;
   doc.setFont('helvetica', 'bold');
-  doc.text('Emitente:', 20, afterTextY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(clientProfile.full_name || '', 45, afterTextY);
-  doc.setFont('helvetica', 'bold');
-  doc.text('CPF:', 20, afterTextY + 8);
-  doc.setFont('helvetica', 'normal');
-  doc.text(clientProfile.cpf || '—', 45, afterTextY + 8);
-
-  doc.line(20, afterTextY + 35, 120, afterTextY + 35);
   doc.setFontSize(9);
-  doc.text('Assinatura', 20, afterTextY + 40);
+  doc.text('Emitente:', left, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(clientProfile.full_name || '', left + 20, y);
+  y += 5.5;
+  doc.setFont('helvetica', 'bold');
+  doc.text('CPF:', left, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(clientProfile.cpf || '—', left + 20, y);
+  y += 5.5;
+  doc.setFont('helvetica', 'bold');
+  doc.text('Endereço:', left, y);
+
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.3);
+  doc.line(130, blockY + 33, right, blockY + 33);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text('Assinatura', 155, blockY + 38);
 }
 
-// Gera UM único PDF com todas as notas promissórias do contrato, uma parcela
-// por página (em vez de um arquivo separado para cada parcela).
-function gerarNotasPromissoriasPDF({ contract, installments, clientProfile, companyName }) {
+// Gera UM único PDF com todas as notas promissórias do contrato, 3 por
+// página (antes era 1 por página — deixava o documento enorme pra
+// contratos com várias parcelas, pedido do usuário 2026-07-29).
+function gerarNotasPromissoriasPDF({ contract, installments, clientProfile, companyName, companyCity }) {
   if (!installments || !installments.length) { showToast('Este contrato não tem parcelas.'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const PER_PAGE = 3;
+  const BLOCK_H = 90;
+  const TOP_MARGIN = 15;
 
   installments.forEach((installment, idx) => {
-    if (idx > 0) doc.addPage();
-    drawPromissoriaPage(doc, { contract, installment, clientProfile, companyName });
+    const posInPage = idx % PER_PAGE;
+    if (idx > 0 && posInPage === 0) doc.addPage();
+    const blockY = TOP_MARGIN + posInPage * BLOCK_H;
+    drawPromissoriaBlock(doc, blockY, {
+      installment, installmentsCount: contract.installments_count, clientProfile, companyName, companyCity,
+    });
+    if (posInPage < PER_PAGE - 1) {
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineDashPattern([1, 1], 0);
+      doc.line(15, blockY + BLOCK_H - 5, 195, blockY + BLOCK_H - 5);
+      doc.setLineDashPattern([], 0);
+      doc.setDrawColor(0);
+    }
   });
 
   doc.save(`notas-promissorias-contrato-${contract.contract_number}.pdf`);

@@ -62,16 +62,6 @@ async function renderClienteDashboard() {
       </div>
     </div>
 
-    <div class="quick-actions-grid mt-14">
-      <a href="#/cliente/solicitar" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/cliente/solicitar')">
-        <span class="circle">${Icons.plus}</span>
-        <span>Solicitar</span>
-      </a>
-      <a href="#/cliente/emprestimos" class="quick-action-btn" onclick="event.preventDefault();router.navigate('#/cliente/emprestimos')">
-        <span class="circle">${Icons.contract}</span>
-        <span>Empréstimos</span>
-      </a>
-    </div>
   `;
 }
 

@@ -126,7 +126,7 @@ function paintPlanejamento(root, state) {
         </div>
       </div>
 
-      <div class="grid grid-2 kpi-grid-2 mt-20" style="gap:14px">
+      <div class="grid grid-2 mt-20" style="gap:14px">
         <div class="stat-card" style="background:var(--bg)">
           <div class="label">Lucro Bruto (Faturamento Final − Dívida Total)</div>
           <div class="value mono" style="font-size:22px;color:${calc.lucroBruto >= 0 ? 'var(--good)' : 'var(--bad)'}">${formatMoney(calc.lucroBruto)}</div>

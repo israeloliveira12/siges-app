@@ -243,12 +243,6 @@ button { cursor: pointer; }
   padding: 0 22px; background: var(--panel); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 20;
 }
-/* Padrão "eyebrow + título grande" (fechando a lacuna do mockup, 2026-07-28)
-   — pequena legenda em caixa-alta acima do título, que agora é maior/mais
-   pesado, na mesma linguagem visual dos cabeçalhos "COBRANÇA / Vencimentos"
-   da referência (Limiar). */
-.topbar-title-wrap { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; }
-.topbar-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); }
 .topbar-title { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 
@@ -286,25 +280,6 @@ button { cursor: pointer; }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 
-/* Grade de atalhos circulares (Dashboard do gerente/cliente) — mesma ideia
-   da fileira "Receber/Pagar/Câmbio" da referência (Limiar): ícone num
-   círculo + rótulo embaixo, várias colunas que se distribuem sozinhas
-   (auto-fit) então funciona igual com 2 atalhos (cliente) ou 6 (gerente). */
-.quick-actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 14px 4px; text-align: center; }
-.quick-action-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 7px;
-  text-decoration: none; color: var(--ink-soft); font-size: 11px; font-weight: 600;
-  background: none; border: none; cursor: pointer; font-family: inherit; padding: 0;
-}
-.quick-action-btn .circle {
-  width: 48px; height: 48px; border-radius: 50%;
-  background: var(--panel); border: 1px solid var(--line);
-  display: flex; align-items: center; justify-content: center; color: var(--brand);
-  transition: border-color .15s, color .15s;
-}
-.quick-action-btn .circle svg { width: 20px; height: 20px; }
-.quick-action-btn:hover .circle { border-color: var(--brand); color: var(--brand); }
-
 /* Círculo colorido de status à esquerda do nome, em listas no estilo
    "extrato" (Cobrar) — mesmo padrão visual da referência (Limiar), cor
    comunica urgência (vermelho = atrasado, navy = vence hoje/normal). */
@@ -313,11 +288,6 @@ button { cursor: pointer; }
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 12px; font-weight: 700;
 }
-
-/* Ponto de status compacto (sem texto dentro) — versão pequena do .row-dot,
-   pra listas onde o círculo só precisa comunicar cor/status ao lado de um
-   nome (Clientes, Solicitações, Auditoria), sem virar um badge grande. */
-.status-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
 
 /* Card "hero" da tela Score (2026-07-29) — junta os 3 KPIs + rosca num
    bloco só, fundo --hero-dark. .text-soft é uma classe aplicada DIRETO nos
@@ -342,7 +312,7 @@ button { cursor: pointer; }
 /* Microinteração sutil (2026-07-29) — o cartão em si não é clicável (só os
    botões Receber/WhatsApp dentro dele são), mas o leve destaque no hover
    ainda ajuda a "escanear" a lista com o mouse, mesma linguagem de affordance
-   já usada em .overview-card/.quick-action-btn. */
+   já usada em .overview-card. */
 .extrato-row:hover { border-color: var(--brand); box-shadow: var(--shadow); }
 .extrato-row .name { font-size: 13.5px; font-weight: 600; }
 .extrato-row .meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; overflow-wrap: break-word; }

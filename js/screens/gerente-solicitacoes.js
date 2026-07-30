@@ -24,16 +24,13 @@ async function renderGerenteSolicitacoes() {
     return `
     <div class="card" style="margin-bottom:10px">
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:10px">
-        <div class="flex items-center gap-8">
-          <span class="status-dot" style="background:${r.status === 'pendente' ? 'var(--warn)' : r.status === 'aprovada' ? 'var(--good)' : 'var(--bad)'}"></span>
-          <div>
+        <div>
           <strong>${escapeHtml(p.full_name || '—')}</strong>
           <div class="text-sm text-soft">${escapeHtml(p.email || '')} · ${formatDate(r.created_at)}</div>
           <div class="mono mt-8" style="font-size:17px">${formatMoney(r.requested_amount)}</div>
           ${r.requested_due_type ? `<div class="text-sm text-soft">Prazo desejado: ${dueTypeLabel(r.requested_due_type, r.requested_custom_interval_days)}</div>` : ''}
           ${r.message ? `<div class="text-sm mt-8">"${escapeHtml(r.message)}"</div>` : ''}
           ${r.decision_reason ? `<div class="text-sm text-soft mt-8">Motivo: ${escapeHtml(r.decision_reason)}</div>` : ''}
-          </div>
         </div>
         <div class="flex items-center gap-10">
           ${showActions ? `

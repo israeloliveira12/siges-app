@@ -145,7 +145,7 @@ function paintAuditoria(root, { logs, summary }) {
             <tr>
               <td data-label="Data/Hora" class="mono text-sm">${formatDateTime(l.created_at)}</td>
               <td data-label="Usuário"><div>${escapeHtml(l.actor_name || 'Anônimo')}</div>${l.actor_role ? `<div class="text-sm text-soft">${l.actor_role === 'gerente' ? 'Administrador' : 'Cliente'}</div>` : ''}</td>
-              <td data-label="Ação"><span class="flex items-center gap-6" style="display:inline-flex"><span class="status-dot" style="background:${auditActionBadgeColor(l.action)}"></span><span style="color:${auditActionBadgeColor(l.action)};font-weight:600">${escapeHtml(auditActionLabel(l.action))}</span></span></td>
+              <td data-label="Ação"><span style="color:${auditActionBadgeColor(l.action)};font-weight:600">${escapeHtml(auditActionLabel(l.action))}</span></td>
               <td data-label="Descrição" class="wrap-text">${escapeHtml(l.description)}</td>
             </tr>
           `).join('')}
