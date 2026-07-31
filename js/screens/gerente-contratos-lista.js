@@ -240,34 +240,32 @@ async function renderGerenteContratoDetalhe(params) {
     <div class="card mt-14">
       <h3>Pagamentos recebidos</h3>
       ${(payments || []).length ? `
-      <div class="mt-8">
-        ${payments.map((pay) => {
-          // Vencimento do pagamento: derivado do registro relacionado
-          // (parcela ou ciclo), já carregado nesta tela — sem query extra.
-          // Pra "renovacao_juros"/"quitacao_final" (ligados a um ciclo),
-          // isso é justamente o "Novo vencimento" que a antiga tabela
-          // "Ciclos de renovação" mostrava — preservado aqui pra não
-          // perder essa informação quando aquela tabela foi removida.
-          const dueDate = pay.installment_id
-            ? ((installments || []).find((i) => i.id === pay.installment_id) || {}).due_date
-            : ((cycles || []).find((c) => c.id === pay.renewal_cycle_id) || {}).new_due_date;
-          const tipoLabel = { quitacao_parcela: 'Quitação', renovacao_juros: 'Renovação (juros)', quitacao_final: 'Quitação final' }[pay.payment_kind];
-          return `
-          <div class="extrato-row">
-            <div style="min-width:0;flex:1 1 auto">
-              <div class="name">${tipoLabel}</div>
-              <div class="meta">Recebido em ${formatDateUTC(pay.received_at)}${dueDate ? ' · Vencimento ' + formatDate(dueDate) : ''}</div>
-            </div>
-            <div class="amt-wrap">
-              <div class="amt">${formatMoney(pay.amount_received)}</div>
-              <div class="text-sm text-soft">Lucro líquido ${formatMoney(pay.net_profit)}${pay.has_operational_fee ? ' · Taxa ' + formatMoney(pay.operational_fee_amount) : ''}</div>
-              <div class="flex gap-8 mt-8" style="justify-content:flex-end">
-                <button class="icon-btn edit-payment-fee-btn" data-id="${pay.id}" title="Editar taxa de entrada">${Icons.edit}</button>
-              </div>
-            </div>
-          </div>
-        `; }).join('')}
-      </div>` : `<p class="text-sm text-soft mt-8">Nenhum pagamento registrado ainda.</p>`}
+      <table class="data-table table-scroll mt-8">
+        <thead><tr><th>Data</th><th>Vencimento</th><th>Tipo</th><th>Valor</th><th>Taxa de entrada</th><th>Lucro líquido</th><th></th></tr></thead>
+        <tbody>
+          ${payments.map((pay) => {
+            // Vencimento do pagamento: derivado do registro relacionado
+            // (parcela ou ciclo), já carregado nesta tela — sem query extra.
+            // Pra "renovacao_juros"/"quitacao_final" (ligados a um ciclo),
+            // isso é justamente o "Novo vencimento" que a antiga tabela
+            // "Ciclos de renovação" mostrava — preservado aqui pra não
+            // perder essa informação quando aquela tabela foi removida.
+            const dueDate = pay.installment_id
+              ? ((installments || []).find((i) => i.id === pay.installment_id) || {}).due_date
+              : ((cycles || []).find((c) => c.id === pay.renewal_cycle_id) || {}).new_due_date;
+            return `
+            <tr>
+              <td data-label="Data">${formatDateUTC(pay.received_at)}</td>
+              <td data-label="Vencimento">${dueDate ? formatDate(dueDate) : '—'}</td>
+              <td data-label="Tipo">${{ quitacao_parcela: 'Quitação', renovacao_juros: 'Renovação (juros)', quitacao_final: 'Quitação final' }[pay.payment_kind]}</td>
+              <td data-label="Valor" class="mono">${formatMoney(pay.amount_received)}</td>
+              <td data-label="Taxa de entrada" class="mono">${pay.has_operational_fee ? formatMoney(pay.operational_fee_amount) : '—'}</td>
+              <td data-label="Lucro líquido" class="mono">${formatMoney(pay.net_profit)}</td>
+              <td data-label=""><button class="icon-btn edit-payment-fee-btn" data-id="${pay.id}" title="Editar taxa de entrada">${Icons.edit}</button></td>
+            </tr>
+          `; }).join('')}
+        </tbody>
+      </table>` : `<p class="text-sm text-soft mt-8">Nenhum pagamento registrado ainda.</p>`}
     </div>
   `;
 
