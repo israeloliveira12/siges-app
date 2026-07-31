@@ -14,7 +14,7 @@ const NAV_ITEMS = {
   gerente: [
     { route: 'gerente/dashboard', label: 'Dashboard', icon: 'dashboard' },
     { route: 'gerente/cobrar', label: 'Cobrar', icon: 'alarm' },
-    { route: 'gerente/lancamentos', label: 'Lançamentos Futuros', icon: 'calendar' },
+    { route: 'gerente/lancamentos', label: 'Lançamentos', icon: 'calendar' },
     { route: 'gerente/contratos', label: 'Contratos', icon: 'contract' },
     { route: 'gerente/solicitacoes', label: 'Solicitações', icon: 'inbox' },
     { route: 'gerente/clientes', label: 'Clientes', icon: 'users' },
@@ -35,7 +35,7 @@ const NAV_ITEMS = {
 // Gerente tem mais itens que isso.
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/indicacoes', 'cliente/score'],
-  gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/contratos', 'gerente/relatorios'],
+  gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/lancamentos', 'gerente/contratos'],
 };
 
 function navLinkHtml(item, mobile) {

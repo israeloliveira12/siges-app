@@ -584,6 +584,11 @@ alter table system_settings add column if not exists company_city text;
 
 **Ação manual pendente (fora do banco):** desativar "Confirm email" no painel do Supabase (Authentication → Providers → Email) — ver item 6 acima.
 
+## Reordenação do nav mobile + rótulo curto "Lançamentos" (2026-07-30)
+
+`js/main.js` — `MOBILE_TAB_ROUTES.gerente` trocou `gerente/relatorios` por `gerente/lancamentos`, então a tabbar do celular virou `Dashboard/Cobrar/Lançamentos/Contratos/Mais` (Relatórios foi pra dentro de "Mais"). O rótulo do item em `NAV_ITEMS.gerente` (usado ao mesmo tempo no sidebar do desktop, na aba direta da tabbar e na folha "Mais" — é o mesmo `label` nos 3 lugares) encurtou de "Lançamentos Futuros" pra só "Lançamentos", pra não ficar grande demais na aba. O nome completo "Lançamentos Futuros" continua intocado como `title` da rota (`registerRoute` em `gerente-lancamentos.js`) — é o que aparece no topbar quando a tela está aberta, então o texto completo não sumiu, só o rótulo do menu ficou mais compacto.
+- `sw.js` em `v55`.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.
