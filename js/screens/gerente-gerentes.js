@@ -20,22 +20,23 @@ async function renderGerenteGerentes() {
       <p class="text-sm text-soft">${isPrimary ? 'Contas de gerente têm acesso operacional ao sistema (sem Planejamento/Configurações). Só crie para pessoas de confiança da equipe.' : 'Só o Administrador pode criar, editar ou excluir contas desta lista.'}</p>
       ${isPrimary ? `<button class="btn btn-primary" id="novo-gerente-btn">${Icons.userPlus} Novo Gerente</button>` : ''}
     </div>
-    <div class="card mt-14" style="padding:0">
-      <table class="data-table table-scroll">
-        <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Status</th><th>Criado em</th>${isPrimary ? '<th></th>' : ''}</tr></thead>
-        <tbody>
-          ${gerentesCache.map((g) => `
-            <tr>
-              <td data-label="Nome"><div class="flex items-center gap-8">${avatarHtml(g.full_name, 28)}<span>${escapeHtml(g.full_name || '—')}</span></div></td>
-              <td data-label="E-mail">${escapeHtml(g.email)}</td>
-              <td data-label="Papel">${g.is_primary_admin ? '<span class="badge badge-brand">Administrador</span>' : '<span class="badge badge-neutral">Gerente</span>'}</td>
-              <td data-label="Status">${g.active ? statusBadge('quitado', 'Ativo') : statusBadge('reprovada', 'Inativo')}</td>
-              <td data-label="Criado em">${formatDate(g.created_at)}</td>
-              ${isPrimary ? `<td data-label=""><button class="icon-btn edit-gerente-btn" data-id="${g.id}">${Icons.edit}</button></td>` : ''}
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+    <div class="mt-14">
+      ${gerentesCache.map((g) => `
+        <div class="extrato-row">
+          ${avatarHtml(g.full_name, 34)}
+          <div style="min-width:0;flex:1 1 auto">
+            <div class="name">${escapeHtml(g.full_name || '—')}</div>
+            <div class="meta">${escapeHtml(g.email)} · Criado em ${formatDate(g.created_at)}</div>
+          </div>
+          <div class="amt-wrap">
+            <div class="flex gap-8 items-center" style="justify-content:flex-end;flex-wrap:wrap">
+              ${g.is_primary_admin ? '<span class="badge badge-brand">Administrador</span>' : '<span class="badge badge-neutral">Gerente</span>'}
+              ${g.active ? statusBadge('quitado', 'Ativo') : statusBadge('reprovada', 'Inativo')}
+              ${isPrimary ? `<button class="icon-btn edit-gerente-btn" data-id="${g.id}">${Icons.edit}</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}
     </div>
   `;
 

@@ -136,21 +136,18 @@ function paintAuditoria(root, { logs, summary }) {
       </div>
     </div>
 
-    <div class="card mt-14" style="padding:0;overflow:hidden">
-      ${filtered.length ? `
-      <table class="data-table table-scroll">
-        <thead><tr><th>Data/Hora</th><th>Usuário</th><th>Ação</th><th>Descrição</th></tr></thead>
-        <tbody>
-          ${filtered.map((l) => `
-            <tr>
-              <td data-label="Data/Hora" class="mono text-sm">${formatDateTime(l.created_at)}</td>
-              <td data-label="Usuário"><div>${escapeHtml(l.actor_name || 'Anônimo')}</div>${l.actor_role ? `<div class="text-sm text-soft">${l.actor_role === 'gerente' ? 'Administrador' : 'Cliente'}</div>` : ''}</td>
-              <td data-label="Ação"><span style="color:${auditActionBadgeColor(l.action)};font-weight:600">${escapeHtml(auditActionLabel(l.action))}</span></td>
-              <td data-label="Descrição" class="wrap-text">${escapeHtml(l.description)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>` : `<div class="empty-state">${Icons.audit}<p>Nenhum evento encontrado com esse filtro.</p></div>`}
+    <div class="mt-14">
+      ${filtered.length ? filtered.map((l) => `
+        <div class="extrato-row" style="align-items:flex-start">
+          <div style="min-width:0;flex:1 1 220px">
+            <div class="name" style="color:${auditActionBadgeColor(l.action)}">${escapeHtml(auditActionLabel(l.action))}</div>
+            <div class="meta">${escapeHtml(l.actor_name || 'Anônimo')}${l.actor_role ? ' · ' + (l.actor_role === 'gerente' ? 'Administrador' : 'Cliente') : ''} · ${formatDateTime(l.created_at)}</div>
+          </div>
+          <div style="min-width:0;flex:2 1 260px">
+            <div class="text-sm text-soft">${escapeHtml(l.description)}</div>
+          </div>
+        </div>
+      `).join('') : `<div class="empty-state">${Icons.audit}<p>Nenhum evento encontrado com esse filtro.</p></div>`}
     </div>
   `;
 

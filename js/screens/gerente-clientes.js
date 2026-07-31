@@ -58,38 +58,33 @@ function paintClientesScreen() {
       <p class="text-sm text-soft">${rows.length} cliente${rows.length === 1 ? '' : 's'}${term ? ' encontrado' + (rows.length === 1 ? '' : 's') : ''}</p>
     </div>
 
-    <div class="card mt-14" style="padding:0;overflow:hidden">
-      ${rows.length ? `
-      <table class="data-table table-scroll">
-        <thead><tr>
-          <th>Nome</th><th>CPF</th><th>Contato</th><th>Limite de crédito</th><th>Ações</th>
-        </tr></thead>
-        <tbody>
-          ${rows.map((c) => {
-            const p = c.profiles || {};
-            const phoneDigits = String(p.phone || '').replace(/\D/g, '');
-            const waUrl = phoneDigits ? `https://wa.me/${phoneDigits.startsWith('55') ? phoneDigits : '55' + phoneDigits}` : null;
-            return `
-            <tr>
-              <td data-label="Nome"><div class="flex items-center gap-8">${avatarHtml(p.full_name, 28)}<strong>${escapeHtml(p.full_name || '—')}</strong></div></td>
-              <td data-label="CPF" class="mono">${escapeHtml(formatCpf(p.cpf || '') || '—')}</td>
-              <td data-label="Contato" class="mobile-hide"><div><div>${escapeHtml(p.email || '')}</div><div class="text-sm text-soft">${escapeHtml(formatPhoneBR(p.phone || ''))}</div></div></td>
-              <td data-label="Limite" class="mono mobile-hide">${formatMoney(c.credit_limit)}</td>
-              <td data-label="Ações">
-                <div class="flex gap-8">
-                  ${clientesTab === 'pendente' ? `
-                    <button class="btn btn-primary btn-sm approve-client-btn" data-id="${c.profile_id}">Aprovar</button>
-                    <button class="btn btn-outline btn-sm reject-client-btn" data-id="${c.profile_id}">Rejeitar</button>
-                  ` : ''}
-                  <button class="icon-btn view-contracts-btn" data-id="${c.profile_id}" title="Ver contratos em aberto">${Icons.contract}</button>
-                  ${waUrl ? `<a class="icon-btn" href="${waUrl}" target="_blank" rel="noopener" title="Contatar via WhatsApp">${Icons.whatsapp}</a>` : ''}
-                  <button class="icon-btn row-more-btn" data-id="${c.profile_id}" title="Mais ações">${Icons.more}</button>
-                </div>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>` : `<div class="empty-state">${Icons.users}<p>Nenhum cliente ${clientesTab === 'pendente' ? 'pendente' : clientesTab === 'aprovado' ? 'aprovado' : 'rejeitado'}.</p></div>`}
+    <div class="mt-14">
+      ${rows.length ? rows.map((c) => {
+        const p = c.profiles || {};
+        const phoneDigits = String(p.phone || '').replace(/\D/g, '');
+        const waUrl = phoneDigits ? `https://wa.me/${phoneDigits.startsWith('55') ? phoneDigits : '55' + phoneDigits}` : null;
+        return `
+        <div class="extrato-row">
+          ${avatarHtml(p.full_name, 34)}
+          <div style="min-width:0;flex:1 1 auto">
+            <div class="name">${escapeHtml(p.full_name || '—')}</div>
+            <div class="meta">${escapeHtml(formatCpf(p.cpf || '') || '—')}${p.email ? ' · ' + escapeHtml(p.email) : ''}</div>
+          </div>
+          <div class="amt-wrap">
+            <div class="amt">${formatMoney(c.credit_limit)}</div>
+            <div class="text-sm text-soft">Limite de crédito</div>
+            <div class="flex gap-6 mt-8" style="justify-content:flex-end;flex-wrap:wrap">
+              ${clientesTab === 'pendente' ? `
+                <button class="btn btn-primary btn-sm approve-client-btn" data-id="${c.profile_id}">Aprovar</button>
+                <button class="btn btn-outline btn-sm reject-client-btn" data-id="${c.profile_id}">Rejeitar</button>
+              ` : ''}
+              <button class="icon-btn view-contracts-btn" data-id="${c.profile_id}" title="Ver contratos em aberto">${Icons.contract}</button>
+              ${waUrl ? `<a class="icon-btn" href="${waUrl}" target="_blank" rel="noopener" title="Contatar via WhatsApp">${Icons.whatsapp}</a>` : ''}
+              <button class="icon-btn row-more-btn" data-id="${c.profile_id}" title="Mais ações">${Icons.more}</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('') : `<div class="empty-state">${Icons.users}<p>Nenhum cliente ${clientesTab === 'pendente' ? 'pendente' : clientesTab === 'aprovado' ? 'aprovado' : 'rejeitado'}.</p></div>`}
     </div>
   `;
 
