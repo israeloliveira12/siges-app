@@ -77,6 +77,18 @@ async function onAuthenticated(session) {
     return;
   }
 
+  // Cliente que entrou pela primeira vez via Google (o OAuth só traz nome/
+  // e-mail, nunca CPF/telefone/empresa/etc.) precisa completar o mesmo
+  // formulário que o cadastro manual sempre exigiu, antes de ver a tela de
+  // "aguardando aprovação" — CPF ausente é o sinal (só acontece com Google,
+  // já que o cadastro manual sempre envia CPF obrigatório).
+  if (isCliente() && App.client && App.client.approval_status === 'pendente' && !App.profile.cpf) {
+    document.getElementById('app').classList.remove('ready');
+    document.getElementById('auth-screen').classList.add('active');
+    renderCompleteRegistrationScreen();
+    return;
+  }
+
   if (isCliente() && App.client && App.client.approval_status !== 'aprovado') {
     document.getElementById('app').classList.remove('ready');
     document.getElementById('auth-screen').classList.add('active');

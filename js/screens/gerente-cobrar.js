@@ -100,6 +100,17 @@ async function renderGerenteCobrar() {
     return;
   }
 
+  paintCobrar(root, { paymentsToday: paymentsToday || [], paymentsMonth: paymentsMonth || [], dueInstallments: dueInstallments || [], dueCycles: dueCycles || [] });
+}
+
+// Repintura pura (sem refetch) — usada pelas abas Tudo/Vence hoje/Atrasados,
+// que só mudam qual fatia da lista já carregada é exibida. Antes cada clique
+// de aba chamava renderGerenteCobrar() inteiro de novo (refetch completo),
+// dando a impressão de um F5 na tela a cada troca — bug real corrigido
+// (2026-07-30), mesmo padrão já usado em paintGerenteScore/paintPlanejamento.
+function paintCobrar(root, state) {
+  const { paymentsToday, paymentsMonth, dueInstallments, dueCycles } = state;
+  const today = todayISO();
   const sum = (rows, f) => (rows || []).reduce((s, r) => s + Number(r[f] || 0), 0);
 
   const items = [
@@ -179,9 +190,9 @@ async function renderGerenteCobrar() {
     </div>
   `;
 
-  document.getElementById('cobrar-tab-todos').onclick = () => { cobrarTab = 'todos'; renderGerenteCobrar(); };
-  document.getElementById('cobrar-tab-hoje').onclick = () => { cobrarTab = 'hoje'; renderGerenteCobrar(); };
-  document.getElementById('cobrar-tab-atrasados').onclick = () => { cobrarTab = 'atrasados'; renderGerenteCobrar(); };
+  document.getElementById('cobrar-tab-todos').onclick = () => { cobrarTab = 'todos'; paintCobrar(root, state); };
+  document.getElementById('cobrar-tab-hoje').onclick = () => { cobrarTab = 'hoje'; paintCobrar(root, state); };
+  document.getElementById('cobrar-tab-atrasados').onclick = () => { cobrarTab = 'atrasados'; paintCobrar(root, state); };
 
   root.querySelectorAll('.cobrar-item-btn').forEach((btn) => {
     btn.onclick = () => {

@@ -143,6 +143,104 @@ function renderLoginScreen() {
   };
 }
 
+// Cliente que entrou pela 1ª vez via Google — o OAuth só traz nome/e-mail,
+// então esta tela cobra os MESMOS campos obrigatórios do cadastro manual
+// (login.js, aba "Criar conta") antes de deixar o cliente ver a tela de
+// "cadastro em análise". Chamada por onAuthenticated() (auth.js) quando
+// approval_status ainda é 'pendente' e o CPF está ausente — único jeito de
+// chegar nesse estado é via Google, já que o cadastro manual sempre exige
+// CPF antes de enviar pro Supabase Auth.
+function renderCompleteRegistrationScreen() {
+  const root = document.getElementById('auth-screen');
+  root.innerHTML = `
+    <div class="auth-shell">
+      <div class="auth-card">
+        <div class="auth-logo">
+          ${Icons.logo}
+          <div class="name">SIGES</div>
+          <div class="sub">Serviços Financeiros</div>
+        </div>
+        <h3 style="text-align:center">Complete seu cadastro</h3>
+        <p class="text-sm text-soft text-center mt-8">Você entrou com o Google — falta só preencher os dados abaixo para enviarmos seu cadastro para aprovação de um administrador.</p>
+        <div id="auth-feedback" class="mt-14"></div>
+        <form id="complete-reg-form">
+          <div class="field mt-14">
+            <label>Nome completo</label>
+            <input type="text" id="cr-name" value="${escapeHtml((App.profile && App.profile.full_name) || '')}" required>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>CPF</label><input type="text" id="cr-cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" required></div>
+            <div class="field"><label>Telefone / WhatsApp</label><input type="tel" id="cr-phone" placeholder="(00) 00000-0000" required></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Empresa</label><input type="text" id="cr-company" required></div>
+            <div class="field"><label>Cargo</label><input type="text" id="cr-job-title" required></div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label>Renda Mensal</label>
+              <select id="cr-salary" required>
+                <option value="" disabled selected>Selecione...</option>
+                ${incomeBracketOptionsHtml(null, false)}
+              </select>
+            </div>
+            <div class="field">
+              <label>Grupo</label>
+              <select id="cr-group" required>
+                <option value="" disabled selected>Selecione...</option>
+                ${clientGroupOptionsHtml(null, false)}
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Chave Pix</label>
+            <input type="text" id="cr-pix-key" required>
+            <span class="help">Atenção: o CPF cadastrado acima deve ser o mesmo CPF do dono da chave Pix.</span>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block mt-14" id="cr-submit">Concluir cadastro</button>
+        </form>
+        <button class="btn btn-ghost btn-block mt-14" id="cr-signout">Sair</button>
+      </div>
+    </div>
+  `;
+
+  const cpfInput = document.getElementById('cr-cpf');
+  cpfInput.oninput = () => { cpfInput.value = formatCpf(cpfInput.value); };
+  attachPhoneMask(document.getElementById('cr-phone'));
+  document.getElementById('cr-signout').onclick = handleSignOut;
+
+  document.getElementById('complete-reg-form').onsubmit = (e) => {
+    e.preventDefault();
+    clearAuthFeedback();
+    withAuthButtonsDisabled(['cr-submit'], async () => {
+      const cpf = document.getElementById('cr-cpf').value.trim();
+      if (cpf.replace(/\D/g, '').length !== 11) { setAuthError('Informe um CPF válido (11 dígitos).'); return; }
+      const { error } = await supa.rpc('complete_client_registration', {
+        p_full_name: document.getElementById('cr-name').value.trim(),
+        p_cpf: cpf,
+        p_phone: document.getElementById('cr-phone').value.trim(),
+        p_company: document.getElementById('cr-company').value.trim(),
+        p_job_title: document.getElementById('cr-job-title').value.trim(),
+        p_salary: document.getElementById('cr-salary').value,
+        p_client_group: document.getElementById('cr-group').value,
+        p_pix_key: document.getElementById('cr-pix-key').value.trim(),
+      });
+      if (error) {
+        const msg = (error.message || '').includes('profiles_cpf_key') || (error.message || '').includes('duplicate key')
+          ? 'Já existe uma conta cadastrada com esse CPF.'
+          : (error.message || '').includes('MISSING_') || (error.message || '').includes('INVALID_')
+          ? 'Preencha todos os campos corretamente antes de continuar.'
+          : 'Ocorreu um erro. Tente novamente.';
+        setAuthError(msg);
+        return;
+      }
+      // Recarrega profile/client (agora completos) e deixa onAuthenticated()
+      // decidir a próxima tela (normalmente "cadastro em análise").
+      await onAuthenticated(App.session);
+    });
+  };
+}
+
 function renderPendingApprovalScreen(client) {
   const root = document.getElementById('auth-screen');
   const rejected = client.approval_status === 'rejeitado';

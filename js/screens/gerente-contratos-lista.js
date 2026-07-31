@@ -67,6 +67,8 @@ async function renderGerenteContratosLista() {
       </div>
     </div>
 
+    <p class="text-sm text-soft mt-8">${rows.length} contrato${rows.length === 1 ? '' : 's'}${contratosSearch.trim() ? ' encontrado' + (rows.length === 1 ? '' : 's') : ''}</p>
+
     <div class="card mt-14" style="padding:0">
       ${rows.length ? `
       <table class="data-table table-scroll">
@@ -81,7 +83,7 @@ async function renderGerenteContratosLista() {
             return `
             <tr class="contract-row" data-id="${c.id}" style="cursor:pointer">
               <td data-label="Contrato">#${c.contract_number}</td>
-              <td data-label="Cliente"><div class="flex items-center gap-8"><span class="row-dot" style="width:10px;height:10px;background:${{ em_aberto: 'var(--brand)', atrasado: 'var(--bad)', quitado: 'var(--good)', perda: 'var(--bad)' }[c.status] || 'var(--line)'}"></span>${avatarHtml((c.clients.profiles || {}).full_name, 26)}<span>${escapeHtml((c.clients.profiles || {}).full_name || '—')}</span></div></td>
+              <td data-label="Cliente"><div class="flex items-center gap-8">${avatarHtml((c.clients.profiles || {}).full_name, 26)}<span>${escapeHtml((c.clients.profiles || {}).full_name || '—')}</span></div></td>
               <td data-label="Aporte" class="mono mobile-hide">${formatMoney(c.principal_amount)}</td>
               <td data-label="Dívida atual" class="mono">${formatMoney(outstanding)}</td>
               <td data-label="Juros" class="mobile-hide">${formatNumber(c.interest_rate, 2)}%</td>
@@ -142,11 +144,11 @@ async function renderGerenteContratoDetalhe(params) {
       <div class="flex justify-between items-center" style="flex-wrap:wrap">
         <div>
           <h3>Contrato #${contract.contract_number} — ${escapeHtml(p.full_name || '')}</h3>
-          <div class="text-sm text-soft">CPF ${escapeHtml(p.cpf || '—')} · ${escapeHtml(p.phone || '')} · Contrato firmado em ${formatDate(contract.contract_date)}</div>
+          <div class="text-sm text-soft">CPF ${escapeHtml(p.cpf || '—')} · ${escapeHtml(p.phone || '')} · Contrato firmado em ${formatDate(contract.contract_date)} · ${contract.installments_count}x ${dueTypeLabel(contract.due_type, contract.custom_interval_days)}</div>
         </div>
         <div class="flex items-center gap-8" style="flex-wrap:wrap">
           ${statusBadge(contract.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[contract.status])}
-          <button class="btn btn-outline btn-sm" id="print-extrato-btn">${Icons.printer} Extrato PDF</button>
+          <button class="btn btn-outline btn-sm" id="print-extrato-btn">${Icons.printer} Extrato</button>
           <button class="btn btn-outline btn-sm" id="edit-contract-btn">${Icons.edit} Editar contrato</button>
           <button class="btn btn-outline btn-sm" id="delete-contract-btn" style="color:var(--bad)">${Icons.trash} Excluir contrato</button>
         </div>
@@ -170,7 +172,7 @@ async function renderGerenteContratoDetalhe(params) {
     <div class="card mt-14">
       <div class="flex justify-between items-center">
         <h3>Parcelas</h3>
-        <button class="btn btn-outline btn-sm" id="print-promissorias-btn">${Icons.printer} Notas promissórias (PDF)</button>
+        <button class="btn btn-outline btn-sm" id="print-promissorias-btn">${Icons.printer} Nota Promissória</button>
       </div>
       <table class="data-table table-scroll mt-8">
         <thead><tr><th>Nº</th><th>Vencimento</th><th>Capital</th><th>Juros</th><th>Total</th><th>Status</th><th></th></tr></thead>
@@ -202,10 +204,9 @@ async function renderGerenteContratoDetalhe(params) {
                   <div class="flex gap-8">
                     ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada') ? `
                       <button class="btn btn-accent btn-sm receive-cycle-btn" data-id="${currentCycle.id}">Receber</button>
-                      <button class="btn btn-outline btn-sm mark-loss-btn" style="color:var(--bad)" data-type="cycle" data-id="${currentCycle.id}" data-amount="${capital}" data-label="Renovação ${currentCycle.cycle_number}">Marcar como perda</button>
                     ` : ''}
-                    ${currentCycle.status === 'perda' ? `
-                      <button class="btn btn-outline btn-sm revert-loss-btn" data-type="cycle" data-id="${currentCycle.id}" data-label="Renovação ${currentCycle.cycle_number}">Reverter perda</button>
+                    ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada' || currentCycle.status === 'perda') ? `
+                      <button class="icon-btn cycle-loss-btn" data-status="${currentCycle.status}" data-id="${currentCycle.id}" data-amount="${capital}" data-label="Renovação ${currentCycle.cycle_number}" title="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'}">${Icons.edit}</button>
                     ` : ''}
                   </div>
                 </td>
@@ -214,7 +215,6 @@ async function renderGerenteContratoDetalhe(params) {
             }
             const st = effectiveInstallmentStatus(i.status, i.due_date);
             const isPartial = st !== 'paga' && (i.principal_paid_partial > 0 || i.interest_paid_partial > 0);
-            const lossAmount = Math.max(0, Number(i.principal_share) - Number(i.principal_paid_partial || 0));
             return `
             <tr>
               <td data-label="Nº">${i.sequence_number}</td>
@@ -227,10 +227,6 @@ async function renderGerenteContratoDetalhe(params) {
                 <div class="flex gap-8">
                   ${(i.status === 'pendente' || i.status === 'atrasada') ? `
                     <button class="btn btn-accent btn-sm receive-inst-btn" data-id="${i.id}">Receber</button>
-                    <button class="btn btn-outline btn-sm mark-loss-btn" style="color:var(--bad)" data-type="installment" data-id="${i.id}" data-amount="${lossAmount}" data-label="Parcela ${i.sequence_number}">Marcar como perda</button>
-                  ` : ''}
-                  ${i.status === 'perda' ? `
-                    <button class="btn btn-outline btn-sm revert-loss-btn" data-type="installment" data-id="${i.id}" data-label="Parcela ${i.sequence_number}">Reverter perda</button>
                   ` : ''}
                   <button class="icon-btn edit-inst-btn" data-id="${i.id}" title="Editar/reagendar parcela">${Icons.edit}</button>
                 </div>
@@ -301,45 +297,25 @@ async function renderGerenteContratoDetalhe(params) {
   root.querySelectorAll('.edit-inst-btn').forEach((btn) => {
     btn.onclick = () => {
       const inst = (installments || []).find((i) => i.id === btn.dataset.id);
-      openEditInstallmentModal(inst, () => renderGerenteContratoDetalhe(params));
+      openEditInstallmentModal(inst, contract, () => renderGerenteContratoDetalhe(params));
     };
   });
   root.querySelectorAll('.receive-cycle-btn').forEach((btn) => {
     btn.onclick = () => openReceberModal({ sourceType: 'renewal_cycle', id: btn.dataset.id, contract }, () => renderGerenteContratoDetalhe(params));
   });
-  root.querySelectorAll('.mark-loss-btn').forEach((btn) => {
-    btn.onclick = () => {
-      const isCycle = btn.dataset.type === 'cycle';
-      openLossActionModal({
-        title: 'Marcar como perda',
-        message: `Confirma marcar "<strong>${escapeHtml(btn.dataset.label)}</strong>" do contrato #${contract.contract_number} como perda? <strong>${formatMoney(Number(btn.dataset.amount))}</strong> de capital não recuperado será abatido do lucro líquido do mês. Se o cliente pagar depois, use "Reverter perda" pra corrigir.`,
-        confirmLabel: 'Marcar como perda',
-        rpcName: isCycle ? 'mark_cycle_loss' : 'mark_installment_loss',
-        rpcParam: isCycle ? { p_cycle_id: btn.dataset.id } : { p_installment_id: btn.dataset.id },
-        auditAction: 'perda_manual',
-        auditMessage: `${btn.dataset.label} do contrato #${contract.contract_number} marcada como perda (${formatMoney(Number(btn.dataset.amount))})`,
-        contractId: contract.id,
-        successMessage: 'Marcado como perda.',
-        onDone: () => renderGerenteContratoDetalhe(params),
-      });
-    };
-  });
-  root.querySelectorAll('.revert-loss-btn').forEach((btn) => {
-    btn.onclick = () => {
-      const isCycle = btn.dataset.type === 'cycle';
-      openLossActionModal({
-        title: 'Reverter perda',
-        message: `Confirma reverter a perda de "<strong>${escapeHtml(btn.dataset.label)}</strong>" do contrato #${contract.contract_number}? Ela volta a aparecer no Cobrar normalmente. O abatimento já contabilizado no lucro do mês em que a perda foi reconhecida não é alterado retroativamente.`,
-        confirmLabel: 'Reverter perda',
-        rpcName: isCycle ? 'revert_cycle_loss' : 'revert_installment_loss',
-        rpcParam: isCycle ? { p_cycle_id: btn.dataset.id } : { p_installment_id: btn.dataset.id },
-        auditAction: 'perda_revertida',
-        auditMessage: `Perda revertida em ${btn.dataset.label} do contrato #${contract.contract_number}`,
-        contractId: contract.id,
-        successMessage: 'Perda revertida.',
-        onDone: () => renderGerenteContratoDetalhe(params),
-      });
-    };
+  // O botão "Marcar como perda" saiu da linha da tabela (poluía o visual,
+  // 2026-07-30) — pra ciclo de renovação (que nunca teve um botão de editar,
+  // decisão anterior de deixar a edição de ciclo de fora) virou um ícone
+  // dedicado que já abre direto a confirmação de marcar/reverter perda. Pra
+  // parcela normal, a mesma ação foi pra dentro do modal de "Editar/
+  // reagendar parcela" (ver openEditInstallmentModal) — reaproveita o botão
+  // de editar (caneta) que já existia, em vez de mais um botão na linha.
+  root.querySelectorAll('.cycle-loss-btn').forEach((btn) => {
+    btn.onclick = () => openMarkOrRevertLossModal({
+      isCycle: true, isLoss: btn.dataset.status === 'perda',
+      id: btn.dataset.id, amount: btn.dataset.amount, label: btn.dataset.label,
+      contract, onDone: () => renderGerenteContratoDetalhe(params),
+    });
   });
   root.querySelectorAll('.edit-payment-fee-btn').forEach((btn) => {
     btn.onclick = () => {
@@ -447,7 +423,11 @@ function openDeleteContratoConfirm(contract) {
   };
 }
 
-function openEditInstallmentModal(installment, onDone) {
+function openEditInstallmentModal(installment, contract, onDone) {
+  // Parcela "acionável" pra perda: só pendente/atrasada (pode marcar) ou já
+  // perda (pode reverter) — paga/renovada/cancelada não tem essa opção.
+  const canLossAction = ['pendente', 'atrasada', 'perda'].includes(installment.status);
+  const lossAmount = Math.max(0, Number(installment.principal_share) - Number(installment.principal_paid_partial || 0));
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
@@ -468,15 +448,30 @@ function openEditInstallmentModal(installment, onDone) {
         ` : ''}
         <p class="text-sm text-soft">Novo total da parcela: <strong class="mono" id="ei-total-preview">${formatMoney(installment.amount_due)}</strong></p>
       </div>
-      <div class="modal-foot">
-        <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
-        <button class="btn btn-primary" id="save-modal">Salvar</button>
+      <div class="modal-foot" style="justify-content:space-between">
+        ${canLossAction ? `<button class="btn btn-outline btn-sm" id="ei-loss-btn" style="color:var(--bad)">${installment.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'}</button>` : '<span></span>'}
+        <div class="flex gap-10">
+          <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
+          <button class="btn btn-primary" id="save-modal">Salvar</button>
+        </div>
       </div>
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
+
+  const lossBtn = document.getElementById('ei-loss-btn');
+  if (lossBtn) {
+    lossBtn.onclick = () => {
+      close();
+      openMarkOrRevertLossModal({
+        isCycle: false, isLoss: installment.status === 'perda',
+        id: installment.id, amount: lossAmount, label: `Parcela ${installment.sequence_number}`,
+        contract, onDone,
+      });
+    };
+  }
 
   const principalInput = document.getElementById('ei-principal');
   const interestInput = document.getElementById('ei-interest');
@@ -615,6 +610,39 @@ function openLossActionModal({ title, message, confirmLabel, rpcName, rpcParam, 
     showToast(successMessage);
     if (typeof onDone === 'function') onDone();
   };
+}
+
+// Monta a mensagem/RPC certa (marcar vs reverter, parcela vs ciclo) e delega
+// pro modal de confirmação genérico acima — usado tanto pelo ícone de perda
+// do ciclo de renovação quanto pelo botão dentro do modal de editar parcela.
+function openMarkOrRevertLossModal({ isCycle, isLoss, id, amount, label, contract, onDone }) {
+  if (isLoss) {
+    openLossActionModal({
+      title: 'Reverter perda',
+      message: `Confirma reverter a perda de "<strong>${escapeHtml(label)}</strong>" do contrato #${contract.contract_number}? Ela volta a aparecer no Cobrar normalmente. O abatimento já contabilizado no lucro do mês em que a perda foi reconhecida não é alterado retroativamente.`,
+      confirmLabel: 'Reverter perda',
+      rpcName: isCycle ? 'revert_cycle_loss' : 'revert_installment_loss',
+      rpcParam: isCycle ? { p_cycle_id: id } : { p_installment_id: id },
+      auditAction: 'perda_revertida',
+      auditMessage: `Perda revertida em ${label} do contrato #${contract.contract_number}`,
+      contractId: contract.id,
+      successMessage: 'Perda revertida.',
+      onDone,
+    });
+  } else {
+    openLossActionModal({
+      title: 'Marcar como perda',
+      message: `Confirma marcar "<strong>${escapeHtml(label)}</strong>" do contrato #${contract.contract_number} como perda? <strong>${formatMoney(Number(amount))}</strong> de capital não recuperado será abatido do lucro líquido do mês. Se o cliente pagar depois, use "Reverter perda" pra corrigir.`,
+      confirmLabel: 'Marcar como perda',
+      rpcName: isCycle ? 'mark_cycle_loss' : 'mark_installment_loss',
+      rpcParam: isCycle ? { p_cycle_id: id } : { p_installment_id: id },
+      auditAction: 'perda_manual',
+      auditMessage: `${label} do contrato #${contract.contract_number} marcada como perda (${formatMoney(Number(amount))})`,
+      contractId: contract.id,
+      successMessage: 'Marcado como perda.',
+      onDone,
+    });
+  }
 }
 
 registerRoute('gerente/contratos/:id', { role: 'gerente', screenId: 'gerente-contratos', title: 'Detalhe do Contrato', render: renderGerenteContratoDetalhe });

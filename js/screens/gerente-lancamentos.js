@@ -7,6 +7,7 @@
 
 let futurosDataLimite = '';
 let futurosTipo = 'todos'; // 'todos' | 'parcela' | 'renovacao'
+let futurosSearch = '';
 
 async function renderGerenteLancamentos() {
   const root = document.getElementById('screen-gerente-lancamentos');
@@ -24,6 +25,8 @@ async function renderGerenteLancamentos() {
   paintLancamentosFuturos(root, installments || [], cycles || []);
 }
 
+// Repintura pura (sem refetch) — os 3 filtros (data limite, tipo, busca) só
+// mudam o que já está em memória, mesmo padrão de paintCobrar/paintGerenteScore.
 function paintLancamentosFuturos(root, installments, cycles) {
   const today = todayISO();
 
@@ -52,11 +55,19 @@ function paintLancamentosFuturos(root, installments, cycles) {
 
   if (futurosTipo !== 'todos') items = items.filter((i) => i.tipo === futurosTipo);
   if (futurosDataLimite) items = items.filter((i) => i.data <= futurosDataLimite);
+  const term = futurosSearch.trim().toLowerCase();
+  if (term) items = items.filter((i) => i.descricao.toLowerCase().includes(term) || String(i.contractNumber || '').includes(term));
   items.sort((a, b) => a.data.localeCompare(b.data));
 
   const previsaoEntradas = items.reduce((s, i) => s + i.valor, 0);
 
   const diasRestantes = (dataStr) => Math.round((new Date(dataStr) - new Date(today)) / 86400000);
+
+  // Preserva foco/cursor da busca entre repaints (debounced, recria o
+  // <input> a cada tecla) — mesmo padrão já usado em Clientes/Contratos.
+  const searchElBefore = document.getElementById('futuros-search');
+  const hadFocus = !!searchElBefore && document.activeElement === searchElBefore;
+  const cursorPos = hadFocus ? searchElBefore.selectionStart : null;
 
   root.innerHTML = `
     <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:8px">
@@ -73,6 +84,7 @@ function paintLancamentosFuturos(root, installments, cycles) {
           <option value="renovacao" ${futurosTipo === 'renovacao' ? 'selected' : ''}>Renovação</option>
         </select>
       </div>
+      <div class="field"><label>Buscar</label><input type="text" id="futuros-search" placeholder="Cliente ou nº contrato" value="${escapeHtml(futurosSearch)}"></div>
     </div>
 
     <div class="card mt-14" style="padding:0">
@@ -98,8 +110,11 @@ function paintLancamentosFuturos(root, installments, cycles) {
     </div>
   `;
 
-  document.getElementById('futuros-data-limite').onchange = (e) => { futurosDataLimite = e.target.value; renderGerenteLancamentos(); };
-  document.getElementById('futuros-tipo').onchange = (e) => { futurosTipo = e.target.value; renderGerenteLancamentos(); };
+  document.getElementById('futuros-data-limite').onchange = (e) => { futurosDataLimite = e.target.value; paintLancamentosFuturos(root, installments, cycles); };
+  document.getElementById('futuros-tipo').onchange = (e) => { futurosTipo = e.target.value; paintLancamentosFuturos(root, installments, cycles); };
+  const searchEl = document.getElementById('futuros-search');
+  searchEl.oninput = debounce((e) => { futurosSearch = e.target.value; paintLancamentosFuturos(root, installments, cycles); }, 250);
+  if (hadFocus) { searchEl.focus(); if (cursorPos != null) searchEl.setSelectionRange(cursorPos, cursorPos); }
 }
 
 registerRoute('gerente/lancamentos', { role: 'gerente', screenId: 'gerente-lancamentos', title: 'Lançamentos Futuros', render: renderGerenteLancamentos });
