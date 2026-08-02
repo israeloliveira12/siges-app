@@ -125,7 +125,14 @@ async function onAuthenticated(session) {
   // a UI. O botão "Recalcular todos" em gerente-score.js continua existindo
   // pra forçar um recálculo manual a qualquer momento.
   if (isGerente()) {
-    supa.rpc('recalculate_all_scores').catch(() => { /* falha silenciosa — o botão manual continua disponível */ });
+    // supa.rpc(...) devolve um builder "thenable" do supabase-js (só
+    // implementa .then, não é uma Promise de verdade) — encadear .catch()
+    // direto nele lança "TypeError: ... .catch is not a function" na hora,
+    // e como ninguém aguarda onAuthenticated(), isso virava uma rejeição de
+    // Promise não tratada em todo login de gerente (bug real reportado pelo
+    // usuário via Auditoria, 2026-08-02). .then(onFulfilled, onRejected) é a
+    // forma do contrato "thenable" que realmente existe nesse objeto.
+    supa.rpc('recalculate_all_scores').then(() => {}, () => { /* falha silenciosa — o botão manual continua disponível */ });
   }
 }
 
