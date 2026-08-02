@@ -352,8 +352,13 @@ button { cursor: pointer; }
 .stat-card-compact .label { font-size: 11px; }
 .stat-card-compact .value { font-size: 17px; margin-top: 2px; }
 
-.overview-card { cursor: pointer; transition: box-shadow .15s, transform .15s; }
-.overview-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+/* Antes usava sombra + leve elevação no hover, único lugar do Dashboard que
+   fazia isso — todo o resto do sistema (linhas de lista, outros cards)
+   sinaliza interação só com a borda acendendo, então esses 2 cards
+   "pesavam" diferente dos vizinhos no mesmo grid (2026-07-31, feedback
+   real do usuário). Unificado pra borda, igual .extrato-row:hover. */
+.overview-card { cursor: pointer; transition: border-color .15s; }
+.overview-card:hover { border-color: var(--brand); }
 .overview-card-link {
   display: inline-flex; align-items: center; gap: 3px; margin-top: 10px;
   font-weight: 600; color: var(--ink-soft);
@@ -517,6 +522,25 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .bar-wrap { background: var(--bg); border-radius: 6px; height: 9px; overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); border-radius: 6px 0 0 6px; }
 .bar-fill.over { background: var(--bad); }
+
+/* ---------------------------------------------------------------------------
+   Gráfico de área com crosshair + tooltip (charts.js, areaChartSVG)
+--------------------------------------------------------------------------- */
+
+.area-chart { position: relative; }
+.area-chart-tooltip {
+  /* Fundo fixo (--hero-dark, não var(--ink)) — um tooltip escuro precisa
+     continuar escuro nos dois temas; --ink vira claro no modo escuro, o que
+     deixaria o texto branco ilegível em cima dele (mesmo cuidado já usado
+     no hero do Dashboard/Score e no toast). */
+  position: absolute; pointer-events: none; background: var(--hero-dark); color: #fff;
+  border-radius: 9px; padding: 7px 10px; font-size: 12px; opacity: 0;
+  transform: translate(-50%, -100%); transition: opacity .1s; white-space: nowrap;
+  z-index: 5; box-shadow: 0 8px 20px rgba(0,0,0,.25);
+}
+.area-chart-tooltip-val { font-family: var(--mono); font-weight: 700; font-size: 13px; }
+.area-chart-tooltip-lbl { font-size: 10.5px; color: rgba(255,255,255,.65); margin-top: 1px; }
+.area-chart-tooltip-key { display: inline-block; width: 9px; height: 2px; margin-right: 6px; vertical-align: middle; border-radius: 1px; }
 
 /* ---------------------------------------------------------------------------
    Toast

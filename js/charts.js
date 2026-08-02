@@ -64,8 +64,11 @@ function lineChartSVG(series, opts = {}) {
   </svg>`;
 }
 
-// Curva suave (Q por ponto médio) com área preenchida — usada em projeções
-// (poucos pontos, valores sempre visíveis, sem depender só do tooltip).
+// Área preenchida com crosshair + tooltip no hover — usada em projeções e
+// tendências (Dashboard). Chame initAreaCharts(root) depois de inserir o
+// HTML no DOM pra ligar a interação (mesmo padrão de attachMoneyMask/
+// wirePasswordToggles: função de wiring chamada explicitamente pela tela).
+let areaChartSeq = 0;
 function areaChartSVG(series, opts = {}) {
   const w = opts.width || 600, h = opts.height || 220, pad = 32;
   const fmt = opts.valueFormatter || formatMoney;
@@ -77,76 +80,121 @@ function areaChartSVG(series, opts = {}) {
   const y = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
   const points = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
 
-  const smoothPath = (pts) => {
-    if (pts.length < 2) return `M ${pts[0].x} ${pts[0].y}`;
-    let d = `M ${pts[0].x} ${pts[0].y}`;
-    for (let i = 1; i < pts.length - 1; i++) {
-      const midX = (pts[i].x + pts[i + 1].x) / 2;
-      const midY = (pts[i].y + pts[i + 1].y) / 2;
-      d += ` Q ${pts[i].x} ${pts[i].y} ${midX} ${midY}`;
-    }
-    const last = pts[pts.length - 1];
-    d += ` Q ${last.x} ${last.y} ${last.x} ${last.y}`;
-    return d;
-  };
-
-  const linePath = smoothPath(points);
-  const areaPath = `${linePath} L ${points[points.length - 1].x} ${h - pad} L ${points[0].x} ${h - pad} Z`;
+  // Segmentos retos ligando os pontos reais — a curva Bézier-por-ponto-médio
+  // usada antes "cortava o canto" de qualquer pico isolado (a linha desenhada
+  // nunca passava pelo ponto em si, só perto dele), fazendo o ponto/rótulo
+  // parecerem flutuar acima da linha em picos altos — bug real reportado
+  // pelo usuário com print (2026-07-31). Reta é a garantia mais simples de
+  // que a linha SEMPRE toca cada dado.
+  const linePath = points.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - pad} L ${points[0].x.toFixed(1)} ${h - pad} Z`;
 
   const gridLines = [0, 0.5, 1].map((f) => {
     const yy = pad + f * (h - pad * 2);
     return `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${w - pad}" y2="${yy.toFixed(1)}" stroke="${CHART_COLORS.line}" stroke-width="1"/>`;
   }).join('');
 
-  // Mesmo critério de esparsamento do barChartSVG/lineChartSVG — com séries
-  // longas (ex: 30 dias) mostrar rótulo em todo ponto vira poluição visual
-  // ilegível, então só 1 a cada N pontos ganha rótulo estático (o valor
-  // continua acessível via <title> no ponto, ao passar o mouse).
+  // Mesmo critério de esparsamento do barChartSVG/lineChartSVG pro eixo X —
+  // com séries longas (ex: 30 dias), rótulo em todo ponto vira ilegível.
   const shouldShowLabel = (i) => series.length <= 10 || i % Math.ceil(series.length / 8) === 0;
-
   const labels = series.map((p, i) => shouldShowLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>` : '').join('');
-  // Rótulo de valor: sempre acima do ponto, com halo branco atrás e cor fixa
-  // (--ink), nunca a mesma cor da linha — testado com valores caindo exatamente
-  // sobre a linha e ficando ilegíveis quando usavam a mesma cor.
-  //
-  // Critério diferente do esparsamento por índice usado no eixo X: aqui o
-  // rótulo aparece em TODO ponto com valor > 0 (ex: dia com recebimento),
-  // pulando só pontos zerados (sem informação nenhuma pra mostrar) — e só
-  // deixa de mostrar um ponto não-zero se ele cair perto demais do último
-  // rótulo já desenhado (evita sobrepor texto quando há muitos dias
-  // seguidos com valor). Antes disso o critério era "1 a cada N pontos"
-  // fixo, que podia pular exatamente os dias com pico de valor e mostrar
-  // só zeros — motivo real da reclamação "muitos picos sem número".
-  const valueLabelMinGap = 46;
-  let lastValueLabelX = -Infinity;
+
+  // Rótulo de VALOR estático: só no pico do período e no último ponto — o
+  // resto vive no hover (crosshair + tooltip, initAreaCharts abaixo). Antes
+  // disso, quase todo ponto não-zero ganhava um número (só evitava sobrepor
+  // por distância em X), lotando a tela de valores competindo entre si numa
+  // série de 30 dias — a reclamação real era exatamente essa poluição
+  // visual. Halo (stroke branco) atrás do texto continua, pros 2 rótulos
+  // que sobram nunca ficarem ilegíveis em cima da linha/grade.
+  let peakIdx = 0;
+  series.forEach((p, i) => { if (p.value > series[peakIdx].value) peakIdx = i; });
+  const lastIdx = series.length - 1;
+  const staticLabelIdxs = new Set([peakIdx, lastIdx]);
   const valueLabels = series.map((p, i) => {
-    if (p.value <= 0) return '';
+    if (!staticLabelIdxs.has(i) || p.value <= 0) return '';
     const xi = x(i);
-    if (xi - lastValueLabelX < valueLabelMinGap) return '';
-    lastValueLabelX = xi;
     const ly = Math.max(12, y(p.value) - 12).toFixed(1);
+    const anchor = i === lastIdx && i !== peakIdx ? 'end' : 'middle';
     const txt = escapeHtml(fmt(p.value));
     return `
-      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="none" stroke="var(--panel)" stroke-width="3" text-anchor="middle" font-weight="700" paint-order="stroke">${txt}</text>
-      <text x="${xi.toFixed(1)}" y="${ly}" font-size="10.5" fill="var(--ink)" text-anchor="middle" font-weight="700">${txt}</text>
+      <text x="${xi.toFixed(1)}" y="${ly}" font-size="11" fill="none" stroke="var(--panel)" stroke-width="3" text-anchor="${anchor}" font-weight="700" paint-order="stroke">${txt}</text>
+      <text x="${xi.toFixed(1)}" y="${ly}" font-size="11" fill="var(--ink)" text-anchor="${anchor}" font-weight="700">${txt}</text>
     `;
   }).join('');
-  const dots = series.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${series.length > 15 ? 2.2 : 3.5}" fill="var(--panel)" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
 
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">
-    <defs>
-      <linearGradient id="areaGrad${opts.gradId || ''}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
-      </linearGradient>
-    </defs>
-    ${gridLines}
-    <path d="${areaPath}" fill="url(#areaGrad${opts.gradId || ''})"/>
-    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>
-    ${dots}
-    ${valueLabels}
-    ${labels}
-  </svg>`;
+  // Ponto = "superfície" (preenchido com a cor do painel) + anel na cor da
+  // série — some no hover como um marcador maior, nunca some/aparece do zero.
+  const dotR = series.length > 15 ? 2.6 : 3.6;
+  const dots = series.map((p, i) => `<circle class="area-chart-dot" data-x="${points[i].x.toFixed(1)}" data-y="${points[i].y.toFixed(1)}" data-value="${p.value}" data-label="${escapeHtml(p.label || '')}" cx="${points[i].x.toFixed(1)}" cy="${points[i].y.toFixed(1)}" r="${dotR}" fill="var(--panel)" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
+
+  const chartId = 'ac' + (++areaChartSeq);
+  return `<div class="area-chart" data-chart-id="${chartId}" data-dot-r="${dotR}" data-dot-r-active="${dotR + 1.8}" data-fmt="${opts.valueFormatterName === 'number' ? 'number' : 'money'}">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block" class="area-chart-svg">
+      <defs>
+        <linearGradient id="areaGrad${opts.gradId || ''}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+        </linearGradient>
+      </defs>
+      ${gridLines}
+      <path d="${areaPath}" fill="url(#areaGrad${opts.gradId || ''})"/>
+      <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <line class="area-chart-crosshair" x1="0" y1="${pad}" x2="0" y2="${h - pad}" stroke="var(--ink-soft)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+      <g>${dots}</g>
+      ${valueLabels}
+      ${labels}
+    </svg>
+    <div class="area-chart-tooltip"><span class="area-chart-tooltip-key" style="background:${color}"></span><span class="area-chart-tooltip-val"></span><div class="area-chart-tooltip-lbl"></div></div>
+  </div>`;
+}
+
+// Liga o crosshair + tooltip de hover em todo .area-chart dentro de `root`
+// (chame depois de inserir o HTML no DOM — o innerHTML não preserva
+// listeners, então isso precisa rodar a cada render, igual attachMoneyMask/
+// wirePasswordToggles). Sem gate de "já ligado": cada render recria os
+// elementos do zero (novo innerHTML), então os listeners antigos já foram
+// descartados junto com os nós antigos — não há o que vazar.
+function initAreaCharts(root) {
+  (root || document).querySelectorAll('.area-chart').forEach((wrap) => {
+    const svg = wrap.querySelector('.area-chart-svg');
+    const crosshair = wrap.querySelector('.area-chart-crosshair');
+    const dots = Array.from(wrap.querySelectorAll('.area-chart-dot'));
+    const tooltip = wrap.querySelector('.area-chart-tooltip');
+    if (!svg || !dots.length || !tooltip) return;
+    const valEl = tooltip.querySelector('.area-chart-tooltip-val');
+    const lblEl = tooltip.querySelector('.area-chart-tooltip-lbl');
+    const baseR = Number(wrap.dataset.dotR);
+    const activeR = Number(wrap.dataset.dotRActive);
+    const fmtFn = wrap.dataset.fmt === 'number' ? formatNumber : formatMoney;
+    const vb = svg.viewBox.baseVal;
+
+    const move = (clientX) => {
+      const rect = svg.getBoundingClientRect();
+      const px = ((clientX - rect.left) / rect.width) * vb.width;
+      let nearest = dots[0], bestDist = Infinity;
+      dots.forEach((d) => {
+        const dist = Math.abs(Number(d.dataset.x) - px);
+        if (dist < bestDist) { bestDist = dist; nearest = d; }
+      });
+      const px2 = Number(nearest.dataset.x), py = Number(nearest.dataset.y);
+      crosshair.setAttribute('x1', px2); crosshair.setAttribute('x2', px2); crosshair.setAttribute('opacity', 1);
+      dots.forEach((d) => d.setAttribute('r', d === nearest ? activeR : baseR));
+      valEl.textContent = fmtFn(Number(nearest.dataset.value));
+      lblEl.textContent = nearest.dataset.label;
+      tooltip.style.left = ((px2 / vb.width) * 100) + '%';
+      tooltip.style.top = ((py / vb.height) * 100) + '%';
+      tooltip.style.opacity = '1';
+    };
+    const leave = () => {
+      crosshair.setAttribute('opacity', 0);
+      tooltip.style.opacity = '0';
+      dots.forEach((d) => d.setAttribute('r', baseR));
+    };
+    wrap.addEventListener('mousemove', (e) => move(e.clientX));
+    wrap.addEventListener('mouseleave', leave);
+    wrap.addEventListener('touchmove', (e) => { if (e.touches[0]) move(e.touches[0].clientX); e.preventDefault(); }, { passive: false });
+    wrap.addEventListener('touchend', leave);
+  });
 }
 
 function barChartSVG(series, opts = {}) {

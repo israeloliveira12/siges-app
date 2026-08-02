@@ -394,6 +394,8 @@ async function renderGerenteDashboard() {
       </div>
     </div>
   `;
+
+  initAreaCharts(root);
 }
 
 registerRoute('gerente/dashboard', { role: 'gerente', screenId: 'gerente-dashboard', title: 'Dashboard', render: renderGerenteDashboard });
