@@ -273,9 +273,17 @@ async function renderGerenteDashboard() {
 
   root.innerHTML = `
     <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
-      <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>
-      <div class="mono" style="font-size:38px;font-weight:800;margin-top:6px;letter-spacing:-0.01em">${formatMoney(lucroMes)}</div>
-      <div style="font-size:13px;margin-top:8px;opacity:.95">${trendBadgeHtml(lucroMes, lucroPrevPeriod, true)} <span style="opacity:.8">vs. mesmo período do mês passado</span></div>
+      <div class="flex justify-between items-start" style="gap:20px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>
+          <div style="font-size:38px;font-weight:800;margin-top:6px;letter-spacing:-0.01em;font-variant-numeric:proportional-nums">${formatMoney(lucroMes)}</div>
+          <div style="font-size:13px;margin-top:8px;opacity:.95">${trendBadgeHtml(lucroMes, lucroPrevPeriod, true)} <span style="opacity:.8">vs. mesmo período do mês passado</span></div>
+        </div>
+        <div style="flex:none">
+          <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.65;text-align:right;margin-bottom:4px">Últimos 12 dias</div>
+          ${sparklineSVG(trendSeries.slice(-12))}
+        </div>
+      </div>
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)${perdaMes > 0 ? ` + ${formatMoney(perdaMes)} em capital perdido` : ''}</div>
     </div>
 
@@ -317,23 +325,21 @@ async function renderGerenteDashboard() {
     </div>
 
     <div class="grid grid-2 mt-14">
-      <div class="card" style="border-color:var(--bad)">
-        <div class="flex justify-between items-center">
-          <div>
-            <div class="label text-soft text-sm">Vence hoje / atrasados</div>
-            <div class="value mono" style="font-size:20px">${totalVencidosAtrasados}</div>
-          </div>
-          <button class="btn btn-danger btn-sm" onclick="router.navigate('#/gerente/cobrar')">Ir para Cobrar</button>
+      <div class="card flex items-center gap-14" style="border-color:var(--bad)">
+        <div class="action-icon danger">${Icons.alarm}</div>
+        <div style="flex:1">
+          <div class="label text-soft text-sm">Vence hoje / atrasados</div>
+          <div class="value mono" style="font-size:20px">${totalVencidosAtrasados}</div>
         </div>
+        <button class="btn btn-danger btn-sm" onclick="router.navigate('#/gerente/cobrar')">Ir para Cobrar</button>
       </div>
-      <div class="card">
-        <div class="flex justify-between items-center">
-          <div>
-            <div class="label text-soft text-sm">Solicitações pendentes</div>
-            <div class="value mono" style="font-size:20px">${pendingRequests || 0}</div>
-          </div>
-          <button class="btn btn-outline btn-sm" onclick="router.navigate('#/gerente/solicitacoes')">Analisar</button>
+      <div class="card flex items-center gap-14">
+        <div class="action-icon neutral">${Icons.inbox}</div>
+        <div style="flex:1">
+          <div class="label text-soft text-sm">Solicitações pendentes</div>
+          <div class="value mono" style="font-size:20px">${pendingRequests || 0}</div>
         </div>
+        <button class="btn btn-outline btn-sm" onclick="router.navigate('#/gerente/solicitacoes')">Analisar</button>
       </div>
     </div>
 
@@ -382,13 +388,19 @@ async function renderGerenteDashboard() {
       <div class="mt-14">
         ${!topClientes.length ? '<p class="text-soft text-sm">Nenhum saldo em aberto no momento.</p>' : topClientes.map((c, i) => {
           const pct = carteiraAtiva > 0 ? (c.principal / carteiraAtiva) * 100 : 0;
+          // Barra escalada 3x (com teto em 100%) — a % de um único cliente
+          // sobre a carteira ativa inteira normalmente é pequena (ex: 12%),
+          // o que deixaria a barra quase invisível; a exageração só serve
+          // pra tornar a diferença ENTRE os 5 clientes do ranking
+          // escaneável, não representa uma escala absoluta de 0-100%.
           return `
-          <div class="flex justify-between items-center" style="padding:9px 0;border-bottom:1px solid var(--line)">
-            <div class="flex items-center gap-10"><span class="text-soft mono text-sm">${i + 1}º</span><span>${escapeHtml(c.name)}</span></div>
-            <div class="flex items-center gap-14">
-              <span class="text-sm text-soft mono">${formatNumber(pct, 1)}% da carteira</span>
+          <div style="padding:9px 0;border-bottom:1px solid var(--line)">
+            <div class="flex justify-between items-center">
+              <div class="flex items-center gap-10"><span class="text-soft mono text-sm">${i + 1}º</span><span>${escapeHtml(c.name)}</span></div>
               <span class="mono" style="font-weight:700">${formatMoney(c.total)}</span>
             </div>
+            <div class="client-share-track"><div class="client-share-fill" style="width:${Math.min(100, pct * 3).toFixed(1)}%"></div></div>
+            <div class="text-sm text-soft mono mt-8">${formatNumber(pct, 1)}% da carteira ativa</div>
           </div>
         `; }).join('')}
       </div>

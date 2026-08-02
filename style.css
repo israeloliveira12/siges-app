@@ -366,6 +366,21 @@ button { cursor: pointer; }
 .overview-card-link svg { width: 13px; height: 13px; }
 .overview-card:hover .overview-card-link { color: var(--ink); }
 
+/* Ícone circular dos cartões de "ação" do Dashboard (Vence hoje/atrasados,
+   Solicitações pendentes) — distingue visualmente "isso pede uma decisão do
+   gerente" dos cartões que só informam um número. Cores reaproveitam os
+   tokens -soft já existentes (mesmos das badges), então já vêm corretos nos
+   dois temas sem token novo. */
+.action-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.action-icon svg { width: 20px; height: 20px; }
+.action-icon.danger { background: var(--bad-soft); color: var(--bad); }
+.action-icon.neutral { background: var(--brand-soft); color: var(--brand); }
+
+/* Barra proporcional sob cada linha de "Top clientes por saldo em aberto" —
+   torna a concentração de risco escaneável sem precisar ler o percentual. */
+.client-share-track { height: 5px; border-radius: 3px; background: var(--line); margin-top: 7px; overflow: hidden; }
+.client-share-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+
 .reference-link {
   display: inline-flex; align-items: center; gap: 3px;
   color: var(--ink); text-decoration: none; font-weight: 600;

@@ -24,6 +24,29 @@ function chartSize(desktopW, desktopH, mobileW, mobileH) {
   return isMobile ? { width: mobileW, height: mobileH } : { width: desktopW, height: desktopH };
 }
 
+// Sparkline compacto (sem eixo, sem hover) — pensado pra ficar ao lado de um
+// número "hero" grande, dando contexto de tendência sem competir por espaço
+// com um gráfico completo. Cor fixa (default branco), porque hoje só é usado
+// sobre fundo --hero-dark, que não muda entre os temas claro/escuro.
+function sparklineSVG(series, opts = {}) {
+  const w = opts.width || 110, h = opts.height || 34, pad = 3;
+  const color = opts.color || '#fff';
+  const values = series.map((p) => p.value);
+  const max = Math.max(1, ...values);
+  const min = Math.min(0, ...values);
+  const x = (i) => pad + (i / Math.max(1, series.length - 1)) * (w - pad * 2);
+  const y = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
+  const points = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
+  const linePath = points.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - pad} L ${points[0].x.toFixed(1)} ${h - pad} Z`;
+  const last = points[points.length - 1];
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block">
+    <path d="${areaPath}" fill="${color}" opacity="0.15"/>
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.4" fill="${color}"/>
+  </svg>`;
+}
+
 function lineChartSVG(series, opts = {}) {
   const w = opts.width || 600, h = opts.height || 200, pad = 28;
   const fmt = opts.valueFormatter || formatMoney;
