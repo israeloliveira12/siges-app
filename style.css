@@ -381,6 +381,26 @@ button { cursor: pointer; }
 .client-share-track { height: 5px; border-radius: 3px; background: var(--line); margin-top: 7px; overflow: hidden; }
 .client-share-fill { height: 100%; background: var(--accent); border-radius: 3px; }
 
+/* Bolinha de ajuda "?" ao lado de um título de gráfico/seção — carrega uma
+   explicação longa (ex: fórmula de cálculo) no atributo title (tooltip
+   nativo do navegador), sem precisar poluir o título com a fórmula inteira
+   nem abrir um modal pra uma frase só. */
+.help-dot {
+  width: 16px; height: 16px; border-radius: 50%; background: var(--brand-soft); color: var(--brand);
+  font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;
+  cursor: help; flex: none;
+}
+
+/* Lista tipo "ledger" (Relatório Analítico → Resumo) — a última linha
+   (.total) ganha destaque de verdade (borda grossa, número maior, cor de
+   destaque) por ser o resultado final do relatório, não só mais um item
+   entre outros 6 do mesmo peso visual. */
+.ledger-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ledger-row:last-child { border-bottom: none; }
+.ledger-row.total { margin-top: 4px; padding-top: 12px; border-top: 2px solid var(--ink); font-weight: 800; font-size: 14.5px; }
+.ledger-row .v { font-family: var(--mono); font-weight: 700; }
+.ledger-row.total .v { font-size: 18px; color: var(--accent); }
+
 .reference-link {
   display: inline-flex; align-items: center; gap: 3px;
   color: var(--ink); text-decoration: none; font-weight: 600;

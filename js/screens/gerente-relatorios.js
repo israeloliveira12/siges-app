@@ -137,10 +137,14 @@ function paintLucroAnalitico(payments, contracts, bucket, losses) {
       <div class="card stat-card"><div class="label">Lucro total no período</div><div class="value mono">${formatMoney(totalLucro)}</div></div>
       <div class="card stat-card"><div class="label">Retorno hoje (capital)</div><div class="value mono">${formatMoney(retornoHoje)}</div></div>
       <div class="card stat-card"><div class="label">Lucro hoje</div><div class="value mono">${formatMoney(lucroHoje)}</div></div>
-      <div class="card stat-card"><div class="label">${bucket === 'mes' ? 'Mês' : 'Dia'} mais lucrativo</div><div class="value" style="font-size:15px">${melhorDia ? bucketLabel(melhorDia, bucket) + ' · ' + formatMoney(netFor(melhorDia)) : '—'}</div></div>
+      <div class="card stat-card">
+        <div class="label">${bucket === 'mes' ? 'Mês' : 'Dia'} mais lucrativo</div>
+        <div class="value mono">${melhorDia ? bucketLabel(melhorDia, bucket) : '—'}</div>
+        ${melhorDia ? `<div class="text-sm text-soft mono mt-8">${formatMoney(netFor(melhorDia))}</div>` : ''}
+      </div>
     </div>
     <div class="card mt-14">
-      <h3>Lucro por período (juros − taxa de saída dos contratos − taxas de entrada dos pagamentos − capital perdido)</h3>
+      <h3 class="flex items-center gap-8">Lucro por período <span class="help-dot" title="Juros recebidos − taxa de saída dos contratos − taxas de entrada dos pagamentos − capital perdido">?</span></h3>
       <div class="mt-8">${series.length ? barChartSVG(series, { color: CHART_COLORS.accent, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem movimento neste período.</p>'}</div>
     </div>
     <div class="card mt-14" style="padding:0">
@@ -197,27 +201,25 @@ function paintRelatorioAnalitico(payments, contracts, losses) {
   const entryFees = payments.filter((p) => p.has_operational_fee).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
   const perdas = (losses || []).reduce((s, l) => s + Number(l.principal_lost || 0), 0);
 
+  const lucroLiquidoTotal = juros - exitFees - entryFees - perdas;
+
   body.innerHTML = `
     <div class="grid grid-2">
       <div class="card">
         <h3>Composição do período</h3>
-        <div class="flex items-center gap-14 mt-14" style="flex-wrap:wrap">
-          ${donutChartSVG([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }])}
-          <div style="flex:1;min-width:160px" class="flex flex-col gap-8">
-            ${donutLegendHtml([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }])}
-          </div>
-        </div>
+        <p class="text-sm text-soft mt-8">Entradas e saídas são 2 totais independentes (não somam "100%" de um mesmo todo) — comparadas em barra, não em rosca.</p>
+        <div class="mt-14">${barChartSVG([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }], { ...chartSize(320, 180, 300, 180) })}</div>
       </div>
       <div class="card">
         <h3>Resumo</h3>
-        <div class="grid grid-2 kpi-grid-2 mt-14">
-          <div class="stat-card"><div class="label">Entradas (recebimentos)</div><div class="value mono">${formatMoney(entradas)}</div></div>
-          <div class="stat-card"><div class="label">Saídas (novo crédito)</div><div class="value mono">${formatMoney(saidas)}</div></div>
-          <div class="stat-card"><div class="label">Juros recebidos (bruto)</div><div class="value mono">${formatMoney(juros)}</div></div>
-          <div class="stat-card"><div class="label">Taxas de saída (contratos)</div><div class="value mono">${formatMoney(exitFees)}</div></div>
-          <div class="stat-card"><div class="label">Taxas de entrada (recebimentos)</div><div class="value mono">${formatMoney(entryFees)}</div></div>
-          <div class="stat-card"><div class="label">Capital em perda</div><div class="value mono">${formatMoney(perdas)}</div></div>
-          <div class="stat-card"><div class="label">Lucro líquido total</div><div class="value mono">${formatMoney(juros - exitFees - entryFees - perdas)}</div></div>
+        <div class="mt-14">
+          <div class="ledger-row"><span class="text-soft">Entradas (recebimentos)</span><span class="v">${formatMoney(entradas)}</span></div>
+          <div class="ledger-row"><span class="text-soft">Saídas (novo crédito)</span><span class="v">${formatMoney(saidas)}</span></div>
+          <div class="ledger-row"><span class="text-soft">Juros recebidos (bruto)</span><span class="v">${formatMoney(juros)}</span></div>
+          <div class="ledger-row"><span class="text-soft">Taxas de saída (contratos)</span><span class="v">${formatMoney(exitFees)}</span></div>
+          <div class="ledger-row"><span class="text-soft">Taxas de entrada (recebimentos)</span><span class="v">${formatMoney(entryFees)}</span></div>
+          <div class="ledger-row"><span class="text-soft">Capital em perda</span><span class="v" style="color:${perdas > 0 ? 'var(--bad)' : 'inherit'}">${formatMoney(perdas)}</span></div>
+          <div class="ledger-row total"><span>Lucro líquido total</span><span class="v">${formatMoney(lucroLiquidoTotal)}</span></div>
         </div>
       </div>
     </div>

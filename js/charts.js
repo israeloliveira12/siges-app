@@ -24,6 +24,16 @@ function chartSize(desktopW, desktopH, mobileW, mobileH) {
   return isMobile ? { width: mobileW, height: mobileH } : { width: desktopW, height: desktopH };
 }
 
+// `width:100%` combinado com `max-width:${w}px` deixa o SVG estreito sempre
+// que o card é mais largo que o viewBox pensado pro desktop (ex: 600px de
+// gráfico dentro de um card de 900px+ em Relatórios) — sem `margin:0 auto`,
+// um elemento mais estreito que o pai gruda na borda ESQUERDA por padrão
+// (bug real reportado pelo usuário com print, 2026-08-03: barras de "Lucro
+// por período" visualmente coladas no canto esquerdo do card). Todo SVG de
+// gráfico abaixo (bar/line/area) precisa de `display:block;margin:0 auto`
+// junto do `max-width` pra centralizar quando sobra espaço — replique isso
+// em qualquer chart novo que use esse mesmo padrão de viewBox+max-width.
+
 // Sparkline compacto (sem eixo, sem hover) — pensado pra ficar ao lado de um
 // número "hero" grande, dando contexto de tendência sem competir por espaço
 // com um gráfico completo. Cor fixa (default branco), porque hoje só é usado
@@ -78,7 +88,7 @@ function lineChartSVG(series, opts = {}) {
     ${showStaticLabels ? `<text x="${x(i).toFixed(1)}" y="${(y(p.value) - 8).toFixed(1)}" font-size="9.5" fill="${opts.color || CHART_COLORS.accent}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
   `).join('');
 
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto">
     ${gridLines}
     <path d="${area}" fill="${opts.color || CHART_COLORS.accent}" opacity="0.08"/>
     <path d="${path}" fill="none" stroke="${opts.color || CHART_COLORS.accent}" stroke-width="2.2" stroke-linejoin="round"/>
@@ -152,7 +162,7 @@ function areaChartSVG(series, opts = {}) {
 
   const chartId = 'ac' + (++areaChartSeq);
   return `<div class="area-chart" data-chart-id="${chartId}" data-dot-r="${dotR}" data-dot-r-active="${dotR + 1.8}" data-fmt="${opts.valueFormatterName === 'number' ? 'number' : 'money'}">
-    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block" class="area-chart-svg">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" class="area-chart-svg">
       <defs>
         <linearGradient id="areaGrad${opts.gradId || ''}" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
@@ -223,7 +233,21 @@ function initAreaCharts(root) {
 function barChartSVG(series, opts = {}) {
   const w = opts.width || 600, h = opts.height || 200, pad = 28;
   const fmt = opts.valueFormatter || formatMoney;
-  const max = Math.max(1, ...series.map((p) => p.value)) * 1.15;
+  const values = series.map((p) => p.value);
+  // Diverging: quando a série tem valor negativo (ex: um período com
+  // prejuízo, agora possível com o recurso de perda), a barra precisa
+  // crescer PRA BAIXO a partir de uma linha de base real (y do valor 0),
+  // não só travar numa altura mínima de 1px acima do zero — senão um mês
+  // negativo aparecia como "quase zero" positivo em vez de prejuízo de
+  // verdade (bug real reportado pelo usuário, 2026-08-03). Quando todos os
+  // valores são >= 0 (caso mais comum), min fica 0 e o resultado é idêntico
+  // ao comportamento antigo (baseline no rodapé, barra sempre pra cima).
+  const hasNegative = values.some((v) => v < 0);
+  const max = Math.max(1, ...values) * (hasNegative ? 1.25 : 1.15);
+  const min = hasNegative ? Math.min(0, ...values) * 1.25 : 0;
+  const range = max - min || 1;
+  const y = (v) => h - pad - ((v - min) / range) * (h - pad * 2);
+  const y0 = y(0); // linha de base (onde valor = 0)
   const barW = (w - pad * 2) / series.length * 0.6;
   const gap = (w - pad * 2) / series.length;
   // Com muitas barras (ex: 30 dias), mostrar rótulo em toda barra vira uma
@@ -234,15 +258,17 @@ function barChartSVG(series, opts = {}) {
   const shouldShowLabel = (i) => series.length <= 10 || i % Math.ceil(series.length / 8) === 0;
 
   const bars = series.map((p, i) => {
-    const bh = ((p.value / max) * (h - pad * 2));
+    const yVal = y(p.value);
+    const bh = Math.abs(y0 - yVal);
+    const by = Math.min(y0, yVal);
     const bx = pad + i * gap + (gap - barW) / 2;
-    const by = h - pad - bh;
-    const color = p.color || opts.color || CHART_COLORS.brand;
+    const color = p.color || (p.value < 0 ? CHART_COLORS.bad : (opts.color || CHART_COLORS.brand));
+    const labelY = p.value >= 0 ? Math.max(by - 5, 10) : Math.min(by + bh + 14, h - 4);
     return `
       <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(bh, 1).toFixed(1)}" rx="3" fill="${color}">
         <title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title>
       </rect>
-      ${shouldShowLabel(i) ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${Math.max(by - 5, 10).toFixed(1)}" font-size="9.5" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
+      ${shouldShowLabel(i) ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${labelY.toFixed(1)}" font-size="9.5" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
     `;
   }).join('');
 
@@ -252,8 +278,8 @@ function barChartSVG(series, opts = {}) {
     return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
   }).join('');
 
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px">
-    <line x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" stroke="${CHART_COLORS.line}"/>
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto">
+    <line x1="${pad}" y1="${y0.toFixed(1)}" x2="${w - pad}" y2="${y0.toFixed(1)}" stroke="${CHART_COLORS.line}"/>
     ${bars}${labels}
   </svg>`;
 }
