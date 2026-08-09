@@ -477,6 +477,17 @@ as $$
   select exists (select 1 from profiles where id = p_id and role = 'gerente' and active);
 $$;
 
+-- Tenant do usuário autenticado — usada em toda política de RLS que precisa
+-- restringir visibilidade a "só o meu tenant" (Fase 1a da transformação em
+-- SaaS multi-empresa, ver migration_031.sql para o histórico completo).
+create or replace function current_tenant_id()
+returns uuid
+language sql stable
+security definer set search_path = public
+as $$
+  select tenant_id from profiles where id = auth.uid();
+$$;
+
 -- Trava de segurança: só o admin primário (ou uma chamada com service_role,
 -- usada pelas serverless functions de /api ao criar/promover conta) pode
 -- mudar `role`/`is_primary_admin` de qualquer linha de profiles — protege
@@ -2003,15 +2014,22 @@ alter table planning_debts enable row level security;
 alter table audit_log enable row level security;
 alter table tenants enable row level security;
 
--- tenants — política mínima: qualquer gerente ativo lê a lista (hoje só
--- existe o próprio tenant, então não é uma restrição nova). Sem policy de
--- insert/update/delete ainda — criar/editar tenant só existe a partir da
--- Fase 3, via RPC security definer.
-create policy "tenants_select" on tenants for select using (is_gerente());
+-- tenants — cada gerente só vê a PRÓPRIA linha (comparação é com o id da
+-- própria tabela, não com uma coluna tenant_id — tenants É a entidade
+-- tenant, não referencia uma). Sem policy de insert/update/delete ainda —
+-- criar/editar tenant só existe a partir da Fase 3, via RPC security
+-- definer.
+create policy "tenants_select" on tenants for select using (is_gerente() and id = current_tenant_id());
 
 -- profiles
+-- is_gerente() sozinho, sem checar tenant_id, deixaria um gerente de
+-- QUALQUER empresa ler o perfil de QUALQUER outro usuário da plataforma —
+-- todo "using (is_gerente())" bruto abaixo tem o mesmo problema e recebeu o
+-- mesmo tratamento (Fase 1a da transformação em SaaS multi-empresa, ver
+-- migration_031.sql). Como só existe 1 tenant até a Fase 3, isso não muda
+-- nenhum comportamento hoje.
 create policy "profiles_select" on profiles for select
-  using (id = auth.uid() or is_gerente());
+  using (id = auth.uid() or (is_gerente() and tenant_id = current_tenant_id()));
 create policy "profiles_update_self" on profiles for update
   using (id = auth.uid()) with check (id = auth.uid());
 -- NENHUMA policy de UPDATE/INSERT/DELETE "genérica pra qualquer gerente"
@@ -2024,13 +2042,14 @@ create policy "profiles_update_self" on profiles for update
 
 -- clients
 create policy "clients_select" on clients for select
-  using (profile_id = auth.uid() or is_gerente());
+  using (profile_id = auth.uid() or (is_gerente() and tenant_id = current_tenant_id()));
 create policy "clients_gerente_write" on clients for insert with check (is_gerente());
-create policy "clients_gerente_update" on clients for update using (is_gerente());
+create policy "clients_gerente_update" on clients for update
+  using (is_gerente() and tenant_id = current_tenant_id());
 
 -- loan_requests
 create policy "requests_select" on loan_requests for select
-  using (client_id = auth.uid() or is_gerente());
+  using (client_id = auth.uid() or (is_gerente() and tenant_id = current_tenant_id()));
 -- with check trava também os campos de DECISÃO (status/decided_by/etc.) —
 -- sem isso, um cliente técnico conseguia inserir a própria solicitação já
 -- com status='aprovado' via REST direto, contornando a aprovação do gerente.
@@ -2045,46 +2064,51 @@ create policy "requests_insert_self" on loan_requests for insert
     and resulting_contract_id is null
   );
 create policy "requests_update_gerente" on loan_requests for update
-  using (is_gerente());
+  using (is_gerente() and tenant_id = current_tenant_id());
 
 -- loan_contracts
 -- is_referrer_of(client_id): quem indicou este cliente também pode ler os
 -- contratos dele (tela "Indicações") — dado financeiro, sem PII, diferente de
 -- clients/profiles (que continuam fechados pro indicador).
 create policy "contracts_select" on loan_contracts for select
-  using (client_id = auth.uid() or is_gerente() or is_referrer_of(client_id));
+  using (client_id = auth.uid() or (is_gerente() and tenant_id = current_tenant_id()) or is_referrer_of(client_id));
+-- "for all" combina com "contracts_select" via OU (Postgres soma todas as
+-- políticas permissivas aplicáveis) — por isso o USING abaixo também precisa
+-- do filtro de tenant, senão essa política sozinha reabriria a leitura sem
+-- filtro nenhum. O WITH CHECK (validar o que pode ser GRAVADO) fica igual
+-- por enquanto — ver Fase 1c.
 create policy "contracts_gerente_all" on loan_contracts for all
-  using (is_gerente()) with check (is_gerente());
+  using (is_gerente() and tenant_id = current_tenant_id()) with check (is_gerente());
 
 -- installments
 create policy "installments_select" on installments for select
-  using (is_gerente() or exists (
+  using ((is_gerente() and tenant_id = current_tenant_id()) or exists (
     select 1 from loan_contracts lc where lc.id = installments.contract_id
       and (lc.client_id = auth.uid() or is_referrer_of(lc.client_id))
   ));
 create policy "installments_gerente_write" on installments for all
-  using (is_gerente()) with check (is_gerente());
+  using (is_gerente() and tenant_id = current_tenant_id()) with check (is_gerente());
 
 -- renewal_cycles
 create policy "renewal_select" on renewal_cycles for select
-  using (is_gerente() or exists (
+  using ((is_gerente() and tenant_id = current_tenant_id()) or exists (
     select 1 from loan_contracts lc where lc.id = renewal_cycles.contract_id
       and (lc.client_id = auth.uid() or is_referrer_of(lc.client_id))
   ));
 create policy "renewal_gerente_write" on renewal_cycles for all
-  using (is_gerente()) with check (is_gerente());
+  using (is_gerente() and tenant_id = current_tenant_id()) with check (is_gerente());
 
 -- payments
 create policy "payments_select" on payments for select
-  using (is_gerente() or exists (
+  using ((is_gerente() and tenant_id = current_tenant_id()) or exists (
     select 1 from loan_contracts lc where lc.id = payments.contract_id and lc.client_id = auth.uid()
   ));
 create policy "payments_gerente_write" on payments for all
-  using (is_gerente()) with check (is_gerente());
+  using (is_gerente() and tenant_id = current_tenant_id()) with check (is_gerente());
 
 -- notifications_log
 create policy "notifications_select" on notifications_log for select
-  using (recipient_id = auth.uid() or is_gerente());
+  using (recipient_id = auth.uid() or (is_gerente() and tenant_id = current_tenant_id()));
 create policy "notifications_update_own" on notifications_log for update
   using (recipient_id = auth.uid()) with check (recipient_id = auth.uid());
 create policy "notifications_gerente_insert" on notifications_log for insert
@@ -2101,22 +2125,28 @@ create policy "push_delete_own" on push_subscriptions for delete using (profile_
 -- só checava auth.uid() is not null, sem checar o papel). Cliente usa a RPC
 -- public_company_info() (security definer, ver seção 5) que só devolve
 -- company_name/company_whatsapp — os 2 únicos campos que ele realmente usa.
-create policy "settings_select_gerente" on system_settings for select using (is_gerente());
+create policy "settings_select_gerente" on system_settings for select
+  using (is_gerente() and tenant_id = current_tenant_id());
 -- is_primary_admin(), não is_gerente(): Configurações é tela exclusiva do
 -- Administrador (routes primaryOnly:true no router) — antes um gerente
 -- secundário conseguia alterar taxas/thresholds/caixa via REST direto,
 -- contornando a restrição que só existia na UI.
-create policy "settings_gerente_update" on system_settings for update using (is_primary_admin());
+create policy "settings_gerente_update" on system_settings for update
+  using (is_primary_admin() and tenant_id = current_tenant_id());
 
 -- planning_debts
 -- is_primary_admin(): mesma razão acima — Planejamento também é primaryOnly.
 create policy "planning_debts_gerente_all" on planning_debts for all
-  using (is_primary_admin()) with check (is_primary_admin());
+  using (is_primary_admin() and tenant_id = current_tenant_id()) with check (is_primary_admin());
 
 -- audit_log — só leitura, e só gerente. Escrita é exclusivamente via
 -- log_audit_event() (security definer, bypassa RLS), inclusive pra registrar
 -- eventos sem sessão (login falho) — por isso não existe policy de insert.
-create policy "audit_log_select_gerente" on audit_log for select using (is_gerente());
+-- tenant_id é NULLABLE aqui (eventos sem sessão não sabem o tenant) — linhas
+-- com tenant_id nulo ficam invisíveis até a Fase 2/3 dar visibilidade
+-- cross-tenant ao Administrador Master (ver migration_031.sql).
+create policy "audit_log_select_gerente" on audit_log for select
+  using (is_gerente() and tenant_id = current_tenant_id());
 
 -- ============================================================================
 -- 7. ÍNDICES DE APOIO

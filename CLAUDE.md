@@ -693,7 +693,30 @@ Fundação de dados, **zero mudança de comportamento visível** — nenhum arqu
 - **Armadilha já identificada pra Fase 1, não esquecer**: `default_tenant_id()` é andaime TEMPORÁRIO. Ela sempre aponta pro Tenant #1 — no dia em que existir um Tenant #2, qualquer código que ainda dependa desse default (em vez de setar `tenant_id` explicitamente a partir do usuário autenticado) vai silenciosamente jogar dado da empresa errada dentro do Tenant #1. A Fase 1 precisa atualizar toda RPC de escrita ANTES de remover/substituir esse default.
 - **`system_settings` ganhou `tenant_id` mas continua com a mesma chave primária de sempre** (`id boolean`) — virar "1 linha de configuração por tenant" de verdade é mudança de comportamento real, fica explicitamente pra Fase 1.
 
-**Próximo passo**: ele roda `migration_030.sql` manualmente no SQL Editor do Supabase e confirma (contagem de linhas antes/depois deve bater, e o app deve continuar funcionando 100% igual, sem nenhuma tela nova). Só depois disso confirmado começa a Fase 1 (a reescrita de RLS — a fase de maior risco técnico do projeto, com portão de validação dedicado antes de qualquer fase seguinte).
+**Fase 0 confirmada rodada em produção pelo usuário (2026-08-09)** — `tenants` existe com 1 linha, app segue funcionando normal. Commit `99c9c44`.
+
+### Fase 1 quebrada em sub-fases (decisão do usuário, 2026-08-09)
+
+Catalogar a Fase 1 revelou que não é só ~15 políticas de RLS — são também ~20 funções `security definer` que fazem insert/update em tabela com `tenant_id` novo, ou leem por id sem checar tenant. Reescrever tudo de uma vez, direto em produção, sem teste automatizado nem staging, foi avaliado como risco alto demais pra entregar numa tacada só. O usuário escolheu quebrar em:
+
+- **1a — isolamento de LEITURA** (políticas RLS puras): feita agora.
+- **1b — funções de leitura** (`client_outstanding_balance`, `client_outstanding_principal`, `search_clients_for_referral`, `list_my_referred_clients`, `has_referrals`, `public_company_info`, `email_for_cpf`, etc.): próxima.
+- **1c — funções de escrita financeira** (`create_loan_contract`, `receive_payment`, `receive_cycle_payment`, `renew_installment`, `mark_installment_loss`/`revert_*`, `update_installment_schedule`, `update_payment_fee`, `recalculate_client_score`/`recalculate_all_scores`, `refresh_overdue_status`, os triggers `trg_check_credit_limit*`): a mais sensível, fica isolada por último.
+
+### Fase 1a implementada — isolamento de LEITURA (2026-08-09)
+
+**`supabase/migration_031.sql`** (não confirmada como rodada ainda). Cria `current_tenant_id()` (retorna `profiles.tenant_id` do usuário autenticado) e reescreve a cláusula `USING` de toda política de RLS que tinha `is_gerente()`/`is_primary_admin()` "cru" (sem checar tenant), adicionando `and tenant_id = current_tenant_id()`.
+
+- **Achado técnico importante**: várias tabelas têm política `for all` (`contracts_gerente_all`, `installments_gerente_write`, `renewal_gerente_write`, `payments_gerente_write`, `planning_debts_gerente_all`) que cobrem SELECT junto com escrita. Postgres combina todas as políticas permissivas aplicáveis a um comando com OU — corrigir só a política `_select` dedicada e deixar a `for all` intocada **não fecharia nada** (a `for all` continuaria liberando leitura sem filtro, anulando silenciosamente a correção). Por isso a Fase 1a corrige o `USING` de TODA política, inclusive as `for all` — mas mantém o `WITH CHECK` delas exatamente como estava (validação do que pode ser GRAVADO é escopo da Fase 1c, já que hoje quase toda escrita passa por RPC `security definer`, que bypassa RLS de qualquer forma).
+- **`tenants_select` corrigida também** (criada na Fase 0 com `is_gerente()` cru) — agora `is_gerente() and id = current_tenant_id()` (compara com o PRÓPRIO id da tabela, não uma coluna `tenant_id`, já que `tenants` é a entidade tenant, não referencia uma).
+- **`audit_log_select_gerente`**: como `audit_log.tenant_id` é nullable (eventos sem sessão), linhas com tenant nulo ficam temporariamente invisíveis pra todo mundo até a Fase 2/3 implementar a visibilidade cross-tenant do Administrador Master. Efeito hoje é mínimo (só afeta tentativas de login que não resolveram nenhum profile).
+- **Zero mudança de comportamento hoje** — confirmado por raciocínio: só existe 1 tenant, toda linha e todo gerente já pertencem a ele, então `tenant_id = current_tenant_id()` é sempre verdadeiro agora. O efeito só existe no dia em que existir um Tenant #2.
+- **`schema.sql` sincronizado** com as mesmas políticas corrigidas, e `current_tenant_id()` adicionada na seção "4. FUNÇÕES HELPER DE RLS", junto de `is_gerente()`/`is_primary_admin()`.
+- Confirmado por grep (`using \(is_gerente\(\)\)|using \(is_primary_admin\(\)\)`) que não sobrou nenhuma política com o padrão antigo em nenhum dos dois arquivos.
+
+**Query de auditoria** (pra qualquer sessão futura conferir o estado atual das políticas): `select tablename, policyname, cmd, qual, with_check from pg_policies where schemaname='public' and tablename in ('profiles','clients','loan_requests','loan_contracts','installments','renewal_cycles','payments','notifications_log','push_subscriptions','system_settings','planning_debts','audit_log','tenants') order by tablename, policyname;`
+
+**Teste ao vivo confirmado pelo usuário (2026-08-09), 2 vezes** — moveu um cliente real pro tenant fantasma via `do $$ ... $$` (script autocontido, sem UUID copiado manualmente — a 1ª versão do roteiro usava placeholders `<...>` que o usuário rodou literalmente, causando erro; corrigido pra bloco com `select ... into`/`returning ... into`), confirmou que ele sumia da tela Clientes, e confirmou que reaparecia depois do bloco de limpeza. Isolamento de leitura (Fase 1a) está provado funcionando. `migration_031.sql` + `schema.sql` ainda não commitados nesta rodada.
 
 ## Limitações conhecidas (v1, ver README para detalhes)
 
