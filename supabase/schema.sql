@@ -293,6 +293,98 @@ create table audit_log (
 create index audit_log_created_at_idx on audit_log(created_at desc);
 create index audit_log_actor_id_idx on audit_log(actor_id);
 
+-- 2.13 tenants — cada linha é uma empresa cliente da plataforma SIGES.
+-- Ver migration_030.sql para o histórico completo do porquê (Fase 0 da
+-- transformação em SaaS multi-empresa). Nesta instalação fresca, o bloco
+-- abaixo cria a tabela, a função-andaime default_tenant_id() (preenche
+-- tenant_id automaticamente enquanto o app não seta o valor real por
+-- usuário — ver aviso na migration), o Tenant #1 (a partir de
+-- system_settings.company_name, que já foi inserido acima) e a coluna
+-- tenant_id em toda tabela de negócio.
+create table tenants (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  owner_profile_id uuid references profiles(id) on delete set null,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create or replace function default_tenant_id()
+returns uuid
+language sql
+stable
+security definer set search_path = public
+as $$
+  select id from tenants order by created_at asc limit 1;
+$$;
+
+insert into tenants (name, owner_profile_id)
+select
+  coalesce(nullif(trim(s.company_name), ''), 'Minha Empresa'),
+  (select id from profiles where role = 'gerente' and is_primary_admin and active order by created_at asc limit 1)
+from system_settings s
+limit 1;
+
+alter table profiles add column tenant_id uuid references tenants(id) default default_tenant_id();
+update profiles set tenant_id = default_tenant_id() where tenant_id is null;
+alter table profiles alter column tenant_id set not null;
+create index profiles_tenant_id_idx on profiles(tenant_id);
+
+alter table clients add column tenant_id uuid references tenants(id) default default_tenant_id();
+update clients set tenant_id = default_tenant_id() where tenant_id is null;
+alter table clients alter column tenant_id set not null;
+create index clients_tenant_id_idx on clients(tenant_id);
+
+alter table loan_requests add column tenant_id uuid references tenants(id) default default_tenant_id();
+update loan_requests set tenant_id = default_tenant_id() where tenant_id is null;
+alter table loan_requests alter column tenant_id set not null;
+create index loan_requests_tenant_id_idx on loan_requests(tenant_id);
+
+alter table loan_contracts add column tenant_id uuid references tenants(id) default default_tenant_id();
+update loan_contracts set tenant_id = default_tenant_id() where tenant_id is null;
+alter table loan_contracts alter column tenant_id set not null;
+create index loan_contracts_tenant_id_idx on loan_contracts(tenant_id);
+
+alter table installments add column tenant_id uuid references tenants(id) default default_tenant_id();
+update installments set tenant_id = default_tenant_id() where tenant_id is null;
+alter table installments alter column tenant_id set not null;
+create index installments_tenant_id_idx on installments(tenant_id);
+
+alter table renewal_cycles add column tenant_id uuid references tenants(id) default default_tenant_id();
+update renewal_cycles set tenant_id = default_tenant_id() where tenant_id is null;
+alter table renewal_cycles alter column tenant_id set not null;
+create index renewal_cycles_tenant_id_idx on renewal_cycles(tenant_id);
+
+alter table payments add column tenant_id uuid references tenants(id) default default_tenant_id();
+update payments set tenant_id = default_tenant_id() where tenant_id is null;
+alter table payments alter column tenant_id set not null;
+create index payments_tenant_id_idx on payments(tenant_id);
+
+alter table notifications_log add column tenant_id uuid references tenants(id) default default_tenant_id();
+update notifications_log set tenant_id = default_tenant_id() where tenant_id is null;
+alter table notifications_log alter column tenant_id set not null;
+create index notifications_log_tenant_id_idx on notifications_log(tenant_id);
+
+alter table push_subscriptions add column tenant_id uuid references tenants(id) default default_tenant_id();
+update push_subscriptions set tenant_id = default_tenant_id() where tenant_id is null;
+alter table push_subscriptions alter column tenant_id set not null;
+create index push_subscriptions_tenant_id_idx on push_subscriptions(tenant_id);
+
+alter table system_settings add column tenant_id uuid references tenants(id) default default_tenant_id();
+update system_settings set tenant_id = default_tenant_id() where tenant_id is null;
+alter table system_settings alter column tenant_id set not null;
+create index system_settings_tenant_id_idx on system_settings(tenant_id);
+
+alter table planning_debts add column tenant_id uuid references tenants(id) default default_tenant_id();
+update planning_debts set tenant_id = default_tenant_id() where tenant_id is null;
+alter table planning_debts alter column tenant_id set not null;
+create index planning_debts_tenant_id_idx on planning_debts(tenant_id);
+
+-- audit_log fica NULLABLE de propósito — ver comentário em migration_030.sql.
+alter table audit_log add column tenant_id uuid references tenants(id);
+update audit_log set tenant_id = default_tenant_id() where tenant_id is null;
+create index audit_log_tenant_id_idx on audit_log(tenant_id);
+
 -- ============================================================================
 -- 3. TRIGGER: criar profiles automaticamente ao registrar em auth.users
 -- ============================================================================
@@ -1909,6 +2001,13 @@ alter table push_subscriptions enable row level security;
 alter table system_settings enable row level security;
 alter table planning_debts enable row level security;
 alter table audit_log enable row level security;
+alter table tenants enable row level security;
+
+-- tenants — política mínima: qualquer gerente ativo lê a lista (hoje só
+-- existe o próprio tenant, então não é uma restrição nova). Sem policy de
+-- insert/update/delete ainda — criar/editar tenant só existe a partir da
+-- Fase 3, via RPC security definer.
+create policy "tenants_select" on tenants for select using (is_gerente());
 
 -- profiles
 create policy "profiles_select" on profiles for select
