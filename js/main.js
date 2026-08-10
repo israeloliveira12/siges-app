@@ -39,6 +39,7 @@ const NAV_ITEMS = {
     { route: 'plataforma/inicio', label: 'Início', icon: 'dashboard' },
     { route: 'plataforma/empresas', label: 'Empresas', icon: 'users' },
     { route: 'plataforma/planos', label: 'Planos', icon: 'wallet' },
+    { route: 'plataforma/backup', label: 'Backup Geral', icon: 'printer' },
   ],
 };
 
@@ -51,7 +52,7 @@ const NAV_ITEMS = {
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/indicacoes', 'cliente/score'],
   gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/lancamentos', 'gerente/contratos'],
-  plataforma: ['plataforma/inicio', 'plataforma/empresas', 'plataforma/planos'],
+  plataforma: ['plataforma/inicio', 'plataforma/empresas', 'plataforma/planos', 'plataforma/backup'],
 };
 
 function navLinkHtml(item, mobile) {
