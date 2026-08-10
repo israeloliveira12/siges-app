@@ -40,6 +40,10 @@ create table profiles (
   created_by uuid references profiles(id) on delete set null,
   active boolean not null default true,
   is_primary_admin boolean not null default false, -- só o 1º gerente criado; pode apagar todos os dados
+  -- Dono da plataforma inteira (SaaS multi-empresa) — global, não por
+  -- tenant, diferente de is_primary_admin. Só existe 1 pessoa com isso.
+  -- Backfillada com TRUE pro Tenant #1 logo abaixo, na seção 2.13.
+  platform_owner boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -394,6 +398,11 @@ alter table audit_log add column tenant_id uuid references tenants(id);
 update audit_log set tenant_id = default_tenant_id() where tenant_id is null;
 create index audit_log_tenant_id_idx on audit_log(tenant_id);
 
+-- Fase 2 (seletor de modo) — marca o dono da própria empresa (Tenant #1)
+-- como dono da plataforma inteira. Ver migration_035.sql.
+update profiles set platform_owner = true
+  where id = (select owner_profile_id from tenants order by created_at asc limit 1);
+
 -- ============================================================================
 -- 3. TRIGGER: criar profiles automaticamente ao registrar em auth.users
 -- ============================================================================
@@ -537,13 +546,24 @@ begin
      and coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'FORBIDDEN: só o administrador primário pode alterar papel/privilégio/status de uma conta';
   end if;
+
+  -- platform_owner (Fase 2, SaaS multi-empresa) é mais rígido que os 3
+  -- campos acima: nem is_primary_admin() basta aqui — só service_role (uso
+  -- interno/scripts administrativos), nunca uma sessão de usuário comum,
+  -- senão o admin primário de QUALQUER tenant conseguiria se auto-promover
+  -- a dono da plataforma inteira via REST direto.
+  if new.platform_owner is distinct from old.platform_owner
+     and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'FORBIDDEN: platform_owner só pode ser alterado internamente';
+  end if;
+
   return new;
 end;
 $$;
 
 drop trigger if exists trg_prevent_profile_privilege_escalation on profiles;
 create trigger trg_prevent_profile_privilege_escalation
-  before update of role, is_primary_admin, active on profiles
+  before update of role, is_primary_admin, active, platform_owner on profiles
   for each row execute function prevent_profile_privilege_escalation();
 
 -- ============================================================================

@@ -25,6 +25,12 @@ const NAV_ITEMS = {
     { route: 'gerente/auditoria', label: 'Auditoria', icon: 'audit' },
     { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings', primaryOnly: true },
   ],
+  // Modo "Plataforma SaaS" (Fase 2) — só existe pra quem é platform_owner.
+  // Só "Início" por enquanto (stub); Empresas/Planos/Métricas chegam nas
+  // próximas fases, quando existir de fato o que gerenciar.
+  plataforma: [
+    { route: 'plataforma/inicio', label: 'Início', icon: 'dashboard' },
+  ],
 };
 
 // Só as rotas mais usadas viram aba direta na tabbar mobile (a tabbar só
@@ -36,6 +42,7 @@ const NAV_ITEMS = {
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/indicacoes', 'cliente/score'],
   gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/lancamentos', 'gerente/contratos'],
+  plataforma: ['plataforma/inicio'],
 };
 
 function navLinkHtml(item, mobile) {
@@ -51,10 +58,39 @@ function toggleMobileMoreMenu(forceOpen) {
   backdrop.classList.toggle('hidden', !open);
 }
 
+// Bolinha "Empréstimos / Plataforma SaaS" no topbar — só existe pra quem é
+// platform_owner (Fase 2). Chamada de dentro de renderShellForRole() pra
+// ficar sempre em sincronia com o modo atual, sem precisar lembrar de
+// chamar as duas funções separadamente em todo lugar que monta o shell.
+function renderModeSwitch() {
+  const wrap = document.getElementById('mode-switch-wrap');
+  if (!wrap) return;
+  if (!isPlatformOwner()) { wrap.innerHTML = ''; return; }
+  const mode = currentMode();
+  // Rótulo completo não cabe ao lado dos ícones do topbar no celular (68px
+  // de altura fixa, sem quebra de linha) — abrevia só nesse breakpoint,
+  // mesmo critério de window.innerWidth<=640 já usado em chartSize().
+  const mobile = window.innerWidth <= 640;
+  const labelEmprestimos = mobile ? 'Negócio' : 'Empréstimos';
+  const labelPlataforma = mobile ? 'SaaS' : 'Plataforma SaaS';
+  wrap.innerHTML = `
+    <div class="mode-switch">
+      <button class="mode-switch-opt ${mode === 'emprestimos' ? 'active' : ''}" data-mode="emprestimos">${labelEmprestimos}</button>
+      <button class="mode-switch-opt ${mode === 'plataforma' ? 'active' : ''}" data-mode="plataforma">${labelPlataforma}</button>
+    </div>
+  `;
+  wrap.querySelectorAll('[data-mode]').forEach((btn) => {
+    btn.onclick = () => switchMode(btn.dataset.mode);
+  });
+}
+
 function renderShellForRole() {
-  const role = isGerente() ? 'gerente' : 'cliente';
+  const inPlatformMode = isPlatformOwner() && currentMode() === 'plataforma';
+  const role = inPlatformMode ? 'plataforma' : (isGerente() ? 'gerente' : 'cliente');
   const isPrimary = !!(App.profile && App.profile.is_primary_admin);
   const items = NAV_ITEMS[role].filter((i) => (!i.primaryOnly || isPrimary) && (!i.referralOnly || App.hasReferrals));
+
+  renderModeSwitch();
 
   document.getElementById('sidebar-nav').innerHTML = items.map((i) => navLinkHtml(i)).join('');
   document.getElementById('sidebar-nav').querySelectorAll('a').forEach((a) => {
@@ -82,7 +118,8 @@ function renderShellForRole() {
 
   document.getElementById('sidebar-user-avatar').innerHTML = avatarHtml(userDisplayName(), 34);
   document.getElementById('sidebar-user-name').textContent = userDisplayName();
-  document.getElementById('sidebar-user-role').textContent = role === 'gerente' ? (isPrimary ? 'Administrador' : 'Gerente') : 'Cliente';
+  document.getElementById('sidebar-user-role').textContent =
+    role === 'plataforma' ? 'Dono da Plataforma' : (role === 'gerente' ? (isPrimary ? 'Administrador' : 'Gerente') : 'Cliente');
   document.getElementById('topbar-signout').onclick = handleSignOut;
 
   renderBell();

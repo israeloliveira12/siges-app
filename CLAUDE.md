@@ -783,6 +783,58 @@ A fase de maior risco técnico do projeto inteiro. Catalogadas TODAS as ~40 fun�
 
 As três sub-fases da fase de maior risco técnico do projeto (isolamento de dado entre empresas) estão implementadas e confirmadas rodadas em produção. Próximo passo é a Fase 2 (seletor de modo "Empréstimos / Plataforma SaaS" no topbar) — a primeira fase que efetivamente toca em tela/JS de UI, não só banco.
 
+### Fase 2 — seletor de modo "Empréstimos / Plataforma SaaS" no topbar (2026-08-09)
+
+Implementada, testada no preview (mock de `platform_owner: true`, desktop e mobile), **ainda não confirmada em produção** — falta o usuário rodar `migration_035.sql` e validar visualmente.
+
+- **`profiles.platform_owner`** (novo, `migration_035.sql`) — flag global à plataforma inteira, diferente de `is_primary_admin` (que é por-tenant, cada empresa cliente do SaaS pode ter o seu). Só a linha do fundador (dono da conta que criou o Tenant #1) recebe `true`, via backfill `where id = (select owner_profile_id from tenants order by created_at asc limit 1)`. Nasce `false` pra todo mundo — zero mudança de comportamento pra ninguém além do fundador.
+- **Trava de segurança**: `prevent_profile_privilege_escalation()` (trigger já existente, usado antes só pra `role`/`is_primary_admin`/`active`) ganhou uma regra própria e mais rígida pra `platform_owner` — nem `is_primary_admin()` basta aqui, só `service_role` (uso interno) pode alterar essa coluna. Sem isso, o admin primário de QUALQUER empresa cliente do SaaS poderia se auto-promover a dono da plataforma inteira via REST direto, ganhando acesso cross-tenant.
+- **`js/state.js`**: `isPlatformOwner()` (lê a flag), e o par `currentMode()`/`switchMode(mode)` — o modo (`'emprestimos'` ou `'plataforma'`) vive numa variável de módulo (`currentModeValue`), **de propósito sem `localStorage`**: todo login/reload volta pra `'emprestimos'` por padrão, mesmo raciocínio já usado no reset de hash no login/logout (evita ficar preso numa tela da plataforma sem querer entre uma sessão e outra). Pra qualquer perfil que não seja `platform_owner`, `currentMode()` sempre retorna `'emprestimos'` — o modo simplesmente não existe pra eles.
+- **`js/main.js`**: `NAV_ITEMS.plataforma` (só um item por enquanto, `plataforma/inicio` — Empresas/Planos/Métricas chegam nas próximas fases) e `MOBILE_TAB_ROUTES.plataforma`. `renderModeSwitch()` (novo) desenha a pílula de 2 opções no topbar — só renderiza algo se `isPlatformOwner()`, senão deixa `#mode-switch-wrap` vazio (não ocupa espaço nenhum pra ninguém mais). `renderShellForRole()` ganhou `inPlatformMode` no topo — decide o `role` efetivo (`'plataforma'` vs `'gerente'`/`'cliente'`) usado pra filtrar `NAV_ITEMS`/`MOBILE_TAB_ROUTES` e pro rótulo `sidebar-user-role` ("Dono da Plataforma" nesse modo).
+- **`js/router.js`**: `handleHashChange()` ganhou o branch `wantsRole === 'plataforma' && !isPlatformOwner()` no guard de papel (mesmo padrão de `gerente`/`cliente`), mais 2 sincronizações pra manter hash e modo sempre coerentes — acessar `#/plataforma/...` direto via hash (F5, link salvo) liga o modo automaticamente (`switchMode('plataforma')`); navegar pra uma rota `gerente`/`cliente` enquanto o modo plataforma está ligado desliga o modo de volta (`switchMode('emprestimos')`) — evita ficar com o menu errado embaixo da tela certa.
+- **`js/screens/plataforma-inicio.js`** (novo) — stub estático, sem nenhuma query ao Supabase ainda. `registerRoute('plataforma/inicio', { role: 'plataforma', ... })`.
+- **`index.html`**: `<div id="mode-switch-wrap">` no `.topbar-actions` (entre o título e o toggle de tema), `<section id="screen-plataforma-inicio">`, script tag do novo arquivo antes de `main.js`.
+- **Bug real encontrado e corrigido AINDA no preview, antes de considerar a fase pronta**: a pílula com o rótulo completo ("Empréstimos" / "Plataforma SaaS") ao lado dos 3 ícones do topbar (tema/sino/sair) estourava a largura da tela no celular (`body.scrollWidth` 456px num viewport de 375px, confirmado programaticamente, não só visual). Corrigido com rótulo abreviado só em mobile ("Negócio"/"SaaS", `window.innerWidth<=640`, mesmo critério já usado em `chartSize()`) + padding/gap do topbar reduzidos nesse breakpoint (`style.css`). Testado de novo depois do fix: `body.scrollWidth === body.clientWidth` nos dois modos.
+- **Zero mudança de comportamento pra qualquer perfil que não seja o fundador** — confirmado no preview mockando um `profiles.platform_owner: false` explícito: `#mode-switch-wrap` fica vazio, shell renderiza exatamente como antes desta fase.
+- `sw.js` em `v63` (novo arquivo `js/screens/plataforma-inicio.js` adicionado ao cache).
+
+**Migration a rodar manualmente no SQL Editor do Supabase:**
+
+```sql
+alter table profiles add column platform_owner boolean not null default false;
+
+update profiles set platform_owner = true
+  where id = (select owner_profile_id from tenants order by created_at asc limit 1);
+
+create or replace function prevent_profile_privilege_escalation()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if (new.role is distinct from old.role
+      or new.is_primary_admin is distinct from old.is_primary_admin
+      or new.active is distinct from old.active)
+     and not is_primary_admin()
+     and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'FORBIDDEN: só o administrador primário pode alterar papel/privilégio/status de uma conta';
+  end if;
+
+  if new.platform_owner is distinct from old.platform_owner
+     and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'FORBIDDEN: platform_owner só pode ser alterado internamente';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_prevent_profile_privilege_escalation on profiles;
+create trigger trg_prevent_profile_privilege_escalation
+  before update of role, is_primary_admin, active, platform_owner on profiles
+  for each row execute function prevent_profile_privilege_escalation();
+```
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

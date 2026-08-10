@@ -47,8 +47,26 @@ const router = {
 
     const { config, params } = match;
     const wantsRole = config.role;
-    if (wantsRole !== 'any' && ((wantsRole === 'gerente' && !isGerente()) || (wantsRole === 'cliente' && !isCliente()))) {
+    if (wantsRole !== 'any' && (
+      (wantsRole === 'gerente' && !isGerente()) ||
+      (wantsRole === 'cliente' && !isCliente()) ||
+      (wantsRole === 'plataforma' && !isPlatformOwner())
+    )) {
       this.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
+      return;
+    }
+    // Rota de plataforma acessada via hash direto (ex: recarregar a página
+    // estando em #/plataforma/inicio) sem o modo estar de fato ligado —
+    // sincroniza o modo, senão renderShellForRole() mostraria o menu errado
+    // (gerente/cliente) por baixo de uma tela de plataforma.
+    if (wantsRole === 'plataforma' && currentMode() !== 'plataforma') {
+      switchMode('plataforma');
+      return;
+    }
+    // Inverso: saiu do modo plataforma (trocou no topbar) mas o hash ainda
+    // aponta pra uma rota de plataforma — evita ficar preso lá.
+    if (wantsRole !== 'plataforma' && isPlatformOwner() && currentMode() === 'plataforma' && wantsRole !== 'any') {
+      switchMode('emprestimos');
       return;
     }
     // Algumas telas de gerente (Planejamento, Configurações) são exclusivas

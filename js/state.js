@@ -20,6 +20,28 @@ function isCliente() {
   return !!App.profile && App.profile.role === 'cliente';
 }
 
+function isPlatformOwner() {
+  return !!(App.profile && App.profile.platform_owner);
+}
+
+// Modo "Empréstimos" (a financeira do dono) x "Plataforma SaaS" (gestão da
+// plataforma inteira) — só existe pra quem é platform_owner. Guardado em
+// variável de módulo, sem persistência: cada login/reload volta pra
+// "Empréstimos" por padrão, de propósito (evita ficar preso numa tela da
+// plataforma sem querer entre uma sessão e outra).
+let currentModeValue = 'emprestimos';
+
+function currentMode() {
+  return isPlatformOwner() ? currentModeValue : 'emprestimos';
+}
+
+function switchMode(mode) {
+  if (!isPlatformOwner() || mode === currentModeValue) return;
+  currentModeValue = mode;
+  renderShellForRole();
+  router.navigate(mode === 'plataforma' ? '#/plataforma/inicio' : '#/gerente/dashboard');
+}
+
 function userDisplayName() {
   if (App.profile && App.profile.full_name) return App.profile.full_name;
   const meta = (App.session && App.session.user.user_metadata) || {};
