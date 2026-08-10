@@ -503,6 +503,19 @@ as $$
   );
 $$;
 
+-- Dono da plataforma inteira (Fase 2/3 da transformação em SaaS multi-
+-- empresa) — global, não por-tenant. Diferente de is_primary_admin(), que
+-- qualquer empresa cliente do SaaS também tem (o admin primário DELA).
+create or replace function is_platform_owner()
+returns boolean
+language sql stable
+security definer set search_path = public
+as $$
+  select exists (
+    select 1 from profiles where id = auth.uid() and platform_owner and active
+  );
+$$;
+
 create or replace function is_active_gerente(p_id uuid)
 returns boolean
 language sql stable
@@ -2212,6 +2225,78 @@ begin
 end;
 $$;
 
+-- 5.14 Gestão de tenants (Fase 3 da transformação em SaaS — Administrador
+-- Master gerencia as empresas clientes da plataforma, sem cobrança ainda).
+
+-- Lista todas as empresas + estatísticas básicas — só o Administrador
+-- Master vê isto (cada empresa continua só enxergando a própria via
+-- tenants_select de RLS).
+create or replace function list_tenants_with_stats()
+returns table (
+  id uuid,
+  name text,
+  active boolean,
+  referrals_enabled boolean,
+  created_at timestamptz,
+  owner_profile_id uuid,
+  admin_name text,
+  admin_email text,
+  gerente_count bigint,
+  cliente_count bigint,
+  contract_count bigint
+)
+language plpgsql
+stable
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  return query
+  select
+    t.id, t.name, t.active, t.referrals_enabled, t.created_at, t.owner_profile_id,
+    p.full_name, p.email,
+    (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente'),
+    (select count(*) from clients c where c.tenant_id = t.id),
+    (select count(*) from loan_contracts lc where lc.tenant_id = t.id)
+  from tenants t
+  left join profiles p on p.id = t.owner_profile_id
+  order by t.created_at asc;
+end;
+$$;
+
+-- Renomear/(des)ativar uma empresa. Trava de segurança: o Administrador
+-- Master nunca consegue desativar o PRÓPRIO tenant por aqui (se travasse a
+-- própria conta, ninguém mais poderia reverter — só um acesso direto ao
+-- banco resolveria).
+create or replace function update_tenant(p_tenant_id uuid, p_name text, p_active boolean)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  if p_tenant_id = current_tenant_id() and not p_active then
+    raise exception 'CANNOT_DEACTIVATE_OWN_TENANT';
+  end if;
+  update tenants set
+    name = coalesce(nullif(trim(p_name), ''), name),
+    active = p_active
+  where id = p_tenant_id;
+end;
+$$;
+
+-- Usada no login (js/auth.js) pra bloquear acesso de QUALQUER usuário
+-- (gerente ou cliente) de uma empresa suspensa pelo Administrador Master —
+-- sem exigir is_gerente()/is_platform_owner(), só o próprio tenant de quem
+-- chama. Não vaza nada sensível (só um boolean sobre a própria empresa).
+create or replace function is_my_tenant_active()
+returns boolean
+language sql stable
+security definer set search_path = public
+as $$
+  select coalesce((select active from tenants where id = current_tenant_id()), true);
+$$;
+
 -- ============================================================================
 -- 6. ROW LEVEL SECURITY
 -- ============================================================================
@@ -2232,10 +2317,11 @@ alter table tenants enable row level security;
 
 -- tenants — cada gerente só vê a PRÓPRIA linha (comparação é com o id da
 -- própria tabela, não com uma coluna tenant_id — tenants É a entidade
--- tenant, não referencia uma). Sem policy de insert/update/delete ainda —
--- criar/editar tenant só existe a partir da Fase 3, via RPC security
--- definer.
-create policy "tenants_select" on tenants for select using (is_gerente() and id = current_tenant_id());
+-- tenant, não referencia uma); o Administrador Master vê TODAS (Fase 3 —
+-- tela "Empresas"). Sem policy de insert/update/delete — criar/editar
+-- tenant é sempre via RPC security definer (create_tenant/update_tenant).
+create policy "tenants_select" on tenants for select
+  using (is_platform_owner() or (is_gerente() and id = current_tenant_id()));
 
 -- profiles
 -- is_gerente() sozinho, sem checar tenant_id, deixaria um gerente de
@@ -2355,14 +2441,16 @@ create policy "settings_gerente_update" on system_settings for update
 create policy "planning_debts_gerente_all" on planning_debts for all
   using (is_primary_admin() and tenant_id = current_tenant_id()) with check (is_primary_admin());
 
--- audit_log — só leitura, e só gerente. Escrita é exclusivamente via
--- log_audit_event() (security definer, bypassa RLS), inclusive pra registrar
--- eventos sem sessão (login falho) — por isso não existe policy de insert.
--- tenant_id é NULLABLE aqui (eventos sem sessão não sabem o tenant) — linhas
--- com tenant_id nulo ficam invisíveis até a Fase 2/3 dar visibilidade
--- cross-tenant ao Administrador Master (ver migration_031.sql).
-create policy "audit_log_select_gerente" on audit_log for select
-  using (is_gerente() and tenant_id = current_tenant_id());
+-- audit_log — só leitura, e só o Administrador Master (Fase 3, decisão
+-- explícita do fundador: Auditoria NUNCA é uma tela do produto SaaS, nem
+-- pro admin primário de uma empresa cliente — só ele vê). Escrita é
+-- exclusivamente via log_audit_event() (security definer, bypassa RLS),
+-- inclusive pra registrar eventos sem sessão (login falho) — por isso não
+-- existe policy de insert. is_platform_owner() enxerga TODOS os tenants de
+-- propósito (inclusive linhas com tenant_id nulo, de eventos sem sessão) —
+-- é o único lugar do sistema com visibilidade cross-tenant intencional.
+create policy "audit_log_select_platform_owner" on audit_log for select
+  using (is_platform_owner());
 
 -- ============================================================================
 -- 7. ÍNDICES DE APOIO

@@ -25,6 +25,8 @@ const AUDIT_ACTION_LABELS = {
   emprestimo_solicitado: 'Empréstimo solicitado',
   perda_manual: 'Parcela marcada como perda',
   perda_revertida: 'Perda revertida',
+  empresa_criada: 'Empresa criada',
+  empresa_editada: 'Empresa editada',
   erro_sistema: 'Erro do sistema',
 };
 
@@ -161,4 +163,4 @@ function paintAuditoria(root, { logs, summary }) {
   };
 }
 
-registerRoute('gerente/auditoria', { role: 'gerente', screenId: 'gerente-auditoria', title: 'Auditoria', render: renderGerenteAuditoria });
+registerRoute('gerente/auditoria', { role: 'gerente', screenId: 'gerente-auditoria', title: 'Auditoria', platformOwnerOnly: true, render: renderGerenteAuditoria });

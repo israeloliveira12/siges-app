@@ -35,10 +35,22 @@ function currentMode() {
   return isPlatformOwner() ? currentModeValue : 'emprestimos';
 }
 
-function switchMode(mode) {
+// Só troca a flag + repinta o shell (sidebar/tabbar) — NÃO navega. Usada
+// pelo router (js/router.js) pra manter o modo em sincronia quando o hash
+// já aponta pra uma rota de um "mundo" diferente do modo atual (ex: F5 em
+// #/plataforma/empresas estando ainda em modo 'emprestimos') — só sincroniza
+// o menu, deixa o hash já correto seguir seu fluxo normal de renderização.
+function setMode(mode) {
   if (!isPlatformOwner() || mode === currentModeValue) return;
   currentModeValue = mode;
   renderShellForRole();
+}
+
+// Troca de modo pelo clique na pílula do topbar — navega pra tela padrão do
+// modo escolhido, já que aqui não existe nenhum hash-alvo específico.
+function switchMode(mode) {
+  if (!isPlatformOwner() || mode === currentModeValue) return;
+  setMode(mode);
   router.navigate(mode === 'plataforma' ? '#/plataforma/inicio' : '#/gerente/dashboard');
 }
 

@@ -66,6 +66,21 @@ async function onAuthenticated(session) {
 
   await loadGlobalReferenceData();
 
+  // Empresa (tenant) suspensa pelo Administrador Master — bloqueia QUALQUER
+  // usuário dela, gerente ou cliente, antes de qualquer outra checagem
+  // (Fase 3 da transformação em SaaS). is_my_tenant_active() nunca falha
+  // pra ninguém antes desta fase (toda empresa nasce ativa), então isso é
+  // best-effort: erro de rede aqui não deve travar o login de todo mundo.
+  try {
+    const { data: tenantActive } = await supa.rpc('is_my_tenant_active');
+    if (tenantActive === false) {
+      document.getElementById('app').classList.remove('ready');
+      document.getElementById('auth-screen').classList.add('active');
+      renderTenantSuspendedScreen();
+      return;
+    }
+  } catch (e) { /* best-effort — não bloqueia o login por falha de rede */ }
+
   // Desativar um gerente não revoga o token de sessão já emitido — sem essa
   // checagem, ele entrava no shell inteiro (sidebar/dashboard/tabbar) e só
   // descobria que foi desativado quando cada query/RPC (bloqueadas por

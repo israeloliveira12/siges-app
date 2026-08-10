@@ -22,14 +22,18 @@ const NAV_ITEMS = {
     { route: 'gerente/relatorios', label: 'Relatórios', icon: 'chart' },
     { route: 'gerente/score', label: 'Score de Clientes', icon: 'score' },
     { route: 'gerente/planejamento', label: 'Planejamento', icon: 'wallet', primaryOnly: true },
-    { route: 'gerente/auditoria', label: 'Auditoria', icon: 'audit' },
+    // Auditoria nunca é uma tela do produto SaaS (decisão explícita do
+    // fundador, 2026-08-09) — nem pro admin primário de uma empresa
+    // cliente, só pro Administrador Master. Reforçado em RLS também (ver
+    // migration_036.sql), isto aqui só evita mostrar um item de menu morto.
+    { route: 'gerente/auditoria', label: 'Auditoria', icon: 'audit', platformOwnerOnly: true },
     { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings', primaryOnly: true },
   ],
-  // Modo "Plataforma SaaS" (Fase 2) — só existe pra quem é platform_owner.
-  // Só "Início" por enquanto (stub); Empresas/Planos/Métricas chegam nas
-  // próximas fases, quando existir de fato o que gerenciar.
+  // Modo "Plataforma SaaS" — só existe pra quem é platform_owner. Planos/
+  // Métricas chegam nas próximas fases.
   plataforma: [
     { route: 'plataforma/inicio', label: 'Início', icon: 'dashboard' },
+    { route: 'plataforma/empresas', label: 'Empresas', icon: 'users' },
   ],
 };
 
@@ -42,7 +46,7 @@ const NAV_ITEMS = {
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/indicacoes', 'cliente/score'],
   gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/lancamentos', 'gerente/contratos'],
-  plataforma: ['plataforma/inicio'],
+  plataforma: ['plataforma/inicio', 'plataforma/empresas'],
 };
 
 function navLinkHtml(item, mobile) {
@@ -88,7 +92,10 @@ function renderShellForRole() {
   const inPlatformMode = isPlatformOwner() && currentMode() === 'plataforma';
   const role = inPlatformMode ? 'plataforma' : (isGerente() ? 'gerente' : 'cliente');
   const isPrimary = !!(App.profile && App.profile.is_primary_admin);
-  const items = NAV_ITEMS[role].filter((i) => (!i.primaryOnly || isPrimary) && (!i.referralOnly || App.hasReferrals));
+  const items = NAV_ITEMS[role].filter((i) =>
+    (!i.primaryOnly || isPrimary) &&
+    (!i.referralOnly || App.hasReferrals) &&
+    (!i.platformOwnerOnly || isPlatformOwner()));
 
   renderModeSwitch();
 

@@ -285,6 +285,30 @@ function renderDeactivatedGerenteScreen() {
   document.getElementById('deactivated-signout').onclick = handleSignOut;
 }
 
+// Empresa (tenant) suspensa pelo Administrador Master (Fase 3 da
+// transformação em SaaS) — bloqueia gerente E cliente da mesma empresa,
+// checado logo no login via is_my_tenant_active(). Mesmo padrão visual de
+// renderDeactivatedGerenteScreen(), mensagem adaptada pro nível de empresa
+// em vez de conta individual.
+function renderTenantSuspendedScreen() {
+  const root = document.getElementById('auth-screen');
+  root.innerHTML = `
+    <div class="auth-shell">
+      <div class="auth-card text-center">
+        <div class="auth-logo">
+          ${Icons.logo}
+          <div class="name">SIGES</div>
+          <div class="sub">Serviços Financeiros</div>
+        </div>
+        <div class="auth-error">O acesso desta empresa foi suspenso.</div>
+        <p class="text-sm text-soft mt-14">Fale com o responsável pela sua empresa ou com a Siges se acredita que isso é um engano.</p>
+        <button class="btn btn-outline btn-block mt-20" id="tenant-suspended-signout">Sair</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('tenant-suspended-signout').onclick = handleSignOut;
+}
+
 function renderResetPasswordModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';

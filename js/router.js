@@ -56,18 +56,19 @@ const router = {
       return;
     }
     // Rota de plataforma acessada via hash direto (ex: recarregar a página
-    // estando em #/plataforma/inicio) sem o modo estar de fato ligado —
-    // sincroniza o modo, senão renderShellForRole() mostraria o menu errado
-    // (gerente/cliente) por baixo de uma tela de plataforma.
+    // estando em #/plataforma/empresas) sem o modo estar de fato ligado —
+    // sincroniza SÓ o modo (setMode, não switchMode: sem isso a navegação
+    // forçava de volta pra #/plataforma/inicio, perdendo a rota pedida —
+    // bug real pego no preview ao testar a 2ª rota de plataforma). O resto
+    // desta função continua normalmente e renderiza a rota já casada acima.
     if (wantsRole === 'plataforma' && currentMode() !== 'plataforma') {
-      switchMode('plataforma');
-      return;
+      setMode('plataforma');
     }
     // Inverso: saiu do modo plataforma (trocou no topbar) mas o hash ainda
-    // aponta pra uma rota de plataforma — evita ficar preso lá.
-    if (wantsRole !== 'plataforma' && isPlatformOwner() && currentMode() === 'plataforma' && wantsRole !== 'any') {
-      switchMode('emprestimos');
-      return;
+    // aponta pra uma rota de plataforma — evita ficar com o menu errado por
+    // baixo de uma tela gerente/cliente.
+    if (wantsRole !== 'plataforma' && wantsRole !== 'any' && isPlatformOwner() && currentMode() === 'plataforma') {
+      setMode('emprestimos');
     }
     // Algumas telas de gerente (Planejamento, Configurações) são exclusivas
     // do admin primário — os demais gerentes nem chegam a ver a tela.
@@ -79,6 +80,12 @@ const router = {
     // hash direto sem isso redireciona, mesma lógica de primaryOnly acima.
     if (config.referralOnly && !App.hasReferrals) {
       this.navigate('#/cliente/dashboard');
+      return;
+    }
+    // Auditoria é exclusiva do Administrador Master — mesma lógica de
+    // primaryOnly acima, mas checando platform_owner em vez de is_primary_admin.
+    if (config.platformOwnerOnly && !isPlatformOwner()) {
+      this.navigate('#/gerente/dashboard');
       return;
     }
 

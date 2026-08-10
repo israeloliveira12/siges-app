@@ -40,7 +40,7 @@ export async function getCallerProfile(accessToken) {
   });
   if (!ok || !data || !data.id) return null;
 
-  const profileRes = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${data.id}&select=id,role,active,is_primary_admin,tenant_id`, { method: 'GET' });
+  const profileRes = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${data.id}&select=id,role,active,is_primary_admin,platform_owner,tenant_id`, { method: 'GET' });
   if (!profileRes.ok || !Array.isArray(profileRes.data) || !profileRes.data.length) return null;
   return profileRes.data[0];
 }
