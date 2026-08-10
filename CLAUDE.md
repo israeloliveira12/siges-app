@@ -746,6 +746,43 @@ Durante a Fase 1b o usuário lembrou de um requisito que eu não tinha capturado
 - `schema.sql` sincronizado (tabela `tenants` ganhou a coluna já na `create table`, insert do Tenant #1 já bootstrap com `referrals_enabled=true`, as 5 funções atualizadas).
 - **Confirmada rodada em produção pelo usuário (2026-08-09)**, sem erro.
 
+### Fase 1c implementada — isolamento de ESCRITA (2026-08-09)
+
+A fase de maior risco técnico do projeto inteiro. Catalogadas TODAS as ~40 funções `security definer` do schema (via grep exaustivo), classificadas em: helpers já corretos, triggers de negócio sem dado de cliente (sem risco), funções de leitura (já fechadas na Fase 1b), e **23 funções de escrita** que precisavam de correção — todas corrigidas em `supabase/migration_034.sql`.
+
+**Por que RLS (Fases 1a/1b) não bastava aqui**: toda função `security definer` roda como DONA da tabela, então BYPASSA RLS completamente. As políticas corrigidas nas fases anteriores não protegem nada dentro dessas funções — cada uma precisa validar tenant por conta própria.
+
+**Achado mais grave de toda a auditoria**: `wipe_all_business_data()` (o botão "Apagar tudo" de Configurações → Zona de risco) fazia `delete from X where true` em toda tabela de negócio — apagava a PLATAFORMA INTEIRA, não só o tenant de quem clicou. Um admin primário de qualquer empresa cliente do SaaS conseguiria, com ou sem querer, destruir os dados de todas as outras empresas de uma vez. Corrigido: cada delete agora é `where tenant_id = current_tenant_id()`.
+
+**Padrão de correção aplicado nas 23 funções**:
+- Toda leitura de linha POR ID (`select ... where id = p_X`) ganhou `and tenant_id = current_tenant_id()`, com `NOT_FOUND` genérico quando não bate (nunca revela "existe mas é de outro tenant").
+- Todo `insert` em tabela com `tenant_id` passou a setar o valor explicitamente (`v_tenant_id := current_tenant_id()` no início da função), em vez de depender do `default_tenant_id()` provisório da Fase 0.
+- `receive_payment`/`receive_cycle_payment`/`renew_installment` (as 3 funções que gravam dinheiro de verdade) eram as mais graves — sem a correção, um gerente de outra empresa podia registrar pagamento/renovação contra parcela de QUALQUER tenant.
+- `recalculate_all_scores()` iterava `select profile_id from clients` sem filtro — recalculava score de TODOS os clientes da plataforma a cada clique em "Recalcular todos". Corrigido pra `where tenant_id = current_tenant_id()`.
+- `log_audit_event()`: retenção de 500 eventos (`migration_029`) agora é PODADA POR TENANT, não pela tabela inteira — senão um tenant ativo empurraria pra fora o histórico de outro, inclusive o do dono da plataforma.
+- `recompute_contract_status()` ganhou checagem `is_gerente() or service_role` (não tinha NENHUMA antes — não vazava/corrompia dado, mas não devia ser chamável por conta de cliente).
+- `refresh_overdue_status()` (cron) e a chamada de `recalculate_client_score()`/`recompute_contract_status()` feita a partir dele foram deliberadamente MANTIDAS sem escopo de tenant — o cron roda com `service_role`, sem `auth.uid()`, e precisa processar TODOS os tenants por design. `recalculate_client_score()` ganhou lógica condicional: escopa por tenant quando chamada por um gerente de verdade, mas não quando vem do cron.
+
+**Achados extras fora do SQL (arquivos `api/*.js`, também corrigidos)** — a mesma classe de bug (escrita via `service_role`, bypassa RLS, sem checar tenant), encontrados ao seguir o rastro de `wipe_all_business_data()`:
+- **`api/wipe-all-data.js`**: buscava `role=eq.cliente` sem filtro de tenant pra depois apagar as contas `auth.users` — mesmo com o SQL corrigido, esse passo sozinho continuaria destruindo as CONTAS DE LOGIN de clientes de outras empresas. Corrigido com `&tenant_id=eq.${caller.tenant_id}`.
+- **`api/create-user.js`**: não passava `tenant_id` no `user_metadata` do novo usuário — TODO cadastro criado por QUALQUER gerente caía no Tenant #1 (fallback do `default_tenant_id()`), não importa de qual empresa o gerente really era. Corrigido passando `tenant_id: caller.tenant_id`.
+- **`api/delete-client.js`**, **`api/reset-client-password.js`**, **`api/update-user-email.js`**: nenhum verificava se o alvo (`target`) pertencia ao mesmo tenant do chamador — um gerente conseguia excluir conta, redefinir senha ou trocar e-mail de QUALQUER usuário (cliente ou até gerente) de QUALQUER outra empresa da plataforma. Sequestro de conta entre empresas. Corrigido com `target.tenant_id !== caller.tenant_id` → 404 genérico nos 3.
+- **`api/notify-event.js`**: `solicitacao_criada` notificava TODO gerente ativo da plataforma (sem filtro de tenant); outros eventos não verificavam se o `client_id` alvo pertencia ao tenant do gerente. Ambos corrigidos.
+- **`api/_lib/supabaseAdmin.js`**: `getCallerProfile()`/`getTargetProfile()` passaram a selecionar `tenant_id` também (pré-requisito pras correções acima).
+- Nenhum desses arquivos teve a ASSINATURA `(req, res)` alterada nem foi criado/removido/renomeado — só lógica interna — então, pela regra já registrada neste documento, **não precisou tocar em `netlify/`**.
+
+**Zero mudança de comportamento hoje**, mesmo raciocínio de todas as fases anteriores — só existe 1 tenant.
+
+**Teste ao vivo sugerido** (mesmo princípio das fases anteriores — mover 1 cliente real pro tenant fantasma, usando o Bloco 1 já usado na Fase 1a): com o cliente movido, tentar **receber um pagamento** de uma parcela dele (ou marcar perda, ou qualquer ação de escrita) — deve falhar com `NOT_FOUND`, mesmo a parcela existindo de verdade. Devolver com o Bloco 2 de sempre depois.
+
+**Migration a rodar**: `supabase/migration_034.sql` (23 funções, `create or replace` — nenhuma mudou assinatura, não precisa de `drop function`). As correções em `api/*.js` só entram em vigor depois do próximo `git push` + deploy na Vercel — não dependem de rodar nada manualmente, mas também não têm efeito até o deploy acontecer.
+
+**Confirmada rodada em produção pelo usuário (2026-08-09).** Testes ao vivo (mover cliente pro tenant fantasma e tentar escrever contra ele) foram deliberadamente adiados pro usuário — decisão dele, "deixar pro final, se for realmente necessário" — não vale como "não foi feito por esquecimento", é escolha consciente de não gastar esse tempo agora. Se uma sessão futura precisar confiar cegamente que a Fase 1c funciona sem nunca ter sido testada ao vivo, vale registrar esse gap.
+
+### Fase 1 completa (1a + 1b + 1c) — 2026-08-09
+
+As três sub-fases da fase de maior risco técnico do projeto (isolamento de dado entre empresas) estão implementadas e confirmadas rodadas em produção. Próximo passo é a Fase 2 (seletor de modo "Empréstimos / Plataforma SaaS" no topbar) — a primeira fase que efetivamente toca em tela/JS de UI, não só banco.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

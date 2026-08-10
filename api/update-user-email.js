@@ -30,6 +30,13 @@ export default async function handler(req, res) {
   // reset-client-password.js.
   const target = await getTargetProfile(user_id);
   if (!target) { res.status(404).json({ error: 'Usuário não encontrado.' }); return; }
+  // Fase 1c (SaaS multi-empresa): mesmo raciocínio de reset-client-password.js
+  // — sem isso, um gerente trocava o e-mail de login de qualquer usuário de
+  // qualquer outra empresa da plataforma.
+  if (target.tenant_id !== caller.tenant_id) {
+    res.status(404).json({ error: 'Usuário não encontrado.' });
+    return;
+  }
   if (target.role === 'gerente' && !caller.is_primary_admin) {
     res.status(403).json({ error: 'Apenas o Administrador pode alterar o e-mail de uma conta de gerente.' });
     return;

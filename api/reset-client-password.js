@@ -31,6 +31,14 @@ export default async function handler(req, res) {
   // pular a validação, senão a checagem de papel vira decorativa.
   const target = await getTargetProfile(user_id);
   if (!target) { res.status(404).json({ error: 'Usuário não encontrado.' }); return; }
+  // Fase 1c (SaaS multi-empresa): sem esta checagem, um gerente conseguia
+  // redefinir a senha de QUALQUER usuário (cliente ou gerente) de QUALQUER
+  // outra empresa da plataforma, só passando o user_id certo — sequestro de
+  // conta entre empresas.
+  if (target.tenant_id !== caller.tenant_id) {
+    res.status(404).json({ error: 'Usuário não encontrado.' });
+    return;
+  }
   if (target.role === 'gerente' && !caller.is_primary_admin) {
     res.status(403).json({ error: 'Apenas o Administrador pode redefinir a senha de uma conta de gerente.' });
     return;

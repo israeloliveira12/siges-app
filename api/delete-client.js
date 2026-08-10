@@ -31,6 +31,13 @@ export default async function handler(req, res) {
     res.status(400).json({ error: 'Este endpoint só pode excluir contas de cliente.' });
     return;
   }
+  // Fase 1c (SaaS multi-empresa): sem esta checagem, um gerente conseguia
+  // excluir a conta de um cliente de QUALQUER outra empresa da plataforma,
+  // só passando o profile_id certo.
+  if (target.tenant_id !== caller.tenant_id) {
+    res.status(404).json({ error: 'Cliente não encontrado.' });
+    return;
+  }
 
   const contractsRes = await supabaseAdminFetch(`/rest/v1/loan_contracts?client_id=eq.${client_id}&select=id&limit=1`, { method: 'GET' });
   if (contractsRes.ok && Array.isArray(contractsRes.data) && contractsRes.data.length) {

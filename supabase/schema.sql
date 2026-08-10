@@ -403,26 +403,42 @@ returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_tenant_id uuid;
 begin
-  insert into public.profiles (id, full_name, email, role, cpf, phone)
+  -- Fase 1c (SaaS multi-empresa): resolve o tenant a partir de raw_user_
+  -- meta_data (campo 'tenant_id', string de uuid) quando presente — é assim
+  -- que o futuro fluxo de link de convite (Fase 4) vai indicar a que empresa
+  -- o novo cadastro pertence. Hoje NENHUM fluxo de cadastro ainda envia esse
+  -- campo, então sempre cai no fallback (default_tenant_id(), seu tenant) —
+  -- zero mudança de comportamento agora, e já fica pronto pro dia em que a
+  -- Fase 4 passar a enviar o valor de verdade.
+  v_tenant_id := coalesce(
+    nullif(new.raw_user_meta_data->>'tenant_id', '')::uuid,
+    default_tenant_id()
+  );
+
+  insert into public.profiles (id, full_name, email, role, cpf, phone, tenant_id)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
     lower(new.email),
     'cliente',
     new.raw_user_meta_data->>'cpf',
-    new.raw_user_meta_data->>'phone'
+    new.raw_user_meta_data->>'phone',
+    v_tenant_id
   )
   on conflict (id) do nothing;
 
-  insert into public.clients (profile_id, company, job_title, salary, pix_key, client_group)
+  insert into public.clients (profile_id, company, job_title, salary, pix_key, client_group, tenant_id)
   values (
     new.id,
     new.raw_user_meta_data->>'company',
     new.raw_user_meta_data->>'job_title',
     nullif(new.raw_user_meta_data->>'salary', ''),
     new.raw_user_meta_data->>'pix_key',
-    nullif(new.raw_user_meta_data->>'client_group', '')
+    nullif(new.raw_user_meta_data->>'client_group', ''),
+    v_tenant_id
   )
   on conflict (profile_id) do nothing;
 
@@ -807,19 +823,30 @@ declare
   v_contract_id uuid;
   v_row jsonb;
   v_principal_sum numeric;
+  v_tenant_id uuid;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN: apenas gerentes podem criar contratos';
   end if;
 
+  v_tenant_id := current_tenant_id();
+
+  -- Fase 1c: cliente precisa pertencer ao mesmo tenant de quem cria o
+  -- contrato — sem isso, uma chamada direta à RPC (fora do fluxo normal do
+  -- app, que já só deixa escolher clientes do próprio tenant) conseguia
+  -- criar um contrato em nome de cliente de OUTRO tenant.
+  if not exists (select 1 from clients where profile_id = p_client_id and tenant_id = v_tenant_id) then
+    raise exception 'FORBIDDEN: cliente não pertence ao seu tenant';
+  end if;
+
   insert into loan_contracts (
-    client_id, created_by, origin_request_id,
+    client_id, created_by, origin_request_id, tenant_id,
     principal_amount, interest_rate, installments_count, due_type, custom_interval_days,
     has_operational_fee, operational_fee_amount,
     contract_date, first_installment_date,
     allows_renewal, late_fee_percent, late_interest_percent, observations
   ) values (
-    p_client_id, auth.uid(), p_origin_request_id,
+    p_client_id, auth.uid(), p_origin_request_id, v_tenant_id,
     p_principal_amount, p_interest_rate, p_installments_count, p_due_type, p_custom_interval_days,
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0),
     p_contract_date, p_first_installment_date,
@@ -835,18 +862,19 @@ begin
       if (v_row->>'principal_share')::numeric < 0 or (v_row->>'interest_share')::numeric < 0 then
         raise exception 'INVALID_AMOUNT';
       end if;
-      insert into installments (contract_id, sequence_number, due_date, principal_share, interest_share)
+      insert into installments (contract_id, sequence_number, due_date, principal_share, interest_share, tenant_id)
       values (
         v_contract_id,
         (v_row->>'sequence_number')::integer,
         (v_row->>'due_date')::date,
         (v_row->>'principal_share')::numeric,
-        (v_row->>'interest_share')::numeric
+        (v_row->>'interest_share')::numeric,
+        v_tenant_id
       );
     end loop;
   else
-    insert into installments (contract_id, sequence_number, due_date, principal_share, interest_share)
-    select v_contract_id, sequence_number, due_date, principal_share, interest_share
+    insert into installments (contract_id, sequence_number, due_date, principal_share, interest_share, tenant_id)
+    select v_contract_id, sequence_number, due_date, principal_share, interest_share, v_tenant_id
     from calc_installments_preview(p_principal_amount, p_interest_rate, p_installments_count, p_due_type, p_first_installment_date, p_custom_interval_days);
   end if;
 
@@ -865,14 +893,15 @@ begin
     update loan_requests
       set status = 'aprovada', resulting_contract_id = v_contract_id,
           decided_by = auth.uid(), decided_at = now()
-      where id = p_origin_request_id;
+      where id = p_origin_request_id and tenant_id = v_tenant_id;
   end if;
 
-  insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body)
+  insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body, tenant_id)
   values (
     p_client_id, 'contrato_criado', 'in_app', v_contract_id,
     'Novo contrato criado',
-    'Seu contrato #' || v_contract_id || ' no valor de R$ ' || p_principal_amount || ' foi criado.'
+    'Seu contrato #' || v_contract_id || ' no valor de R$ ' || p_principal_amount || ' foi criado.',
+    v_tenant_id
   );
 
   return v_contract_id;
@@ -1013,23 +1042,29 @@ security definer set search_path = public
 as $$
 declare
   v_client_id uuid;
+  v_tenant_id uuid;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
 
+  v_tenant_id := current_tenant_id();
+
+  -- Fase 1c: filtro de tenant_id abaixo garante que um gerente só reprova
+  -- solicitação do próprio tenant — REQUEST_NOT_FOUND_OR_ALREADY_DECIDED
+  -- também cobre "existe mas é de outro tenant", sem revelar a diferença.
   update loan_requests
     set status = 'reprovada', decision_reason = p_reason, decided_by = auth.uid(), decided_at = now()
-    where id = p_request_id and status = 'pendente'
+    where id = p_request_id and status = 'pendente' and tenant_id = v_tenant_id
     returning client_id into v_client_id;
 
   if v_client_id is null then
     raise exception 'REQUEST_NOT_FOUND_OR_ALREADY_DECIDED';
   end if;
 
-  insert into notifications_log (recipient_id, event, channel, title, body)
+  insert into notifications_log (recipient_id, event, channel, title, body, tenant_id)
   values (v_client_id, 'solicitacao_reprovada', 'in_app', 'Solicitação reprovada',
-          coalesce('Motivo: ' || p_reason, 'Sua solicitação de empréstimo foi reprovada.'));
+          coalesce('Motivo: ' || p_reason, 'Sua solicitação de empréstimo foi reprovada.'), v_tenant_id);
 end;
 $$;
 
@@ -1051,6 +1086,16 @@ declare
   v_has_loss boolean;
   v_new_status contract_status;
 begin
+  -- Fase 1c: só existia checagem nenhuma antes — qualquer cliente autenticado
+  -- podia chamar essa RPC direto. Não vaza/corrompe dado real (recalcula a
+  -- partir do estado verdadeiro das parcelas, não aceita valor arbitrário),
+  -- mas não deveria ser chamável por conta de cliente. Precisa aceitar
+  -- service_role porque também é chamada de dentro de refresh_overdue_status
+  -- (cron diário, sem sessão de usuário).
+  if not is_gerente() and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'FORBIDDEN';
+  end if;
+
   select
     exists(select 1 from installments where contract_id = p_contract_id and status = 'atrasada')
       or exists(select 1 from renewal_cycles where contract_id = p_contract_id and status = 'atrasada'),
@@ -1098,12 +1143,24 @@ declare
   v_pay_principal numeric;
   v_pay_late numeric;
   v_after_interest numeric;
+  v_tenant_id uuid;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
 
-  select * into v_installment from installments where id = p_installment_id for update;
+  v_tenant_id := current_tenant_id();
+
+  -- Fase 1c: sem o filtro de tenant_id abaixo, um gerente de outra empresa
+  -- podia informar o id de uma parcela de QUALQUER tenant e registrar um
+  -- pagamento contra ela — grava dinheiro no lugar errado, o tipo de bug
+  -- mais grave desta fase inteira. v_installment.id is null cobre "não
+  -- existe" e "existe mas é de outro tenant" com a mesma mensagem, sem
+  -- revelar a diferença.
+  select * into v_installment from installments where id = p_installment_id and tenant_id = v_tenant_id for update;
+  if v_installment.id is null then
+    raise exception 'NOT_FOUND';
+  end if;
   if v_installment.status not in ('pendente', 'atrasada') then
     raise exception 'INSTALLMENT_NOT_PAYABLE';
   end if;
@@ -1138,12 +1195,12 @@ begin
   insert into payments (
     contract_id, installment_id, payment_kind, amount_received,
     principal_component, interest_component, late_charge_amount,
-    has_operational_fee, operational_fee_amount, received_by, notes, received_at
+    has_operational_fee, operational_fee_amount, received_by, notes, received_at, tenant_id
   ) values (
     v_contract.id, p_installment_id, 'quitacao_parcela', p_amount_received,
     v_pay_principal, v_pay_interest + v_pay_late, v_pay_late,
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes,
-    coalesce(p_received_at, current_date)
+    coalesce(p_received_at, current_date), v_tenant_id
   ) returning id into v_payment_id;
 
   update installments set
@@ -1155,14 +1212,14 @@ begin
     update installments set status = 'paga', paid_at = coalesce(p_received_at, current_date) where id = p_installment_id;
     perform recompute_contract_status(v_contract.id);
 
-    insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body)
+    insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body, tenant_id)
     values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id, p_installment_id,
-            'Pagamento recebido', 'Recebemos seu pagamento de R$ ' || p_amount_received || '.');
+            'Pagamento recebido', 'Recebemos seu pagamento de R$ ' || p_amount_received || '.', v_tenant_id);
   else
-    insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body)
+    insert into notifications_log (recipient_id, event, channel, related_contract_id, related_installment_id, title, body, tenant_id)
     values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id, p_installment_id,
             'Pagamento parcial recebido',
-            'Recebemos R$ ' || p_amount_received || '. Restam R$ ' || round(v_remaining_total - p_amount_received, 2) || ' desta parcela.');
+            'Recebemos R$ ' || p_amount_received || '. Restam R$ ' || round(v_remaining_total - p_amount_received, 2) || ' desta parcela.', v_tenant_id);
   end if;
 
   return v_payment_id;
@@ -1201,10 +1258,13 @@ declare
   v_status installment_status;
   v_installments_count integer;
   v_allows_renewal boolean;
+  v_tenant_id uuid;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
+
+  v_tenant_id := current_tenant_id();
 
   if p_interest_only_amount < 0 then
     raise exception 'INVALID_AMOUNT';
@@ -1222,21 +1282,26 @@ begin
     -- novo ciclo, fazendo o valor já pago "sumir" do saldo devedor do
     -- cliente. greatest(0, ...) é defesa extra contra qualquer estado
     -- inconsistente anterior (parcela editada com valor abaixo do já pago).
+    -- Fase 1c: filtro de tenant_id evita renovar parcela de outro tenant.
     select i.contract_id,
            greatest(0, i.principal_share - i.principal_paid_partial),
            greatest(0, i.interest_share - i.interest_paid_partial),
            i.status
       into v_contract_id, v_principal, v_interest, v_status
-      from installments i where i.id = p_source_id for update;
+      from installments i where i.id = p_source_id and i.tenant_id = v_tenant_id for update;
   else
     select rc.contract_id, 0, (rc.full_debt_amount - 0), rc.status
       into v_contract_id, v_principal, v_interest, v_status
-      from renewal_cycles rc where rc.id = p_source_id for update;
+      from renewal_cycles rc where rc.id = p_source_id and rc.tenant_id = v_tenant_id for update;
     -- para ciclos já renovados, o "capital" permanece o mesmo da 1ª parcela original;
     -- full_debt_amount do ciclo anterior já é o total (capital+juros) então usamos ele
-    select rc.full_debt_amount into v_full_debt from renewal_cycles rc where rc.id = p_source_id;
+    select rc.full_debt_amount into v_full_debt from renewal_cycles rc where rc.id = p_source_id and rc.tenant_id = v_tenant_id;
     v_principal := 0;
     v_interest := v_full_debt; -- mantém o valor cheio como base do próximo ciclo abaixo
+  end if;
+
+  if v_contract_id is null then
+    raise exception 'NOT_FOUND';
   end if;
 
   -- defesa contra corrida: duplo-clique ou dois gerentes renovando a mesma
@@ -1280,12 +1345,12 @@ begin
 
   insert into renewal_cycles (
     contract_id, cycle_number, origin_installment_id, previous_cycle_id,
-    interest_only_amount, full_debt_amount, new_due_date, created_by
+    interest_only_amount, full_debt_amount, new_due_date, created_by, tenant_id
   ) values (
     v_contract_id, v_cycle_number,
     case when p_source_type = 'installment' then p_source_id else null end,
     case when p_source_type = 'renewal_cycle' then p_source_id else null end,
-    p_interest_only_amount, v_full_debt, v_new_due_date, auth.uid()
+    p_interest_only_amount, v_full_debt, v_new_due_date, auth.uid(), v_tenant_id
   ) returning id into v_new_cycle_id;
 
   if p_source_type = 'installment' then
@@ -1297,12 +1362,12 @@ begin
   insert into payments (
     contract_id, renewal_cycle_id, payment_kind, amount_received,
     principal_component, interest_component, late_charge_amount,
-    has_operational_fee, operational_fee_amount, received_by, notes, received_at
+    has_operational_fee, operational_fee_amount, received_by, notes, received_at, tenant_id
   ) values (
     v_contract_id, v_new_cycle_id, 'renovacao_juros', p_interest_only_amount + coalesce(p_late_charge_amount, 0),
     0, p_interest_only_amount + coalesce(p_late_charge_amount, 0), coalesce(p_late_charge_amount, 0),
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes,
-    coalesce(p_received_at, current_date)
+    coalesce(p_received_at, current_date), v_tenant_id
   ) returning id into v_payment_id;
 
   -- Inclui 'perda' de propósito: um contrato marcado em cobrança que ainda
@@ -1313,9 +1378,9 @@ begin
   update loan_contracts set status = 'em_aberto', updated_at = now()
     where id = v_contract_id and status in ('em_aberto', 'atrasado', 'perda');
 
-  insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body)
+  insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body, tenant_id)
   values (v_client_id, 'renovacao_registrada', 'in_app', v_contract_id,
-          'Renovação registrada', 'Sua dívida foi renovada. Novo vencimento: ' || v_new_due_date);
+          'Renovação registrada', 'Sua dívida foi renovada. Novo vencimento: ' || v_new_due_date, v_tenant_id);
 
   return v_new_cycle_id;
 end;
@@ -1343,12 +1408,21 @@ declare
   v_interest numeric;
   v_full_amount_due numeric;
   v_payment_id uuid;
+  v_tenant_id uuid;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
 
-  select * into v_cycle from renewal_cycles where id = p_cycle_id for update;
+  v_tenant_id := current_tenant_id();
+
+  -- Fase 1c: mesmo raciocínio de receive_payment() — sem o filtro de
+  -- tenant_id, um gerente de outra empresa conseguia quitar um ciclo de
+  -- renovação de QUALQUER tenant.
+  select * into v_cycle from renewal_cycles where id = p_cycle_id and tenant_id = v_tenant_id for update;
+  if v_cycle.id is null then
+    raise exception 'NOT_FOUND';
+  end if;
   if v_cycle.status not in ('pendente', 'atrasada') then
     raise exception 'CYCLE_NOT_PAYABLE';
   end if;
@@ -1376,20 +1450,20 @@ begin
   insert into payments (
     contract_id, renewal_cycle_id, payment_kind, amount_received,
     principal_component, interest_component, late_charge_amount,
-    has_operational_fee, operational_fee_amount, received_by, notes, received_at
+    has_operational_fee, operational_fee_amount, received_by, notes, received_at, tenant_id
   ) values (
     v_contract.id, p_cycle_id, 'quitacao_final', p_amount_received,
     v_principal, v_interest + coalesce(p_late_charge_amount, 0), coalesce(p_late_charge_amount, 0),
     p_has_operational_fee, coalesce(p_operational_fee_amount, 0), auth.uid(), p_notes,
-    coalesce(p_received_at, current_date)
+    coalesce(p_received_at, current_date), v_tenant_id
   ) returning id into v_payment_id;
 
   update renewal_cycles set status = 'paga', paid_at = coalesce(p_received_at, current_date) where id = p_cycle_id;
   perform recompute_contract_status(v_contract.id);
 
-  insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body)
+  insert into notifications_log (recipient_id, event, channel, related_contract_id, title, body, tenant_id)
   values (v_contract.client_id, 'pagamento_recebido', 'in_app', v_contract.id,
-          'Pagamento recebido', 'Recebemos seu pagamento de R$ ' || p_amount_received || '. Contrato quitado.');
+          'Pagamento recebido', 'Recebemos seu pagamento de R$ ' || p_amount_received || '. Contrato quitado.', v_tenant_id);
 
   return v_payment_id;
 end;
@@ -1473,7 +1547,7 @@ declare
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
 
-  select * into v_installment from installments where id = p_installment_id for update;
+  select * into v_installment from installments where id = p_installment_id and tenant_id = current_tenant_id() for update;
   if v_installment.id is null then raise exception 'NOT_FOUND'; end if;
   if v_installment.status not in ('pendente', 'atrasada') then
     raise exception 'INSTALLMENT_NOT_PAYABLE';
@@ -1499,7 +1573,7 @@ declare
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
 
-  select * into v_installment from installments where id = p_installment_id for update;
+  select * into v_installment from installments where id = p_installment_id and tenant_id = current_tenant_id() for update;
   if v_installment.id is null then raise exception 'NOT_FOUND'; end if;
   if v_installment.status <> 'perda' then raise exception 'NOT_IN_LOSS'; end if;
 
@@ -1524,7 +1598,7 @@ declare
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
 
-  select * into v_cycle from renewal_cycles where id = p_cycle_id for update;
+  select * into v_cycle from renewal_cycles where id = p_cycle_id and tenant_id = current_tenant_id() for update;
   if v_cycle.id is null then raise exception 'NOT_FOUND'; end if;
   if v_cycle.status not in ('pendente', 'atrasada') then
     raise exception 'INSTALLMENT_NOT_PAYABLE';
@@ -1552,7 +1626,7 @@ declare
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
 
-  select * into v_cycle from renewal_cycles where id = p_cycle_id for update;
+  select * into v_cycle from renewal_cycles where id = p_cycle_id and tenant_id = current_tenant_id() for update;
   if v_cycle.id is null then raise exception 'NOT_FOUND'; end if;
   if v_cycle.status <> 'perda' then raise exception 'NOT_IN_LOSS'; end if;
 
@@ -1584,6 +1658,13 @@ begin
   -- essa checagem, QUALQUER cliente autenticado podia chamar esta RPC direto
   -- e forçar o recálculo do score de qualquer outro cliente à vontade.
   if not is_gerente() and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'FORBIDDEN';
+  end if;
+
+  -- Fase 1c: gerente só recalcula cliente do PRÓPRIO tenant — chamada via
+  -- service_role (cron, iterando clientes de TODOS os tenants) não tem
+  -- sessão de usuário pra comparar contra, e deve continuar irrestrita.
+  if is_gerente() and not exists (select 1 from clients where profile_id = p_client_id and tenant_id = current_tenant_id()) then
     raise exception 'FORBIDDEN';
   end if;
 
@@ -1706,7 +1787,10 @@ begin
     raise exception 'FORBIDDEN';
   end if;
 
-  for v_client in select profile_id from clients loop
+  -- Fase 1c: sem o filtro de tenant_id, "Recalcular todos" (botão manual e
+  -- disparo automático no login) recalculava o score de TODOS os clientes
+  -- da PLATAFORMA inteira, não só do próprio tenant.
+  for v_client in select profile_id from clients where tenant_id = current_tenant_id() loop
     perform recalculate_client_score(v_client.profile_id);
   end loop;
 end;
@@ -1736,15 +1820,24 @@ security definer set search_path = public
 as $$
 declare
   v_referrals_enabled boolean;
+  v_tenant_id uuid;
 begin
   if not is_gerente() then
+    raise exception 'FORBIDDEN';
+  end if;
+
+  v_tenant_id := current_tenant_id();
+
+  -- Fase 1c: sem esta checagem, um gerente conseguia editar nome/CPF/
+  -- telefone/limite de crédito de cliente de QUALQUER tenant da plataforma.
+  if not exists (select 1 from clients where profile_id = p_client_id and tenant_id = v_tenant_id) then
     raise exception 'FORBIDDEN';
   end if;
 
   -- Recurso "Indicações" é exclusivo do Tenant #1 (ver tenants.referrals_
   -- enabled) — trava o valor em NULL sempre que o tenant não tem o recurso
   -- ligado, não importa o que o front-end mandar em p_referred_by_client_id.
-  select referrals_enabled into v_referrals_enabled from tenants where id = current_tenant_id();
+  select referrals_enabled into v_referrals_enabled from tenants where id = v_tenant_id;
 
   update profiles set full_name = p_full_name, cpf = p_cpf, phone = p_phone, updated_at = now()
     where id = p_client_id;
@@ -1833,7 +1926,9 @@ begin
     late_interest_percent = coalesce(p_late_interest_percent, 0),
     observations = p_observations,
     updated_at = now()
-  where id = p_contract_id;
+  -- Fase 1c: sem o filtro de tenant_id, um gerente editava contrato de
+  -- qualquer tenant informando o id direto.
+  where id = p_contract_id and tenant_id = current_tenant_id();
 end;
 $$;
 
@@ -1862,7 +1957,9 @@ declare
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
 
-  select * into v_installment from installments where id = p_installment_id;
+  -- Fase 1c: sem o filtro de tenant_id, um gerente editava/reagendava
+  -- parcela de qualquer tenant informando o id direto.
+  select * into v_installment from installments where id = p_installment_id and tenant_id = current_tenant_id();
   if v_installment.id is null then raise exception 'NOT_FOUND'; end if;
 
   -- Não deixa o novo valor ficar abaixo do que já foi pago (parcial ou
@@ -1919,12 +2016,14 @@ security definer set search_path = public
 as $$
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
-  if not exists (select 1 from payments where id = p_payment_id) then raise exception 'NOT_FOUND'; end if;
+  -- Fase 1c: sem o filtro de tenant_id, um gerente editava a taxa de um
+  -- pagamento de qualquer tenant informando o id direto.
+  if not exists (select 1 from payments where id = p_payment_id and tenant_id = current_tenant_id()) then raise exception 'NOT_FOUND'; end if;
 
   update payments set
     has_operational_fee = p_has_operational_fee,
     operational_fee_amount = coalesce(p_operational_fee_amount, 0)
-  where id = p_payment_id;
+  where id = p_payment_id and tenant_id = current_tenant_id();
 end;
 $$;
 
@@ -1936,6 +2035,12 @@ security definer set search_path = public
 as $$
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  -- Fase 1c: confirma que o contrato pertence ao próprio tenant ANTES de
+  -- excluir qualquer coisa — sem isso, um gerente conseguia apagar contrato
+  -- (e todo o histórico ligado) de QUALQUER tenant informando o id direto.
+  if not exists (select 1 from loan_contracts where id = p_contract_id and tenant_id = current_tenant_id()) then
+    raise exception 'NOT_FOUND';
+  end if;
   delete from payments where contract_id = p_contract_id;
   delete from renewal_cycles where contract_id = p_contract_id;
   delete from installments where contract_id = p_contract_id;
@@ -1959,10 +2064,12 @@ as $$
 begin
   -- Só o admin primário edita conta de gerente (2026-07-11, decisão
   -- explícita do usuário) — antes qualquer gerente conseguia editar
-  -- qualquer outro, inclusive reativar/desativar contas.
+  -- qualquer outro, inclusive reativar/desativar contas. Fase 1c: filtro de
+  -- tenant_id evita que o admin primário de um tenant edite gerente de
+  -- OUTRO tenant.
   if not is_primary_admin() then raise exception 'FORBIDDEN'; end if;
   update profiles set full_name = p_full_name, phone = p_phone, active = p_active, updated_at = now()
-    where id = p_gerente_id and role = 'gerente';
+    where id = p_gerente_id and role = 'gerente' and tenant_id = current_tenant_id();
 end;
 $$;
 
@@ -1973,14 +2080,19 @@ returns void
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_tenant_id uuid;
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  v_tenant_id := current_tenant_id();
+  -- Fase 1c: sem o filtro de tenant_id, um gerente aprovava cadastro de
+  -- cliente de QUALQUER tenant informando o id direto.
   update clients set approval_status = 'aprovado', decided_by = auth.uid(), decided_at = now(), decision_reason = null
-    where profile_id = p_client_id;
+    where profile_id = p_client_id and tenant_id = v_tenant_id;
 
-  insert into notifications_log (recipient_id, event, channel, title, body)
+  insert into notifications_log (recipient_id, event, channel, title, body, tenant_id)
   values (p_client_id, 'solicitacao_aprovada', 'in_app', 'Cadastro aprovado',
-          'Sua conta foi aprovada. Você já pode usar o SIGES normalmente.');
+          'Sua conta foi aprovada. Você já pode usar o SIGES normalmente.', v_tenant_id);
 end;
 $$;
 
@@ -1989,14 +2101,17 @@ returns void
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_tenant_id uuid;
 begin
   if not is_gerente() then raise exception 'FORBIDDEN'; end if;
+  v_tenant_id := current_tenant_id();
   update clients set approval_status = 'rejeitado', decided_by = auth.uid(), decided_at = now(), decision_reason = p_reason
-    where profile_id = p_client_id;
+    where profile_id = p_client_id and tenant_id = v_tenant_id;
 
-  insert into notifications_log (recipient_id, event, channel, title, body)
+  insert into notifications_log (recipient_id, event, channel, title, body, tenant_id)
   values (p_client_id, 'solicitacao_reprovada', 'in_app', 'Cadastro não aprovado',
-          coalesce('Motivo: ' || p_reason, 'Seu cadastro não foi aprovado.'));
+          coalesce('Motivo: ' || p_reason, 'Seu cadastro não foi aprovado.'), v_tenant_id);
 end;
 $$;
 
@@ -2017,20 +2132,28 @@ declare
   v_actor_id uuid := auth.uid();
   v_actor_name text;
   v_actor_role text;
+  v_tenant_id uuid;
 begin
   if v_actor_id is not null then
-    select full_name, role::text into v_actor_name, v_actor_role from profiles where id = v_actor_id;
+    select full_name, role::text, tenant_id into v_actor_name, v_actor_role, v_tenant_id from profiles where id = v_actor_id;
   end if;
-  insert into audit_log (actor_id, actor_name, actor_role, action, description, metadata)
-  values (v_actor_id, coalesce(v_actor_name, 'Anônimo'), v_actor_role, p_action, p_description, coalesce(p_metadata, '{}'::jsonb));
+  -- tenant_id fica NULL quando não há sessão (ex: tentativa de login falha,
+  -- onde v_actor_id já é null e não há profile pra resolver tenant nenhum) —
+  -- mesmo design nullable de audit_log já decidido na Fase 1a.
+  insert into audit_log (actor_id, actor_name, actor_role, action, description, metadata, tenant_id)
+  values (v_actor_id, coalesce(v_actor_name, 'Anônimo'), v_actor_role, p_action, p_description, coalesce(p_metadata, '{}'::jsonb), v_tenant_id);
 
   -- Retenção: mantém só os 500 eventos mais recentes (pedido do usuário,
   -- 2026-07-30) — poda a cada insert, direto aqui, em vez de depender de um
   -- cron separado (a tabela nunca cresce ilimitada, mesmo que o cron diário
   -- falhe ou não rode). Volume de inserts é baixo (uma ação por vez), então
   -- o custo desse DELETE extra a cada chamada é desprezível.
-  delete from audit_log where id in (
-    select id from audit_log order by created_at desc offset 500
+  -- Fase 1c: poda por TENANT (não mais pela tabela inteira) — sem isso, um
+  -- tenant com muita atividade podia empurrar pra fora o histórico de OUTRO
+  -- tenant, incluindo o do dono da plataforma. `is not distinct from` trata
+  -- NULL corretamente (eventos sem tenant são podados entre si, à parte).
+  delete from audit_log where tenant_id is not distinct from v_tenant_id and id in (
+    select id from audit_log where tenant_id is not distinct from v_tenant_id order by created_at desc offset 500
   );
 end;
 $$;
@@ -2043,20 +2166,29 @@ returns void
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_tenant_id uuid;
 begin
   if not is_primary_admin() then
     raise exception 'FORBIDDEN';
   end if;
 
-  delete from payments where true;
-  delete from renewal_cycles where true;
-  delete from installments where true;
-  delete from loan_contracts where true;
-  delete from loan_requests where true;
-  delete from notifications_log where true;
-  delete from push_subscriptions where true;
-  delete from clients where true;
-  delete from profiles where role = 'cliente';
+  v_tenant_id := current_tenant_id();
+
+  -- Fase 1c — ACHADO MAIS GRAVE de toda a auditoria: cada "where true" abaixo
+  -- apagava a tabela INTEIRA, de TODOS os tenants da plataforma. O admin
+  -- primário de qualquer empresa cliente do SaaS conseguia, sem querer ou
+  -- não, apagar os dados de TODAS as outras empresas de uma vez. Agora cada
+  -- delete é escopado ao próprio tenant.
+  delete from payments where tenant_id = v_tenant_id;
+  delete from renewal_cycles where tenant_id = v_tenant_id;
+  delete from installments where tenant_id = v_tenant_id;
+  delete from loan_contracts where tenant_id = v_tenant_id;
+  delete from loan_requests where tenant_id = v_tenant_id;
+  delete from notifications_log where tenant_id = v_tenant_id;
+  delete from push_subscriptions where tenant_id = v_tenant_id;
+  delete from clients where tenant_id = v_tenant_id;
+  delete from profiles where role = 'cliente' and tenant_id = v_tenant_id;
 end;
 $$;
 

@@ -40,7 +40,7 @@ export async function getCallerProfile(accessToken) {
   });
   if (!ok || !data || !data.id) return null;
 
-  const profileRes = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${data.id}&select=id,role,active,is_primary_admin`, { method: 'GET' });
+  const profileRes = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${data.id}&select=id,role,active,is_primary_admin,tenant_id`, { method: 'GET' });
   if (!profileRes.ok || !Array.isArray(profileRes.data) || !profileRes.data.length) return null;
   return profileRes.data[0];
 }
@@ -50,7 +50,7 @@ export async function getCallerProfile(accessToken) {
 // checar se o alvo é um gerente antes de decidir se o caller precisa ser
 // is_primary_admin (só o admin primário mexe em conta de gerente).
 export async function getTargetProfile(userId) {
-  const res = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${userId}&select=id,role,is_primary_admin`, { method: 'GET' });
+  const res = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${userId}&select=id,role,is_primary_admin,tenant_id`, { method: 'GET' });
   if (!res.ok || !Array.isArray(res.data) || !res.data.length) return null;
   return res.data[0];
 }

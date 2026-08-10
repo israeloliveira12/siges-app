@@ -21,8 +21,17 @@ export default async function handler(req, res) {
     return;
   }
 
-  // 1. Busca todos os clientes ANTES de apagar (para depois remover o auth.users de cada um)
-  const clientsRes = await supabaseAdminFetch('/rest/v1/profiles?role=eq.cliente&select=id', { method: 'GET' });
+  // 1. Busca os clientes do PRÓPRIO TENANT do chamador, ANTES de apagar (pra
+  // depois remover o auth.users de cada um). Fase 1c (SaaS multi-empresa):
+  // sem o filtro de tenant_id abaixo, esta busca trazia TODOS os clientes da
+  // PLATAFORMA inteira — mesmo com wipe_all_business_data() já corrigida
+  // para só apagar dado do próprio tenant, este passo continuaria excluindo
+  // a CONTA DE LOGIN (auth.users) de clientes de QUALQUER outra empresa,
+  // destruindo o acesso deles mesmo com os dados de negócio preservados.
+  const clientsRes = await supabaseAdminFetch(
+    `/rest/v1/profiles?role=eq.cliente&tenant_id=eq.${caller.tenant_id}&select=id`,
+    { method: 'GET' }
+  );
   const clientIds = clientsRes.ok ? clientsRes.data.map((c) => c.id) : [];
 
   // 2. Apaga todas as tabelas de negócio + as linhas de profiles/clients dos clientes

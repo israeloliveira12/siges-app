@@ -70,7 +70,13 @@ export default async function handler(req, res) {
   if (event === 'solicitacao_criada') {
     if (caller.role !== 'cliente') { res.status(403).json({ error: 'Apenas clientes disparam este evento' }); return; }
 
-    const gerentesRes = await supabaseAdminFetch('/rest/v1/profiles?role=eq.gerente&active=eq.true&select=id,email', { method: 'GET' });
+    // Fase 1c (SaaS multi-empresa): sem o filtro de tenant_id, uma
+    // solicitação de empréstimo notificava TODO gerente ativo da
+    // PLATAFORMA inteira, não só os do tenant do cliente que solicitou.
+    const gerentesRes = await supabaseAdminFetch(
+      `/rest/v1/profiles?role=eq.gerente&active=eq.true&tenant_id=eq.${caller.tenant_id}&select=id,email`,
+      { method: 'GET' }
+    );
     const gerentes = gerentesRes.ok ? gerentesRes.data : [];
 
     for (const g of gerentes) {
@@ -89,7 +95,12 @@ export default async function handler(req, res) {
   if (caller.role !== 'gerente') { res.status(403).json({ error: 'Apenas gerentes disparam este evento' }); return; }
   if (!client_id) { res.status(400).json({ error: 'client_id ausente' }); return; }
 
-  const clientRes = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${client_id}&select=id,email`, { method: 'GET' });
+  // Fase 1c: filtro de tenant_id evita que um gerente dispare notificação
+  // pra um cliente de OUTRA empresa da plataforma.
+  const clientRes = await supabaseAdminFetch(
+    `/rest/v1/profiles?id=eq.${client_id}&tenant_id=eq.${caller.tenant_id}&select=id,email`,
+    { method: 'GET' }
+  );
   const client = clientRes.ok && clientRes.data[0];
   if (!client) { res.status(404).json({ error: 'Cliente não encontrado' }); return; }
 

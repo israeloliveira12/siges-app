@@ -34,11 +34,16 @@ export default async function handler(req, res) {
     return;
   }
 
+  // tenant_id vai em user_metadata pra handle_new_user() (trigger em
+  // auth.users, banco) resolver o tenant certo — Fase 1c (SaaS multi-
+  // empresa): sem isso, TODO usuário criado por QUALQUER gerente caía no
+  // Tenant #1 (fallback de default_tenant_id()), não importa de qual
+  // empresa o gerente que criou realmente era.
   const createRes = await supabaseAdminFetch('/auth/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify({
       email, password, email_confirm: true,
-      user_metadata: { full_name: full_name || '' },
+      user_metadata: { full_name: full_name || '', tenant_id: caller.tenant_id },
     }),
   });
 
