@@ -125,6 +125,15 @@ function openEditEmpresaModal(tenant) {
           <span>Empresa ativa${isOwnTenant ? ' (sua própria empresa não pode ser suspensa por aqui)' : ''}</span>
         </div>
         ${!tenant.active ? '<p class="text-sm text-soft mt-8">Empresa suspensa: nenhum administrador ou cliente dela consegue entrar no sistema até reativar.</p>' : ''}
+        <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
+          <label>Link de convite</label>
+          <div class="flex gap-8 mt-8" style="align-items:center">
+            <input type="text" id="ee-invite-link" readonly value="${escapeHtml(location.origin + '/?convite=' + (tenant.invite_token || ''))}">
+            <button type="button" class="btn btn-outline btn-sm" id="ee-invite-copy" style="flex:none">Copiar</button>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm mt-8" id="ee-invite-regenerate">Gerar novo link</button>
+          <div id="ee-invite-feedback" class="mt-8"></div>
+        </div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="ee-cancel">Cancelar</button>
@@ -136,6 +145,32 @@ function openEditEmpresaModal(tenant) {
   overlay.querySelector('#ee-close').onclick = close;
   overlay.querySelector('#ee-cancel').onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  overlay.querySelector('#ee-invite-copy').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(overlay.querySelector('#ee-invite-link').value);
+      showToast('Link copiado.');
+    } catch (e) {
+      overlay.querySelector('#ee-invite-feedback').innerHTML = '<div class="auth-error">Não foi possível copiar automaticamente — selecione e copie manualmente.</div>';
+    }
+  };
+  overlay.querySelector('#ee-invite-regenerate').onclick = async () => {
+    const feedback = overlay.querySelector('#ee-invite-feedback');
+    const btn = overlay.querySelector('#ee-invite-regenerate');
+    feedback.innerHTML = '';
+    btn.disabled = true;
+    try {
+      const { data: newToken, error: regenError } = await supa.rpc('regenerate_tenant_invite_token', { p_tenant_id: tenant.id });
+      if (regenError) throw regenError;
+      overlay.querySelector('#ee-invite-link').value = `${location.origin}/?convite=${newToken}`;
+      tenant.invite_token = newToken;
+      showToast('Novo link de convite gerado.');
+    } catch (e) {
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
 
   overlay.querySelector('#ee-save').onclick = async () => {
     const feedback = overlay.querySelector('#ee-feedback');

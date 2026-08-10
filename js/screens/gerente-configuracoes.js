@@ -16,6 +16,13 @@ async function renderGerenteConfiguracoes() {
     return;
   }
   App.settings = settings;
+
+  // Link de convite (Fase 4) — best-effort: se falhar, o card de convite
+  // simplesmente não aparece, não trava o resto da tela (empresa/taxas/
+  // backup continuam funcionando normalmente).
+  const { data: inviteRows } = await supa.rpc('get_my_tenant_invite_info');
+  const inviteInfo = inviteRows && inviteRows[0];
+  const inviteLink = inviteInfo ? `${location.origin}/?convite=${inviteInfo.invite_token}` : '';
   const isPrimary = App.profile.is_primary_admin;
   if (cfgActiveTab === 'risco' && !isPrimary) cfgActiveTab = 'empresa';
 
@@ -42,6 +49,22 @@ async function renderGerenteConfiguracoes() {
           <span class="help">Usada como "praça de [cidade]" no texto das notas promissórias.</span>
         </div>
       </div>
+
+      ${inviteInfo ? `
+      <div class="card mt-14">
+        <h3>Link de convite para clientes</h3>
+        <p class="text-sm text-soft mt-8">Compartilhe este link com seus clientes — o cadastro deles já entra automaticamente na sua empresa, sem se misturar com nenhuma outra empresa da plataforma.</p>
+        <div class="field mt-14">
+          <label>Seu link de convite</label>
+          <div class="flex gap-8" style="align-items:center">
+            <input type="text" id="cfg-invite-link" readonly value="${escapeHtml(inviteLink)}">
+            <button type="button" class="btn btn-outline btn-sm" id="cfg-invite-copy" style="flex:none">Copiar</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm mt-8" id="cfg-invite-regenerate">Gerar novo link</button>
+        <p class="text-sm text-soft mt-8">Gerar um novo link invalida o anterior — quem ainda não terminou o cadastro com o link antigo vai precisar do novo.</p>
+        <div id="cfg-invite-feedback" class="mt-8"></div>
+      </div>` : ''}
 
       <div class="card mt-14">
         <h3>Configurações de atraso e perda</h3>
@@ -159,6 +182,36 @@ async function renderGerenteConfiguracoes() {
   document.getElementById('cfg-tab-backup').onclick = () => setCfgTab('backup');
   const tabRisco = document.getElementById('cfg-tab-risco');
   if (tabRisco) tabRisco.onclick = () => setCfgTab('risco');
+
+  const inviteCopyBtn = document.getElementById('cfg-invite-copy');
+  if (inviteCopyBtn) {
+    inviteCopyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(document.getElementById('cfg-invite-link').value);
+        showToast('Link copiado.');
+      } catch (e) {
+        document.getElementById('cfg-invite-feedback').innerHTML = '<div class="auth-error">Não foi possível copiar automaticamente — selecione e copie manualmente.</div>';
+      }
+    };
+  }
+  const inviteRegenerateBtn = document.getElementById('cfg-invite-regenerate');
+  if (inviteRegenerateBtn) {
+    inviteRegenerateBtn.onclick = async () => {
+      const feedback = document.getElementById('cfg-invite-feedback');
+      feedback.innerHTML = '';
+      inviteRegenerateBtn.disabled = true;
+      try {
+        const { data: newToken, error: regenError } = await supa.rpc('regenerate_tenant_invite_token');
+        if (regenError) throw regenError;
+        document.getElementById('cfg-invite-link').value = `${location.origin}/?convite=${newToken}`;
+        showToast('Novo link de convite gerado.');
+      } catch (e) {
+        feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+      } finally {
+        inviteRegenerateBtn.disabled = false;
+      }
+    };
+  }
 
   attachPhoneMask(document.getElementById('cfg-company-whatsapp'));
   setMoneyValue(document.getElementById('cfg-exit-fee-fixed'), settings.default_exit_fee_fixed);

@@ -4,6 +4,15 @@
 
 let authMode = 'login'; // 'login' | 'signup'
 
+// Link de convite (Fase 4) — `?convite=<token>` na URL vincula o cadastro
+// público à empresa dona do link, em vez de cair no tenant padrão (o seu).
+// Resolvido 1x no carregamento da página (não a cada render da tela de
+// login/troca de aba) via IIFE no fim deste arquivo. `inviteInfo` fica
+// `null` enquanto ainda não resolveu, `{ invalid: true }` se o token não
+// bate com nenhuma empresa ativa, ou `{ companyName }` se válido.
+let inviteToken = null;
+let inviteInfo = null;
+
 function setAuthError(msg) {
   const el = document.getElementById('auth-feedback');
   if (el) el.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
@@ -17,6 +26,13 @@ function setAuthMessage(msg) {
 function clearAuthFeedback() {
   const el = document.getElementById('auth-feedback');
   if (el) el.innerHTML = '';
+}
+
+function inviteBannerHtml() {
+  if (!inviteToken) return '';
+  if (!inviteInfo) return `<p class="text-sm text-soft">Verificando link de convite...</p>`;
+  if (inviteInfo.invalid) return `<div class="auth-error">Link de convite inválido ou expirado. Peça um novo link para a empresa que te convidou.</div>`;
+  return `<div class="auth-msg">Você está se cadastrando para: <strong>${escapeHtml(inviteInfo.companyName)}</strong></div>`;
 }
 
 function renderLoginScreen() {
@@ -36,6 +52,7 @@ function renderLoginScreen() {
         </div>
 
         <div id="auth-feedback"></div>
+        ${authMode === 'signup' ? inviteBannerHtml() : ''}
 
         <form id="auth-form">
           ${authMode === 'signup' ? `
@@ -82,14 +99,17 @@ function renderLoginScreen() {
             ${passwordFieldHtml('f-password', `autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}" required`)}
           </div>
           ${authMode === 'login' ? `<div class="text-sm mt-8"><a href="#" id="forgot-link" style="color:var(--accent)">Esqueci minha senha</a></div>` : ''}
-          <button type="submit" class="btn btn-primary btn-block mt-14" id="submit-btn">
+          <button type="submit" class="btn btn-primary btn-block mt-14" id="submit-btn" ${authMode === 'signup' && inviteToken && (!inviteInfo || inviteInfo.invalid) ? 'disabled' : ''}>
             ${authMode === 'login' ? 'Entrar' : 'Criar conta de cliente'}
           </button>
         </form>
 
-        <div class="auth-divider">ou</div>
-
-        <button class="google-btn" id="google-btn">${Icons.google} Continuar com Google</button>
+        ${authMode === 'signup' && inviteToken ? `
+          <p class="text-sm text-soft text-center mt-14">Cadastro via Google não está disponível para links de convite — use o formulário acima.</p>
+        ` : `
+          <div class="auth-divider">ou</div>
+          <button class="google-btn" id="google-btn">${Icons.google} Continuar com Google</button>
+        `}
 
         <p class="text-sm text-soft text-center mt-14">
           Este cadastro é exclusivo para clientes. Contas de administrador são criadas internamente pela equipe Siges.
@@ -100,7 +120,8 @@ function renderLoginScreen() {
 
   document.getElementById('tab-login').onclick = () => { authMode = 'login'; renderLoginScreen(); };
   document.getElementById('tab-signup').onclick = () => { authMode = 'signup'; renderLoginScreen(); };
-  document.getElementById('google-btn').onclick = () => withAuthButtonsDisabled(['google-btn'], doGoogleSignIn);
+  const googleBtn = document.getElementById('google-btn');
+  if (googleBtn) googleBtn.onclick = () => withAuthButtonsDisabled(['google-btn'], doGoogleSignIn);
 
   const cpfInput = document.getElementById('f-cpf');
   if (cpfInput) cpfInput.oninput = () => { cpfInput.value = formatCpf(cpfInput.value); };
@@ -127,6 +148,14 @@ function renderLoginScreen() {
       } else {
         const cpf = document.getElementById('f-cpf').value.trim();
         if (cpf.replace(/\D/g, '').length !== 11) { setAuthError('Informe um CPF válido (11 dígitos).'); return; }
+        // Defesa em profundidade: o botão já vem `disabled` quando o token é
+        // inválido, mas nunca confiar só nisso — um cadastro com link quebrado
+        // não pode silenciosamente cair no tenant padrão (misturaria cliente
+        // de outra empresa com o seu próprio negócio).
+        if (inviteToken && (!inviteInfo || inviteInfo.invalid)) {
+          setAuthError('Link de convite inválido ou expirado. Peça um novo link para a empresa que te convidou.');
+          return;
+        }
         const profileData = {
           full_name: document.getElementById('f-name').value.trim(),
           cpf,
@@ -137,6 +166,9 @@ function renderLoginScreen() {
           client_group: document.getElementById('f-group').value || null,
           pix_key: document.getElementById('f-pix-key').value.trim(),
         };
+        if (inviteToken && inviteInfo && inviteInfo.companyName) {
+          profileData.invite_token = inviteToken;
+        }
         await doSignUp(email, password, profileData);
       }
     });
@@ -342,3 +374,26 @@ function renderResetPasswordModal() {
     showToast('Senha atualizada com sucesso.');
   };
 }
+
+// Detecta `?convite=<token>` na URL (link de convite, Fase 4) e resolve 1x
+// no carregamento da página — nunca a cada render/troca de aba (evita
+// refazer a chamada de rede toda hora). Roda antes de qualquer autenticação
+// (é só leitura pública, resolve_invite_token() é anon), então não depende
+// de App.session/App.profile existirem ainda.
+(function initInviteTokenFromUrl() {
+  const token = new URLSearchParams(location.search).get('convite');
+  if (!token) return;
+  inviteToken = token;
+  supa.rpc('resolve_invite_token', { p_token: token }).then(
+    ({ data, error }) => {
+      inviteInfo = (!error && Array.isArray(data) && data.length) ? { companyName: data[0].company_name } : { invalid: true };
+      const authScreen = document.getElementById('auth-screen');
+      if (authScreen && authScreen.classList.contains('active')) renderLoginScreen();
+    },
+    () => {
+      inviteInfo = { invalid: true };
+      const authScreen = document.getElementById('auth-screen');
+      if (authScreen && authScreen.classList.contains('active')) renderLoginScreen();
+    }
+  );
+})();

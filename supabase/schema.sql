@@ -318,6 +318,11 @@ create table tenants (
   -- clientes pagantes entre si) — este flag é incondicional a qualquer
   -- plano, "isso nunca existe fora do tenant do fundador".
   referrals_enabled boolean not null default false,
+  -- Link de convite (Fase 4) — token opaco e rotacionável, nunca o `id` real
+  -- do tenant, pra poder ser regenerado sem quebrar a identidade interna da
+  -- empresa. Usado em `?convite=<token>` no cadastro público, resolvido
+  -- por resolve_invite_token() e consumido por handle_new_user().
+  invite_token text not null unique default replace(gen_random_uuid()::text, '-', ''),
   created_at timestamptz not null default now()
 );
 
@@ -415,15 +420,20 @@ as $$
 declare
   v_tenant_id uuid;
 begin
-  -- Fase 1c (SaaS multi-empresa): resolve o tenant a partir de raw_user_
-  -- meta_data (campo 'tenant_id', string de uuid) quando presente — é assim
-  -- que o futuro fluxo de link de convite (Fase 4) vai indicar a que empresa
-  -- o novo cadastro pertence. Hoje NENHUM fluxo de cadastro ainda envia esse
-  -- campo, então sempre cai no fallback (default_tenant_id(), seu tenant) —
-  -- zero mudança de comportamento agora, e já fica pronto pro dia em que a
-  -- Fase 4 passar a enviar o valor de verdade.
+  -- Fase 1c (SaaS multi-empresa): 'tenant_id' em raw_user_meta_data resolve
+  -- direto o tenant — usado só pelos fluxos SERVIDOR-A-SERVIDOR de criação
+  -- de conta (api/create-user.js, api/create-tenant.js — service_role,
+  -- tenant_id vem de um profile já autenticado no servidor, nunca do corpo
+  -- da requisição HTTP). 'invite_token' (Fase 4) é o caminho pro cadastro
+  -- PÚBLICO (login.js, cliente se autocadastrando com `?convite=<token>` na
+  -- URL) — resolve_invite_token() já validou o token antes de mostrar o
+  -- formulário, mas o valor final é sempre resolvido aqui de novo, no
+  -- servidor, nunca confiando cegamente no que o navegador mandou. Sem
+  -- nenhum dos dois campos (cadastro público comum, sem link de convite),
+  -- cai no fallback de sempre — seu próprio tenant.
   v_tenant_id := coalesce(
     nullif(new.raw_user_meta_data->>'tenant_id', '')::uuid,
+    (select id from tenants where invite_token = new.raw_user_meta_data->>'invite_token' and active),
     default_tenant_id()
   );
 
@@ -2243,7 +2253,8 @@ returns table (
   admin_email text,
   gerente_count bigint,
   cliente_count bigint,
-  contract_count bigint
+  contract_count bigint,
+  invite_token text
 )
 language plpgsql
 stable
@@ -2257,7 +2268,8 @@ begin
     p.full_name, p.email,
     (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente'),
     (select count(*) from clients c where c.tenant_id = t.id),
-    (select count(*) from loan_contracts lc where lc.tenant_id = t.id)
+    (select count(*) from loan_contracts lc where lc.tenant_id = t.id),
+    t.invite_token
   from tenants t
   left join profiles p on p.id = t.owner_profile_id
   order by t.created_at asc;
@@ -2295,6 +2307,58 @@ language sql stable
 security definer set search_path = public
 as $$
   select coalesce((select active from tenants where id = current_tenant_id()), true);
+$$;
+
+-- 5.15 Link de convite (Fase 4) — cada empresa (admin primário dela) gera e
+-- compartilha o próprio link com os clientes dela. O Administrador Master
+-- também pode gerar/consultar de qualquer empresa (suporte).
+
+-- Consultado pela tela Configurações (admin primário da própria empresa).
+create or replace function get_my_tenant_invite_info()
+returns table (invite_token text, company_name text)
+language plpgsql
+stable
+security definer set search_path = public
+as $$
+begin
+  if not is_primary_admin() then raise exception 'FORBIDDEN'; end if;
+  return query select t.invite_token, t.name from tenants t where t.id = current_tenant_id();
+end;
+$$;
+
+-- p_tenant_id omitido = a própria empresa de quem chama (admin primário).
+-- Informado = só o Administrador Master pode mexer na empresa de outro.
+create or replace function regenerate_tenant_invite_token(p_tenant_id uuid default null)
+returns text
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_target uuid;
+  v_new_token text;
+begin
+  v_target := coalesce(p_tenant_id, current_tenant_id());
+  if not (is_platform_owner() or (is_primary_admin() and v_target = current_tenant_id())) then
+    raise exception 'FORBIDDEN';
+  end if;
+  v_new_token := replace(gen_random_uuid()::text, '-', '');
+  update tenants set invite_token = v_new_token where id = v_target;
+  return v_new_token;
+end;
+$$;
+
+-- Pública (anon) — chamada pela tela de cadastro ANTES de qualquer sessão
+-- existir, pra mostrar "você está se cadastrando em <empresa>" e validar o
+-- link antes de deixar o cadastro prosseguir. Só devolve o nome da empresa
+-- (mesma informação que public_company_info() já expõe) — nunca o id real
+-- do tenant nem qualquer outro dado.
+create or replace function resolve_invite_token(p_token text)
+returns table (company_name text)
+language sql
+stable
+security definer set search_path = public
+as $$
+  select name from tenants where invite_token = p_token and active;
 $$;
 
 -- ============================================================================
