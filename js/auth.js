@@ -52,6 +52,14 @@ async function loadGlobalReferenceData() {
     const { data: hasReferrals } = await supa.rpc('has_referrals');
     App.hasReferrals = !!hasReferrals;
   }
+  // Limites do plano (Fase 5) — carregado pros dois papéis (gerente E
+  // cliente usam o flag allow_extrato_pdf pra esconder o botão de extrato).
+  // Best-effort: se falhar, App.planLimits fica {} (== "tudo liberado",
+  // mesmo comportamento de uma empresa sem plano atribuído).
+  try {
+    const { data: limits } = await supa.rpc('get_my_plan_limits');
+    App.planLimits = limits || {};
+  } catch (e) { App.planLimits = {}; }
 }
 
 async function onAuthenticated(session) {
@@ -285,6 +293,7 @@ function traduzErroAuth(error) {
   if (msg.includes('User already registered')) return 'Já existe uma conta com esse e-mail.';
   if (msg.includes('Email not confirmed')) return 'Confirme seu e-mail antes de entrar.';
   if (msg.includes('profiles_cpf_key')) return 'Já existe uma conta cadastrada com esse CPF.';
+  if (msg.includes('CLIENT_LIMIT_EXCEEDED')) return 'Esta empresa atingiu o limite de clientes do plano atual. Fale com o administrador dela.';
   if (msg.includes('email_address_invalid')) return 'Informe um e-mail válido.';
   if (msg.includes('duplicate key value')) return 'Alguns dos dados informados já estão em uso por outra conta.';
   if (msg.startsWith('{') || msg.length > 200) return 'Ocorreu um erro. Tente novamente em instantes.';

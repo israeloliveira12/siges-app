@@ -34,6 +34,30 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Fase 5 (planos): limite de gerentes/clientes por plano. Sem plano
+  // atribuído (a grande maioria hoje) = sem limite, zero mudança de
+  // comportamento. Verifica ANTES de criar a conta — nunca depois.
+  const tenantRes = await supabaseAdminFetch(`/rest/v1/tenants?id=eq.${caller.tenant_id}&select=plan_id`, { method: 'GET' });
+  const planId = tenantRes.ok && tenantRes.data[0] && tenantRes.data[0].plan_id;
+  let limits = {};
+  if (planId) {
+    const planRes = await supabaseAdminFetch(`/rest/v1/plans?id=eq.${planId}&select=limits`, { method: 'GET' });
+    limits = (planRes.ok && planRes.data[0] && planRes.data[0].limits) || {};
+  }
+  const limitKey = role === 'gerente' ? 'max_gerentes' : 'max_clientes';
+  const maxAllowed = limits[limitKey];
+  if (typeof maxAllowed === 'number') {
+    const countRes = await supabaseAdminFetch(
+      `/rest/v1/profiles?role=eq.${role}&tenant_id=eq.${caller.tenant_id}&select=id`,
+      { method: 'GET' }
+    );
+    const currentCount = countRes.ok ? countRes.data.length : 0;
+    if (currentCount >= maxAllowed) {
+      res.status(403).json({ error: `Limite de ${role === 'gerente' ? 'gerentes' : 'clientes'} do plano atual atingido (${maxAllowed}).` });
+      return;
+    }
+  }
+
   // tenant_id vai em user_metadata pra handle_new_user() (trigger em
   // auth.users, banco) resolver o tenant certo — Fase 1c (SaaS multi-
   // empresa): sem isso, TODO usuário criado por QUALQUER gerente caía no

@@ -10,7 +10,15 @@ const App = {
   settings: null,       // system_settings (singleton), lido uma vez após login
   unreadCount: 0,
   hasReferrals: false,  // cliente: já indicou alguém? controla o menu "Indicações"
+  planLimits: {},       // Fase 5 — limites/recursos do plano do tenant atual (jsonb de plans.limits, {} = sem plano/ilimitado)
 };
+
+// Fase 5 (planos) — true se a chave de recurso booleano estiver ausente
+// (sem plano atribuído = liberado) ou explicitamente true no plano.
+function planAllows(key) {
+  const v = App.planLimits && App.planLimits[key];
+  return v !== false;
+}
 
 function isGerente() {
   return !!App.profile && App.profile.role === 'gerente';

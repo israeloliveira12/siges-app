@@ -211,7 +211,7 @@ function paintPlanejamento(root, state) {
     const btn = e.currentTarget;
     btn.disabled = true;
     const value = getMoneyValue(caixaInput);
-    const { error } = await supa.from('system_settings').update({ planning_current_cash: value }).eq('id', true);
+    const { error } = await supa.rpc('update_planning_cash', { p_value: value });
     if (error) { btn.disabled = false; showToast('Erro ao salvar: ' + error.message); return; }
     App.settings = { ...App.settings, planning_current_cash: value };
     showToast('Caixa atualizado.');
@@ -222,7 +222,7 @@ function paintPlanejamento(root, state) {
     const btn = e.currentTarget;
     btn.disabled = true;
     const value = Number(document.getElementById('pl-ltv').value || 0);
-    const { error } = await supa.from('system_settings').update({ planning_ltv_percent: value }).eq('id', true);
+    const { error } = await supa.rpc('update_planning_ltv', { p_value: value });
     if (error) { btn.disabled = false; showToast('Erro ao salvar: ' + error.message); return; }
     App.settings = { ...App.settings, planning_ltv_percent: value };
     showToast('LTV atualizado.');
@@ -304,4 +304,4 @@ function openDebtModal(monthKeys, existingDebt) {
   };
 }
 
-registerRoute('gerente/planejamento', { role: 'gerente', primaryOnly: true, screenId: 'gerente-planejamento', title: 'Planejamento', render: renderGerentePlanejamento });
+registerRoute('gerente/planejamento', { role: 'gerente', primaryOnly: true, platformOwnerOnly: true, screenId: 'gerente-planejamento', title: 'Planejamento', render: renderGerentePlanejamento });

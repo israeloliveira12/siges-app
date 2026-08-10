@@ -423,7 +423,10 @@ function shouldAutoBackupNow() {
 
 async function maybeRunAutoBackup() {
   try {
-    if (!isGerente() || !shouldAutoBackupNow()) return;
+    // Fase 5 (plano): plano sem allow_backup_export desliga o backup
+    // automático também, não só os botões manuais — sem isso, uma empresa
+    // "sem esse recurso no plano" continuaria baixando backup todo dia.
+    if (!isGerente() || !shouldAutoBackupNow() || (App.planLimits && App.planLimits.allow_backup_export === false)) return;
     const data = await collectAllSystemData();
     await runBackupJSON(true, data);
     // Pequeno intervalo entre os dois downloads — disparar dois arquivos no

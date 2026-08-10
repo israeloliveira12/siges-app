@@ -27,6 +27,9 @@ const AUDIT_ACTION_LABELS = {
   perda_revertida: 'Perda revertida',
   empresa_criada: 'Empresa criada',
   empresa_editada: 'Empresa editada',
+  plano_criado: 'Plano criado',
+  plano_editado: 'Plano editado',
+  plano_excluido: 'Plano excluído',
   erro_sistema: 'Erro do sistema',
 };
 

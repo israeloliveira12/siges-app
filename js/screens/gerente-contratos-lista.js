@@ -148,7 +148,7 @@ async function renderGerenteContratoDetalhe(params) {
         </div>
         <div class="flex items-center gap-8" style="flex-wrap:wrap">
           ${statusBadge(contract.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[contract.status])}
-          <button class="btn btn-outline btn-sm" id="print-extrato-btn">${Icons.printer} Extrato</button>
+          <button class="btn btn-outline btn-sm" id="print-extrato-btn" ${planAllows('allow_extrato_pdf') ? '' : 'disabled title="Não disponível no plano atual"'}>${Icons.printer} Extrato</button>
           <button class="btn btn-outline btn-sm" id="edit-contract-btn">${Icons.edit} Editar contrato</button>
           <button class="btn btn-outline btn-sm" id="delete-contract-btn" style="color:var(--bad)">${Icons.trash} Excluir contrato</button>
         </div>
@@ -172,7 +172,7 @@ async function renderGerenteContratoDetalhe(params) {
     <div class="card mt-14">
       <div class="flex justify-between items-center">
         <h3>Parcelas</h3>
-        <button class="btn btn-outline btn-sm" id="print-promissorias-btn">${Icons.printer} Nota Promissória</button>
+        <button class="btn btn-outline btn-sm" id="print-promissorias-btn" ${planAllows('allow_promissoria_pdf') ? '' : 'disabled title="Não disponível no plano atual"'}>${Icons.printer} Nota Promissória</button>
       </div>
       <table class="data-table table-scroll mt-8">
         <thead><tr><th>Nº</th><th>Vencimento</th><th>Capital</th><th>Juros</th><th>Total</th><th>Status</th><th></th></tr></thead>

@@ -24,13 +24,23 @@ async function renderGerenteConfiguracoes() {
   const inviteInfo = inviteRows && inviteRows[0];
   const inviteLink = inviteInfo ? `${location.origin}/?convite=${inviteInfo.invite_token}` : '';
   const isPrimary = App.profile.is_primary_admin;
-  if (cfgActiveTab === 'risco' && !isPrimary) cfgActiveTab = 'empresa';
+  // "Zona de risco" é exclusiva do Administrador Master (Fase 5) — mesmo
+  // requisito original do pivô SaaS ("configurações não terá zona de
+  // risco" pra usuário comum do SaaS). Antes bastava ser admin primário DA
+  // PRÓPRIA empresa; agora precisa ser o dono da plataforma inteira.
+  const canSeeRisco = isPlatformOwner();
+  if (cfgActiveTab === 'risco' && !canSeeRisco) cfgActiveTab = 'empresa';
+  // Fase 5 (plano) — se o plano da empresa desligar backup/exportação, os
+  // botões de ação ficam desabilitados com um aviso. maybeRunAutoBackup()
+  // (backup-export.js) é o ponto de checagem real pro backup automático —
+  // isto aqui é só a camada de UI.
+  const backupBlocked = App.planLimits && App.planLimits.allow_backup_export === false;
 
   root.innerHTML = `
     <div class="auth-tabs">
       <button class="auth-tab ${cfgActiveTab === 'empresa' ? 'active' : ''}" id="cfg-tab-empresa">Empresa e taxas</button>
       <button class="auth-tab ${cfgActiveTab === 'backup' ? 'active' : ''}" id="cfg-tab-backup">Backup e exportação</button>
-      ${isPrimary ? `<button class="auth-tab ${cfgActiveTab === 'risco' ? 'active' : ''}" id="cfg-tab-risco" style="color:var(--bad)">Zona de risco</button>` : ''}
+      ${canSeeRisco ? `<button class="auth-tab ${cfgActiveTab === 'risco' ? 'active' : ''}" id="cfg-tab-risco" style="color:var(--bad)">Zona de risco</button>` : ''}
     </div>
 
     <div id="cfg-panel-empresa" class="mt-14 ${cfgActiveTab === 'empresa' ? '' : 'hidden'}">
@@ -130,11 +140,12 @@ async function renderGerenteConfiguracoes() {
           </div>
           <span class="help">Verificado 1x por dia, no primeiro acesso ao sistema — se já tiver rodado no período, não baixa de novo.</span>
         </div>
+        ${backupBlocked ? '<p class="text-sm mt-8" style="color:var(--bad)">Backup e exportação não estão disponíveis no plano atual desta empresa.</p>' : ''}
         <div id="cfg-backup-feedback" class="mt-8"></div>
         <div class="flex gap-8 mt-14" style="flex-wrap:wrap">
           <button class="btn btn-primary" id="cfg-backup-save">Salvar backup automático</button>
-          <button class="btn btn-outline" id="cfg-backup-now-btn">${Icons.printer} Fazer backup agora (.json)</button>
-          <button class="btn btn-outline" id="cfg-backup-now-sql-btn">${Icons.printer} Fazer backup agora (.sql)</button>
+          <button class="btn btn-outline" id="cfg-backup-now-btn" ${backupBlocked ? 'disabled' : ''}>${Icons.printer} Fazer backup agora (.json)</button>
+          <button class="btn btn-outline" id="cfg-backup-now-sql-btn" ${backupBlocked ? 'disabled' : ''}>${Icons.printer} Fazer backup agora (.sql)</button>
         </div>
 
         <h3 class="mt-20">Exportar dados</h3>
@@ -155,11 +166,11 @@ async function renderGerenteConfiguracoes() {
             </select>
           </div>
         </div>
-        <button class="btn btn-primary mt-8" id="cfg-export-btn">Exportar</button>
+        <button class="btn btn-primary mt-8" id="cfg-export-btn" ${backupBlocked ? 'disabled' : ''}>Exportar</button>
       </div>
     </div>
 
-    ${isPrimary ? `
+    ${canSeeRisco ? `
     <div id="cfg-panel-risco" class="mt-14 ${cfgActiveTab === 'risco' ? '' : 'hidden'}">
       <div class="card" style="border-color:var(--bad)">
         <h3 style="color:var(--bad)">Zona de risco</h3>

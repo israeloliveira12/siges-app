@@ -16,8 +16,12 @@ export default async function handler(req, res) {
 
   const accessToken = (req.headers.authorization || '').replace('Bearer ', '').trim();
   const caller = await getCallerProfile(accessToken);
-  if (!caller || !caller.is_primary_admin || !caller.active) {
-    res.status(403).json({ error: 'Apenas o administrador primário pode apagar todos os dados.' });
+  // Fase 5: "Zona de risco" virou exclusiva do Administrador Master (mesmo
+  // requisito original do pivô SaaS) — is_primary_admin sozinho não basta
+  // mais, senão o admin de qualquer empresa cliente do SaaS ainda apagaria
+  // os próprios dados sozinho.
+  if (!caller || !caller.platform_owner || !caller.active) {
+    res.status(403).json({ error: 'Apenas o Administrador Master pode apagar todos os dados.' });
     return;
   }
 

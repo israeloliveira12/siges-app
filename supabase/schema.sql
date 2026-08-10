@@ -343,6 +343,31 @@ select
 from system_settings s
 limit 1;
 
+-- 2.13b plans (Fase 5) — planos configuráveis manualmente pelo Administrador
+-- Master (Basic/Essential/Premium são só um ponto de partida, não nomes
+-- fixos no código — ele edita/renomeia/cria à vontade pela tela "Planos").
+-- `limits` é jsonb de propósito: adicionar um novo limite/recurso no futuro
+-- é só uma nova chave reconhecida pelo frontend, sem migration de schema.
+-- Chaves usadas hoje: max_gerentes/max_clientes (inteiro, null = ilimitado),
+-- allow_extrato_pdf/allow_promissoria_pdf/allow_backup_export (boolean).
+create table plans (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text,
+  price_monthly numeric(10,2),
+  active boolean not null default true,
+  sort_order integer not null default 0,
+  limits jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+-- tenants.plan_id — NULL de propósito pra toda empresa hoje (inclusive a
+-- sua): "sem plano" = sem limite nenhum, exatamente o comportamento atual,
+-- até o Administrador Master atribuir um plano manualmente pela tela
+-- "Empresas". Nenhum tenant existente muda de comportamento com esta
+-- migration.
+alter table tenants add column plan_id uuid references plans(id) on delete set null;
+
 alter table profiles add column tenant_id uuid references tenants(id) default default_tenant_id();
 update profiles set tenant_id = default_tenant_id() where tenant_id is null;
 alter table profiles alter column tenant_id set not null;
@@ -419,6 +444,7 @@ security definer set search_path = public
 as $$
 declare
   v_tenant_id uuid;
+  v_max_clientes int;
 begin
   -- Fase 1c (SaaS multi-empresa): 'tenant_id' em raw_user_meta_data resolve
   -- direto o tenant — usado só pelos fluxos SERVIDOR-A-SERVIDOR de criação
@@ -436,6 +462,23 @@ begin
     (select id from tenants where invite_token = new.raw_user_meta_data->>'invite_token' and active),
     default_tenant_id()
   );
+
+  -- Fase 5 (limite de clientes por plano): só aplicado quando a origem é o
+  -- cadastro PÚBLICO (self-signup) — reconhecido pela AUSÊNCIA do campo
+  -- 'tenant_id' bruto no metadata (esse campo só é enviado pelos endpoints
+  -- servidor-a-servidor, que já fazem sua própria checagem de limite ANTES
+  -- de chegar aqui, olhando o papel certo — 'gerente' ou 'cliente' — coisa
+  -- que este trigger não sabe ainda nesse ponto, já que todo mundo nasce
+  -- 'cliente' aqui antes de uma eventual promoção).
+  if new.raw_user_meta_data->>'tenant_id' is null then
+    select (p.limits->>'max_clientes')::int into v_max_clientes
+    from tenants t left join plans p on p.id = t.plan_id
+    where t.id = v_tenant_id;
+
+    if v_max_clientes is not null and v_max_clientes <= (select count(*) from clients where tenant_id = v_tenant_id) then
+      raise exception 'CLIENT_LIMIT_EXCEEDED';
+    end if;
+  end if;
 
   insert into public.profiles (id, full_name, email, role, cpf, phone, tenant_id)
   values (
@@ -2212,7 +2255,12 @@ as $$
 declare
   v_tenant_id uuid;
 begin
-  if not is_primary_admin() then
+  -- Fase 5: "Zona de risco" virou exclusiva do Administrador Master (mesmo
+  -- requisito original do pivô SaaS que fechou Planejamento/Auditoria) —
+  -- antes o admin primário de QUALQUER empresa cliente da plataforma podia
+  -- apagar os próprios dados de negócio sozinho, sem passar pelo dono da
+  -- plataforma. is_primary_admin() sozinho não bastava mais aqui.
+  if not is_platform_owner() then
     raise exception 'FORBIDDEN';
   end if;
 
@@ -2235,6 +2283,35 @@ begin
 end;
 $$;
 
+-- 5.13b Planejamento (caixa atual / LTV) também virou exclusivo do
+-- Administrador Master (Fase 5) — mas as 2 colunas vivem na MESMA linha de
+-- system_settings que dados de empresa/taxas (editáveis por qualquer admin
+-- primário), então não dá pra travar isso via RLS sem quebrar Configurações
+-- pra todo mundo. Duas RPCs estreitas em vez de UPDATE direto na tabela —
+-- gerente-planejamento.js parou de usar supa.from('system_settings').update()
+-- pra esses 2 campos especificamente.
+create or replace function update_planning_cash(p_value numeric)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  update system_settings set planning_current_cash = p_value where tenant_id = current_tenant_id();
+end;
+$$;
+
+create or replace function update_planning_ltv(p_value numeric)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  update system_settings set planning_ltv_percent = p_value where tenant_id = current_tenant_id();
+end;
+$$;
+
 -- 5.14 Gestão de tenants (Fase 3 da transformação em SaaS — Administrador
 -- Master gerencia as empresas clientes da plataforma, sem cobrança ainda).
 
@@ -2254,7 +2331,9 @@ returns table (
   gerente_count bigint,
   cliente_count bigint,
   contract_count bigint,
-  invite_token text
+  invite_token text,
+  plan_id uuid,
+  plan_name text
 )
 language plpgsql
 stable
@@ -2269,9 +2348,12 @@ begin
     (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente'),
     (select count(*) from clients c where c.tenant_id = t.id),
     (select count(*) from loan_contracts lc where lc.tenant_id = t.id),
-    t.invite_token
+    t.invite_token,
+    t.plan_id,
+    pl.name
   from tenants t
   left join profiles p on p.id = t.owner_profile_id
+  left join plans pl on pl.id = t.plan_id
   order by t.created_at asc;
 end;
 $$;
@@ -2361,6 +2443,110 @@ as $$
   select name from tenants where invite_token = p_token and active;
 $$;
 
+-- 5.16 Planos configuráveis (Fase 5) — exclusivo do Administrador Master.
+-- `limits` (jsonb) fica 100% na mão dele: cria/edita/renomeia plano, e
+-- escolhe manualmente quais das chaves conhecidas valem em cada um, pela
+-- tela "Planos" (js/screens/plataforma-planos.js).
+
+create or replace function list_plans()
+returns setof plans
+language plpgsql
+stable
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  return query select * from plans order by sort_order asc, created_at asc;
+end;
+$$;
+
+-- p_id null = cria um plano novo; informado = atualiza o existente.
+create or replace function upsert_plan(
+  p_id uuid,
+  p_name text,
+  p_description text,
+  p_price_monthly numeric,
+  p_active boolean,
+  p_sort_order integer,
+  p_limits jsonb
+)
+returns uuid
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  if p_name is null or trim(p_name) = '' then raise exception 'INVALID_NAME'; end if;
+
+  if p_id is null then
+    insert into plans (name, description, price_monthly, active, sort_order, limits)
+    values (trim(p_name), nullif(trim(p_description), ''), p_price_monthly, coalesce(p_active, true), coalesce(p_sort_order, 0), coalesce(p_limits, '{}'::jsonb))
+    returning id into v_id;
+  else
+    update plans set
+      name = trim(p_name),
+      description = nullif(trim(p_description), ''),
+      price_monthly = p_price_monthly,
+      active = coalesce(p_active, true),
+      sort_order = coalesce(p_sort_order, 0),
+      limits = coalesce(p_limits, '{}'::jsonb)
+    where id = p_id
+    returning id into v_id;
+  end if;
+
+  return v_id;
+end;
+$$;
+
+-- Apagar um plano é seguro mesmo com empresas usando ele — tenants.plan_id
+-- é `on delete set null`, então essas empresas só voltam a ficar "sem
+-- plano" (ilimitado), nunca travadas/quebradas.
+create or replace function delete_plan(p_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  delete from plans where id = p_id;
+end;
+$$;
+
+-- Atribuir/remover o plano de uma empresa — p_plan_id null = "sem plano"
+-- (ilimitado). Chamado pela tela "Empresas".
+create or replace function assign_tenant_plan(p_tenant_id uuid, p_plan_id uuid)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  update tenants set plan_id = p_plan_id where id = p_tenant_id;
+end;
+$$;
+
+-- Consultado por QUALQUER usuário autenticado (gerente OU cliente, mesmo
+-- padrão de is_my_tenant_active() — não vaza nada sensível, só as chaves de
+-- recurso/limite do PRÓPRIO tenant) pra decisões de UI (esconder botão de
+-- extrato/promissória/backup fora do plano). Também replicado como checagem
+-- no servidor em pontos sensíveis (ver api/create-user.js). Sempre devolve
+-- um jsonb (nunca null) — tenant sem plano = '{}' = nenhuma chave de limite
+-- presente = tudo liberado/ilimitado nos pontos de checagem (que tratam
+-- ausência de chave como "sem limite").
+create or replace function get_my_plan_limits()
+returns jsonb
+language sql
+stable
+security definer set search_path = public
+as $$
+  select coalesce(
+    (select p.limits from tenants t left join plans p on p.id = t.plan_id where t.id = current_tenant_id()),
+    '{}'::jsonb
+  );
+$$;
+
 -- ============================================================================
 -- 6. ROW LEVEL SECURITY
 -- ============================================================================
@@ -2386,6 +2572,15 @@ alter table tenants enable row level security;
 -- tenant é sempre via RPC security definer (create_tenant/update_tenant).
 create policy "tenants_select" on tenants for select
   using (is_platform_owner() or (is_gerente() and id = current_tenant_id()));
+
+-- plans (Fase 5) — só o Administrador Master lê a tabela inteira (tela
+-- "Planos"). Um gerente comum nunca consulta `plans` direto — os limites
+-- efetivos do PRÓPRIO tenant vêm da RPC get_my_plan_limits() (security
+-- definer, bypassa RLS, devolve só o `limits` jsonb do plano atual). Sem
+-- policy de insert/update/delete — sempre via RPC (upsert_plan/delete_plan).
+alter table plans enable row level security;
+create policy "plans_select_platform_owner" on plans for select
+  using (is_platform_owner());
 
 -- profiles
 -- is_gerente() sozinho, sem checar tenant_id, deixaria um gerente de
@@ -2501,9 +2696,12 @@ create policy "settings_gerente_update" on system_settings for update
   using (is_primary_admin() and tenant_id = current_tenant_id());
 
 -- planning_debts
--- is_primary_admin(): mesma razão acima — Planejamento também é primaryOnly.
+-- is_platform_owner() (Fase 5, fecha um requisito original do pivô SaaS:
+-- "Planejamento é só meu" — nenhuma empresa cliente da plataforma deve ter
+-- essa tela, nem o próprio admin primário dela). Tabela dedicada, só usada
+-- por Planejamento — sem risco de colisão com outro uso legítimo.
 create policy "planning_debts_gerente_all" on planning_debts for all
-  using (is_primary_admin() and tenant_id = current_tenant_id()) with check (is_primary_admin());
+  using (is_platform_owner() and tenant_id = current_tenant_id()) with check (is_platform_owner());
 
 -- audit_log — só leitura, e só o Administrador Master (Fase 3, decisão
 -- explícita do fundador: Auditoria NUNCA é uma tela do produto SaaS, nem

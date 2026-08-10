@@ -21,7 +21,11 @@ const NAV_ITEMS = {
     { route: 'gerente/gerentes', label: 'Administradores', icon: 'userPlus' },
     { route: 'gerente/relatorios', label: 'Relatórios', icon: 'chart' },
     { route: 'gerente/score', label: 'Score de Clientes', icon: 'score' },
-    { route: 'gerente/planejamento', label: 'Planejamento', icon: 'wallet', primaryOnly: true },
+    // Planejamento também é exclusivo do Administrador Master (mesmo
+    // requisito original do pivô SaaS que já fechou Auditoria) — "isso é
+    // apenas meu", nunca uma tela do produto SaaS, nem pro admin primário
+    // de uma empresa cliente.
+    { route: 'gerente/planejamento', label: 'Planejamento', icon: 'wallet', primaryOnly: true, platformOwnerOnly: true },
     // Auditoria nunca é uma tela do produto SaaS (decisão explícita do
     // fundador, 2026-08-09) — nem pro admin primário de uma empresa
     // cliente, só pro Administrador Master. Reforçado em RLS também (ver
@@ -29,11 +33,12 @@ const NAV_ITEMS = {
     { route: 'gerente/auditoria', label: 'Auditoria', icon: 'audit', platformOwnerOnly: true },
     { route: 'gerente/configuracoes', label: 'Configurações', icon: 'settings', primaryOnly: true },
   ],
-  // Modo "Plataforma SaaS" — só existe pra quem é platform_owner. Planos/
-  // Métricas chegam nas próximas fases.
+  // Modo "Plataforma SaaS" — só existe pra quem é platform_owner. Métricas
+  // chegam numa próxima fase.
   plataforma: [
     { route: 'plataforma/inicio', label: 'Início', icon: 'dashboard' },
     { route: 'plataforma/empresas', label: 'Empresas', icon: 'users' },
+    { route: 'plataforma/planos', label: 'Planos', icon: 'wallet' },
   ],
 };
 
@@ -46,7 +51,7 @@ const NAV_ITEMS = {
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/indicacoes', 'cliente/score'],
   gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/lancamentos', 'gerente/contratos'],
-  plataforma: ['plataforma/inicio', 'plataforma/empresas'],
+  plataforma: ['plataforma/inicio', 'plataforma/empresas', 'plataforma/planos'],
 };
 
 function navLinkHtml(item, mobile) {

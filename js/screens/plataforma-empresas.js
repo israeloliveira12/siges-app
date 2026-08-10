@@ -7,14 +7,19 @@
    ============================================================================ */
 
 let tenantsCache = [];
+let plansForAssignCache = [];
 
 async function renderPlataformaEmpresas() {
   const root = document.getElementById('screen-plataforma-empresas');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
-  const { data, error } = await supa.rpc('list_tenants_with_stats');
+  const [{ data, error }, { data: plansData }] = await Promise.all([
+    supa.rpc('list_tenants_with_stats'),
+    supa.rpc('list_plans'),
+  ]);
   if (error) { root.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
   tenantsCache = data || [];
+  plansForAssignCache = plansData || [];
 
   paintPlataformaEmpresas(root);
 }
@@ -33,7 +38,7 @@ function paintPlataformaEmpresas(root) {
           ${avatarHtml(t.name, 34)}
           <div style="min-width:0;flex:1 1 auto">
             <div class="name">${escapeHtml(t.name || '—')}${t.id === myTenantId ? ' <span class="text-soft text-sm">(sua empresa)</span>' : ''}</div>
-            <div class="meta">${escapeHtml(t.admin_name || t.admin_email || 'sem administrador')} · ${t.gerente_count} gerente${Number(t.gerente_count) === 1 ? '' : 's'} · ${t.cliente_count} cliente${Number(t.cliente_count) === 1 ? '' : 's'} · ${t.contract_count} contrato${Number(t.contract_count) === 1 ? '' : 's'} · Criada em ${formatDate(t.created_at)}</div>
+            <div class="meta">${escapeHtml(t.admin_name || t.admin_email || 'sem administrador')} · ${t.gerente_count} gerente${Number(t.gerente_count) === 1 ? '' : 's'} · ${t.cliente_count} cliente${Number(t.cliente_count) === 1 ? '' : 's'} · ${t.contract_count} contrato${Number(t.contract_count) === 1 ? '' : 's'} · Plano: ${escapeHtml(t.plan_name || 'sem plano (ilimitado)')} · Criada em ${formatDate(t.created_at)}</div>
           </div>
           <div class="amt-wrap">
             <div class="flex gap-8 items-center" style="justify-content:flex-end;flex-wrap:wrap">
@@ -125,6 +130,13 @@ function openEditEmpresaModal(tenant) {
           <span>Empresa ativa${isOwnTenant ? ' (sua própria empresa não pode ser suspensa por aqui)' : ''}</span>
         </div>
         ${!tenant.active ? '<p class="text-sm text-soft mt-8">Empresa suspensa: nenhum administrador ou cliente dela consegue entrar no sistema até reativar.</p>' : ''}
+        <div class="field">
+          <label>Plano</label>
+          <select id="ee-plan">
+            <option value="">Sem plano (ilimitado)</option>
+            ${plansForAssignCache.map((p) => `<option value="${p.id}" ${tenant.plan_id === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+          </select>
+        </div>
         <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
           <label>Link de convite</label>
           <div class="flex gap-8 mt-8" style="align-items:center">
@@ -184,6 +196,13 @@ function openEditEmpresaModal(tenant) {
         p_active: isOwnTenant ? true : overlay.querySelector('#ee-active').checked,
       });
       if (error) throw error;
+
+      const newPlanId = overlay.querySelector('#ee-plan').value || null;
+      if (newPlanId !== tenant.plan_id) {
+        const { error: planError } = await supa.rpc('assign_tenant_plan', { p_tenant_id: tenant.id, p_plan_id: newPlanId });
+        if (planError) throw planError;
+      }
+
       logAudit('empresa_editada', `Empresa ${tenant.name} editada`, { tenant_id: tenant.id });
       close();
       showToast('Empresa atualizada.');

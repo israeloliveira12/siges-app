@@ -81,7 +81,7 @@ function paintClienteEmprestimos(root, allContracts, installments, cycles) {
         </div>
         <div class="flex items-center gap-8">
           ${statusBadge(c.status, statusLabel)}
-          <button class="btn btn-outline btn-sm extrato-btn" data-id="${c.id}">${Icons.printer} Extrato</button>
+          ${planAllows('allow_extrato_pdf') ? `<button class="btn btn-outline btn-sm extrato-btn" data-id="${c.id}">${Icons.printer} Extrato</button>` : ''}
         </div>
       </div>
       <table class="data-table table-scroll mt-14">
