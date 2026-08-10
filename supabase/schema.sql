@@ -306,6 +306,14 @@ create table tenants (
   name text not null,
   owner_profile_id uuid references profiles(id) on delete set null,
   active boolean not null default true,
+  -- Recurso "Indicações" (cliente indica outro cliente) é exclusivo do
+  -- Tenant #1 (o fundador da plataforma) — nenhuma empresa cliente do SaaS
+  -- tem essa opção, em nenhum plano. Default FALSE pra qualquer tenant
+  -- novo; só o Tenant #1, criado logo abaixo, recebe TRUE. Diferente do
+  -- futuro sistema de limites/recursos por PLANO (Fase 5, que diferencia
+  -- clientes pagantes entre si) — este flag é incondicional a qualquer
+  -- plano, "isso nunca existe fora do tenant do fundador".
+  referrals_enabled boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -318,10 +326,11 @@ as $$
   select id from tenants order by created_at asc limit 1;
 $$;
 
-insert into tenants (name, owner_profile_id)
+insert into tenants (name, owner_profile_id, referrals_enabled)
 select
   coalesce(nullif(trim(s.company_name), ''), 'Minha Empresa'),
-  (select id from profiles where role = 'gerente' and is_primary_admin and active order by created_at asc limit 1)
+  (select id from profiles where role = 'gerente' and is_primary_admin and active order by created_at asc limit 1),
+  true
 from system_settings s
 limit 1;
 
@@ -533,7 +542,15 @@ language plpgsql stable
 security definer set search_path = public
 as $$
 begin
-  if not (is_gerente() or auth.uid() = p_client_id) then
+  -- Fase 1b (SaaS multi-empresa): gerente só consulta saldo de cliente do
+  -- PRÓPRIO tenant — sem isso, um gerente de outra empresa podia informar o
+  -- profile_id de um cliente alheio e receber o saldo devedor dele de volta,
+  -- mesmo sem conseguir ver esse cliente na lista (RLS da Fase 1a não cobre
+  -- chamada de função, só select direto em tabela).
+  if not (
+    (is_gerente() and exists(select 1 from clients where profile_id = p_client_id and tenant_id = current_tenant_id()))
+    or auth.uid() = p_client_id
+  ) then
     raise exception 'FORBIDDEN';
   end if;
 
@@ -570,7 +587,11 @@ language plpgsql stable
 security definer set search_path = public
 as $$
 begin
-  if not (is_gerente() or auth.uid() = p_client_id) then
+  -- Fase 1b: mesmo raciocínio de client_outstanding_balance() acima.
+  if not (
+    (is_gerente() and exists(select 1 from clients where profile_id = p_client_id and tenant_id = current_tenant_id()))
+    or auth.uid() = p_client_id
+  ) then
     raise exception 'FORBIDDEN';
   end if;
 
@@ -595,7 +616,10 @@ $$;
 
 -- 5.2 Checagem de limite de crédito (uso interno/gerente — chamada sempre com
 -- p_client_id verificado por quem chama; client_outstanding_principal() já
--- reforça a própria checagem de titularidade/role por baixo)
+-- reforça a própria checagem de titularidade/role por baixo). Fase 1b: não
+-- precisou de filtro de tenant PRÓPRIO — a chamada a client_outstanding_
+-- principal() já lança FORBIDDEN antes de qualquer coisa se p_client_id for
+-- de outro tenant, então essa proteção já chega aqui "de graça".
 create or replace function check_credit_limit(p_client_id uuid, p_new_principal numeric)
 returns boolean
 language plpgsql stable
@@ -857,6 +881,14 @@ $$;
 
 -- 5.5b Login por CPF: função pública (chamada ANTES do login, então precisa
 -- ser security definer) que só resolve CPF -> e-mail, nada mais sensível.
+-- INTENCIONALMENTE sem filtro de tenant (Fase 1b, SaaS multi-empresa): CPF é
+-- único em toda a PLATAFORMA (profiles.cpf unique, sem escopo por tenant), e
+-- quem digita o CPF ainda não tem sessão nenhuma (current_tenant_id() daria
+-- null de qualquer forma) — o sistema só descobre a que tenant a pessoa
+-- pertence DEPOIS de autenticar. Implicação de produto que fica registrada
+-- aqui: hoje o mesmo CPF não pode ser cliente de duas empresas diferentes na
+-- plataforma (um profile = um tenant, sempre) — se isso precisar mudar no
+-- futuro, é redesenho de identidade, não um ajuste desta função.
 create or replace function email_for_cpf(p_cpf text)
 returns text
 language sql stable
@@ -868,6 +900,11 @@ $$;
 -- 5.5c Dados públicos da empresa pro cliente (nome/whatsapp) — o SELECT
 -- direto em system_settings é exclusivo de gerente (vazava taxas/caixa
 -- interno), então o cliente usa esta RPC pros 2 únicos campos que precisa.
+-- Fase 1b: troca "where id = true" (a única linha que podia existir até
+-- agora) por "where tenant_id = current_tenant_id()" — hoje ainda dá no
+-- mesmo resultado (só existe 1 linha), mas já deixa a função certa pro dia
+-- em que system_settings passar a ter 1 linha por tenant (mudança de chave
+-- primária ainda pendente, fora do escopo desta fase).
 create or replace function public_company_info()
 returns table (company_name text, company_whatsapp text)
 language plpgsql stable
@@ -877,7 +914,7 @@ begin
   if auth.uid() is null then
     raise exception 'FORBIDDEN';
   end if;
-  return query select s.company_name, s.company_whatsapp from system_settings s where s.id = true;
+  return query select s.company_name, s.company_whatsapp from system_settings s where s.tenant_id = current_tenant_id();
 end;
 $$;
 
@@ -886,13 +923,22 @@ $$;
 -- acompanha o andamento da dívida de quem ele indicou num menu próprio.
 
 -- Usada só dentro de RLS (loan_contracts/installments/renewal_cycles) —
--- nunca chamada direto pelo frontend.
+-- nunca chamada direto pelo frontend. Fase 1b: exige que o cliente indicado
+-- esteja no MESMO tenant de quem chama — na prática um vínculo de indicação
+-- só deveria existir dentro do mesmo tenant mesmo, isso é defesa em
+-- profundidade caso esse dado fique inconsistente por algum outro motivo.
 create or replace function is_referrer_of(p_client_id uuid)
 returns boolean
 language sql stable
 security definer set search_path = public
 as $$
-  select exists(select 1 from clients where profile_id = p_client_id and referred_by_client_id = auth.uid());
+  select coalesce((select referrals_enabled from tenants where id = current_tenant_id()), false)
+    and exists(
+      select 1 from clients
+      where profile_id = p_client_id
+        and referred_by_client_id = auth.uid()
+        and tenant_id = current_tenant_id()
+    );
 $$;
 
 -- Gate leve do menu "Indicações" — chamada 1x no login do cliente.
@@ -901,7 +947,8 @@ returns boolean
 language sql stable
 security definer set search_path = public
 as $$
-  select exists(select 1 from clients where referred_by_client_id = auth.uid());
+  select coalesce((select referrals_enabled from tenants where id = current_tenant_id()), false)
+    and exists(select 1 from clients where referred_by_client_id = auth.uid() and tenant_id = current_tenant_id());
 $$;
 
 -- Lista curada (só profile_id + nome) de quem o cliente logado indicou — a
@@ -918,6 +965,8 @@ as $$
   from clients c
   join profiles p on p.id = c.profile_id
   where c.referred_by_client_id = auth.uid()
+    and c.tenant_id = current_tenant_id()
+    and coalesce((select referrals_enabled from tenants where id = current_tenant_id()), false)
   order by p.full_name;
 $$;
 
@@ -925,7 +974,10 @@ $$;
 -- case-insensitive) enquanto o gerente digita. Só gerente chama (vaza nomes/
 -- CPF de outros clientes). p_exclude_client_id evita que o próprio cliente em
 -- edição apareça como opção de indicador (defesa em profundidade — o mesmo
--- já é bloqueado pelo check clients_no_self_referral no banco).
+-- já é bloqueado pelo check clients_no_self_referral no banco). Fase 1b:
+-- sem o filtro de tenant abaixo, um gerente de outra empresa conseguia
+-- digitar qualquer coisa nesse campo e ver nome+CPF de clientes de QUALQUER
+-- tenant da plataforma — era a única função de busca sem nenhum filtro.
 create or replace function search_clients_for_referral(p_query text, p_exclude_client_id uuid default null)
 returns table (profile_id uuid, full_name text, cpf text)
 language plpgsql stable
@@ -936,11 +988,16 @@ begin
     raise exception 'FORBIDDEN';
   end if;
 
+  if not coalesce((select referrals_enabled from tenants where id = current_tenant_id()), false) then
+    return; -- lista vazia — recurso desligado pra este tenant, sem erro
+  end if;
+
   return query
     select p.id, p.full_name, p.cpf
     from profiles p
     join clients c on c.profile_id = p.id
     where p.role = 'cliente'
+      and c.tenant_id = current_tenant_id()
       and (p_exclude_client_id is null or p.id <> p_exclude_client_id)
       and p.full_name ilike '%' || trim(p_query) || '%'
     order by p.full_name
@@ -1677,10 +1734,17 @@ returns void
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  v_referrals_enabled boolean;
 begin
   if not is_gerente() then
     raise exception 'FORBIDDEN';
   end if;
+
+  -- Recurso "Indicações" é exclusivo do Tenant #1 (ver tenants.referrals_
+  -- enabled) — trava o valor em NULL sempre que o tenant não tem o recurso
+  -- ligado, não importa o que o front-end mandar em p_referred_by_client_id.
+  select referrals_enabled into v_referrals_enabled from tenants where id = current_tenant_id();
 
   update profiles set full_name = p_full_name, cpf = p_cpf, phone = p_phone, updated_at = now()
     where id = p_client_id;
@@ -1688,7 +1752,7 @@ begin
   update clients set credit_limit = p_credit_limit,
     client_group = p_client_group, notes = p_notes,
     company = p_company, job_title = p_job_title, salary = p_salary, pix_key = p_pix_key,
-    referred_by_client_id = p_referred_by_client_id
+    referred_by_client_id = case when coalesce(v_referrals_enabled, false) then p_referred_by_client_id else null end
     where profile_id = p_client_id;
 end;
 $$;

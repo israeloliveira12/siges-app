@@ -716,7 +716,35 @@ Catalogar a Fase 1 revelou que não é só ~15 políticas de RLS — são també
 
 **Query de auditoria** (pra qualquer sessão futura conferir o estado atual das políticas): `select tablename, policyname, cmd, qual, with_check from pg_policies where schemaname='public' and tablename in ('profiles','clients','loan_requests','loan_contracts','installments','renewal_cycles','payments','notifications_log','push_subscriptions','system_settings','planning_debts','audit_log','tenants') order by tablename, policyname;`
 
-**Teste ao vivo confirmado pelo usuário (2026-08-09), 2 vezes** — moveu um cliente real pro tenant fantasma via `do $$ ... $$` (script autocontido, sem UUID copiado manualmente — a 1ª versão do roteiro usava placeholders `<...>` que o usuário rodou literalmente, causando erro; corrigido pra bloco com `select ... into`/`returning ... into`), confirmou que ele sumia da tela Clientes, e confirmou que reaparecia depois do bloco de limpeza. Isolamento de leitura (Fase 1a) está provado funcionando. `migration_031.sql` + `schema.sql` ainda não commitados nesta rodada.
+**Teste ao vivo confirmado pelo usuário (2026-08-09), 2 vezes** — moveu um cliente real pro tenant fantasma via `do $$ ... $$` (script autocontido, sem UUID copiado manualmente — a 1ª versão do roteiro usava placeholders `<...>` que o usuário rodou literalmente, causando erro; corrigido pra bloco com `select ... into`/`returning ... into`), confirmou que ele sumia da tela Clientes, e confirmou que reaparecia depois do bloco de limpeza. Isolamento de leitura (Fase 1a) está provado funcionando. Commit `b1413cb`.
+
+### Fase 1b implementada — isolamento de LEITURA em funções (2026-08-09)
+
+**`supabase/migration_032.sql`** (não confirmada como rodada ainda). Catalogadas as 13 funções `stable` (só-leitura) do schema inteiro via grep — `is_gerente`, `is_primary_admin`, `current_tenant_id` (helpers já corretos), `is_active_gerente` (código morto, nunca chamado em lugar nenhum do projeto, não mexido), `calc_installments_preview` (cálculo puro, não lê tabela nenhuma, sem risco). Corrigidas as 6 que realmente liam dado sem checar tenant:
+
+- **`client_outstanding_balance`/`client_outstanding_principal`**: gerente só consulta cliente do PRÓPRIO tenant agora (`is_gerente() and exists(select 1 from clients where profile_id=p_client_id and tenant_id=current_tenant_id())`); cliente continua podendo consultar o próprio saldo (`auth.uid() = p_client_id`, inalterado). `check_credit_limit()` não precisou mudar — já chama `client_outstanding_principal()`, que agora levanta `FORBIDDEN` sozinha pra cliente de outro tenant, proteção "de graça" por composição.
+- **`search_clients_for_referral`**: achado mais sério dos 6 — sem o filtro, um gerente de outra empresa via nome+CPF de qualquer cliente da plataforma inteira só digitando algo no campo "Indicado por" (autocomplete de indicação). Agora exige `c.tenant_id = current_tenant_id()`.
+- **`is_referrer_of`/`has_referrals`/`list_my_referred_clients`**: mesmo tratamento — indicação só é reconhecida dentro do mesmo tenant.
+- **`public_company_info`**: trocou `where id = true` (só existia 1 linha possível) por `where tenant_id = current_tenant_id()` — resultado idêntico hoje, mas já correto pro dia em que `system_settings` passar a ter 1 linha por tenant.
+- **`email_for_cpf` NÃO mudou, de propósito** — CPF é único em toda a plataforma (`profiles.cpf unique`, sem escopo por tenant) e login ainda não tem sessão no momento da chamada (`current_tenant_id()` daria null). Implicação de produto registrada no comentário da função: hoje o mesmo CPF não pode ser cliente de 2 empresas diferentes na plataforma — se isso precisar mudar, é redesenho de identidade, não ajuste desta função.
+- **Zero mudança de comportamento hoje**, mesmo raciocínio das fases anteriores (só existe 1 tenant).
+- `schema.sql` sincronizado com as mesmas 6 funções corrigidas.
+
+**Teste ao vivo sugerido pra esta fase** (mais simples que o da 1a, mesmo princípio "mover 1 cliente pro tenant fantasma"): depois de mover um cliente com o Bloco 1 de teste já usado na Fase 1a, ir em "Editar cliente" de QUALQUER OUTRO cliente → campo "Indicado por" → digitar o nome do cliente movido — não deve aparecer nenhum resultado (antes da correção, apareceria normalmente). Devolver com o Bloco 2 de sempre depois.
+
+**Fase 1b confirmada rodada em produção pelo usuário (2026-08-09)** — `migration_032.sql` executada sem erro.
+
+### Decisão do fundador: "Indicações" é exclusiva do Tenant #1 (2026-08-09)
+
+Durante a Fase 1b o usuário lembrou de um requisito que eu não tinha capturado: a feature de indicação de cliente (cliente indica outro cliente, acompanha a dívida de quem indicou — telas `gerente-clientes.js` campo "Indicado por" e `cliente-indicacoes.js`) só faz sentido pro negócio de crédito DELE — nenhuma empresa cliente do SaaS deve ter essa opção, em nenhum plano, nem no cadastro nem como menu pros clientes dela.
+
+**`supabase/migration_033.sql`** (não confirmada como rodada ainda):
+- Nova coluna `tenants.referrals_enabled boolean not null default false` — só o Tenant #1 recebe `true` nesta migration. **Não é o mesmo mecanismo do futuro sistema de limites/recursos por plano da Fase 5** (aquele diferencia clientes PAGANTES entre si; este é "isso nunca existe fora do tenant do fundador", incondicional a qualquer plano).
+- 4 funções de leitura (`has_referrals`, `is_referrer_of`, `list_my_referred_clients`, `search_clients_for_referral`) passam a checar `referrals_enabled` do tenant de quem chama, além do isolamento por tenant já feito na Fase 1b.
+- **`update_client_profile()` corrigida FORA da ordem normal da Fase 1c** (que ainda vai revisar toda função de escrita uma a uma) — é a ÚNICA função em todo o schema que grava `clients.referred_by_client_id` (confirmado por grep), e o fundador pediu ênfase explícita ("nenhum usuário poderá ter isso"), então virou uma correção pontual imediata: o valor é travado em `NULL` sempre que `referrals_enabled` for falso pro tenant de quem chama, não importa o que o front-end mandar.
+- **Front-end (`gerente-clientes.js` campo "Indicado por", `cliente-indicacoes.js` menu) continua existindo sem condicional nenhuma por enquanto** — como só existe 1 tenant (o do fundador, com o recurso ligado), não há nada visível pra esconder ainda. Esconder essas telas condicionalmente por tenant é trabalho pra quando existir um 2º tenant de verdade pra testar contra (Fase 2+) — só o backend já ficou travado nesta migration.
+- `schema.sql` sincronizado (tabela `tenants` ganhou a coluna já na `create table`, insert do Tenant #1 já bootstrap com `referrals_enabled=true`, as 5 funções atualizadas).
+- **Confirmada rodada em produção pelo usuário (2026-08-09)**, sem erro.
 
 ## Limitações conhecidas (v1, ver README para detalhes)
 
