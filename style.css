@@ -162,15 +162,6 @@ html, body {
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
-  /* Rede de segurança contra scrollWidth > viewport por arredondamento
-     sub-pixel de colunas fracionárias de CSS Grid (ex: 166.5px numa
-     kpi-grid-4 de 2 colunas) — nenhum elemento visível chega a ultrapassar
-     a borda da tela nesses casos, só o cálculo interno do navegador; sem
-     isso, o celular ganhava um scroll horizontal fantasma de alguns
-     pixels em telas com grids bem aninhados (achado no dashboard da
-     Plataforma SaaS, 2026-08-10). Não afeta rolagem vertical nem nenhum
-     layout — não há conteúdo legítimo que precise estourar a largura. */
-  overflow-x: hidden;
 }
 
 body { min-height: 100vh; }
@@ -270,6 +261,17 @@ button { cursor: pointer; }
 
 .main {
   flex: 1 1 auto; padding: 22px; max-width: 1280px; width: 100%; margin: 0 auto;
+  /* overflow-x:hidden aqui, nunca em html/body: html/body com overflow-x
+     não-visible força o navegador a computar overflow-y como auto também
+     (regra do CSSOM), transformando body num scroll container próprio —
+     isso quebra position:sticky da .sidebar/.topbar (que dependem do
+     scroll do documento/viewport, não de um container aninhado). .main é
+     irmã da .sidebar (nunca ancestral), então a mesma proteção contra o
+     scroll horizontal fantasma de arredondamento sub-pixel de CSS Grid
+     (achado no dashboard da Plataforma SaaS, 2026-08-10) fica só aqui,
+     sem esse efeito colateral. Bug real corrigido no mesmo dia depois que
+     o usuário reportou a sidebar "descendo" ao rolar a tela. */
+  overflow-x: hidden;
 }
 
 /* ---------------------------------------------------------------------------
