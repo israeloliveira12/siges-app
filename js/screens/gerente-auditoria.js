@@ -31,6 +31,11 @@ const AUDIT_ACTION_LABELS = {
   plano_criado: 'Plano criado',
   plano_editado: 'Plano editado',
   plano_excluido: 'Plano excluído',
+  cobranca_criada: 'Cobrança criada',
+  cobranca_editada: 'Cobrança editada',
+  cobranca_excluida: 'Cobrança excluída',
+  config_plataforma_editada: 'Configurações da plataforma editadas',
+  comunicado_enviado: 'Comunicado enviado',
   erro_sistema: 'Erro do sistema',
 };
 

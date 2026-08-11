@@ -39,6 +39,12 @@ function inactivityNote(t) {
   return `Último login há ${days} dia${days === 1 ? '' : 's'} · 0 contratos ativos`;
 }
 
+function trialNote(t) {
+  const days = Math.ceil((new Date(t.trial_ends_at).getTime() - Date.now()) / 86400000);
+  if (days > 0) return `Expira em ${days} dia${days === 1 ? '' : 's'}`;
+  return `Expirado há ${Math.abs(days)} dia${Math.abs(days) === 1 ? '' : 's'}`;
+}
+
 async function renderPlataformaInicio() {
   const root = document.getElementById('screen-plataforma-inicio');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
@@ -76,6 +82,15 @@ function paintPlataformaInicio(root, data) {
 
   const withErrors = [...tenants].filter((t) => t.errors_recent > 0).sort((a, b) => b.errors_recent - a.errors_recent);
 
+  // Testes (trial) — empresas com trial_ends_at setado, ordenadas pela data
+  // mais próxima de vencer/já vencida primeiro. MRR/ARR/ticket médio já
+  // excluem essas empresas (ver get_platform_dashboard_stats) — aqui é só
+  // pra você acompanhar e decidir manualmente quando converter ou suspender
+  // (o sistema nunca suspende sozinho por teste vencido).
+  const inTrial = tenants
+    .filter((t) => t.active && t.trial_ends_at)
+    .sort((a, b) => new Date(a.trial_ends_at) - new Date(b.trial_ends_at));
+
   const churnCount = s.suspended_this_month + s.deleted_this_month;
   const churnRate = s.total_tenants > 0 ? (churnCount / s.total_tenants) * 100 : 0;
 
@@ -97,7 +112,7 @@ function paintPlataformaInicio(root, data) {
           <div style="font-size:18px;font-weight:700;margin-top:2px">${formatMoney(s.avg_ticket)}</div>
         </div>
       </div>
-      <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Sem cobrança automática nenhuma — preço de cada plano é só informativo, definido em Planos.</div>
+      <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Sem cobrança automática nenhuma — preço de cada plano é só informativo, definido em Planos.${s.trials_active > 0 ? ` ${s.trials_active} empresa${s.trials_active === 1 ? '' : 's'} em teste não ${s.trials_active === 1 ? 'entra' : 'entram'} nesse valor.` : ''}</div>
     </div>
 
     <div class="grid grid-4 kpi-grid-4 mt-14">
@@ -148,7 +163,11 @@ function paintPlataformaInicio(root, data) {
     </div>
 
     <h3 class="mt-20">Saúde operacional</h3>
-    <div class="grid grid-3 mt-14" style="align-items:start">
+    <div class="grid grid-4 mt-14" style="align-items:start">
+      <div class="card">
+        <h4>Testes (trial)</h4>
+        ${inTrial.length ? inTrial.map((t) => tenantHealthRowHtml(t, trialNote(t))).join('') : '<p class="text-sm text-soft mt-8">Nenhuma empresa em teste.</p>'}
+      </div>
       <div class="card">
         <h4>Perto do limite do plano</h4>
         ${nearLimit.length ? nearLimit.map((t) => tenantHealthRowHtml(t, planUsageNote(t))).join('') : '<p class="text-sm text-soft mt-8">Nenhuma empresa perto do limite.</p>'}

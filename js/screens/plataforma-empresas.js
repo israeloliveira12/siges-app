@@ -9,6 +9,17 @@
 let tenantsCache = [];
 let plansForAssignCache = [];
 
+// Badge de teste (trial) — some por completo pra empresa sem trial_ends_at
+// (comportamento de sempre, cobrança/atribuição normal). Cor amarela
+// enquanto ainda tem dias restantes, vermelha quando já venceu (o sistema
+// nunca suspende sozinho — ver CLAUDE.md — só sinaliza pra você decidir).
+function trialBadgeHtml(tenant) {
+  if (!tenant.trial_ends_at) return '';
+  const days = Math.ceil((new Date(tenant.trial_ends_at).getTime() - Date.now()) / 86400000);
+  if (days > 0) return `<span class="badge badge-warn">Em teste — expira em ${days}d</span>`;
+  return `<span class="badge badge-bad">Teste expirado há ${Math.abs(days)}d</span>`;
+}
+
 async function renderPlataformaEmpresas() {
   const root = document.getElementById('screen-plataforma-empresas');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
@@ -43,6 +54,7 @@ function paintPlataformaEmpresas(root) {
           <div class="amt-wrap">
             <div class="flex gap-8 items-center" style="justify-content:flex-end;flex-wrap:wrap">
               ${t.active ? statusBadge('quitado', 'Ativa') : statusBadge('reprovada', 'Suspensa')}
+              ${trialBadgeHtml(t)}
               <button class="icon-btn edit-tenant-btn" data-id="${t.id}">${Icons.edit}</button>
             </div>
           </div>
@@ -134,8 +146,15 @@ function openEditEmpresaModal(tenant) {
           <label>Plano</label>
           <select id="ee-plan">
             <option value="">Sem plano (ilimitado)</option>
-            ${plansForAssignCache.map((p) => `<option value="${p.id}" ${tenant.plan_id === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+            ${plansForAssignCache.map((p) => `<option value="${p.id}" ${tenant.plan_id === p.id ? 'selected' : ''}>${escapeHtml(p.name)}${p.trial_days ? ` (${p.trial_days}d de teste)` : ''}</option>`).join('')}
           </select>
+          <span class="help">Trocar pra um plano com dias de teste configurados inicia um teste novo automaticamente. Reatribuir o mesmo plano não reinicia um teste em andamento.</span>
+        </div>
+        <div class="field">
+          <label>Fim do teste (trial)${trialBadgeHtml(tenant) ? ' ' + trialBadgeHtml(tenant) : ''}</label>
+          <input type="date" id="ee-trial-date" value="${tenant.trial_ends_at ? String(tenant.trial_ends_at).slice(0, 10) : ''}">
+          <span class="help">Deixe em branco pra "sem teste" (cobrança/atribuição normal). Ajuste manual aqui não muda o plano atribuído.</span>
+          ${tenant.trial_ends_at ? '<button type="button" class="btn btn-ghost btn-sm mt-8" id="ee-trial-clear">Converter pra pago (encerrar teste)</button>' : ''}
         </div>
         <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
           <label>Link de convite</label>
@@ -195,19 +214,33 @@ function openEditEmpresaModal(tenant) {
     deleteBtn.onclick = () => openDeleteEmpresaModal(tenant, close);
   }
 
+  const trialClearBtn = overlay.querySelector('#ee-trial-clear');
+  if (trialClearBtn) {
+    trialClearBtn.onclick = () => { overlay.querySelector('#ee-trial-date').value = ''; };
+  }
+
   overlay.querySelector('#ee-save').onclick = async () => {
     const feedback = overlay.querySelector('#ee-feedback');
     feedback.innerHTML = '';
     const btn = overlay.querySelector('#ee-save');
     btn.disabled = true;
     try {
+      const trialDateRaw = overlay.querySelector('#ee-trial-date').value;
+      const trialEndsAt = trialDateRaw ? new Date(trialDateRaw + 'T23:59:59').toISOString() : null;
       const { error } = await supa.rpc('update_tenant', {
         p_tenant_id: tenant.id,
         p_name: overlay.querySelector('#ee-name').value.trim(),
         p_active: isOwnTenant ? true : overlay.querySelector('#ee-active').checked,
+        p_trial_ends_at: trialEndsAt,
       });
       if (error) throw error;
 
+      // Roda DEPOIS de update_tenant de propósito: se o plano mudou aqui,
+      // assign_tenant_plan recalcula trial_ends_at automaticamente a partir
+      // do NOVO plano, sobrescrevendo o valor manual que acabou de ser
+      // salvo acima — trocar de plano e editar a data manual na MESMA
+      // gravação sempre prioriza o cálculo automático do plano novo (edite
+      // a data numa gravação separada se quiser um valor custom depois).
       const newPlanId = overlay.querySelector('#ee-plan').value || null;
       if (newPlanId !== tenant.plan_id) {
         const { error: planError } = await supa.rpc('assign_tenant_plan', { p_tenant_id: tenant.id, p_plan_id: newPlanId });

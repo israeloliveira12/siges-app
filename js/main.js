@@ -39,6 +39,10 @@ const NAV_ITEMS = {
     { route: 'plataforma/inicio', label: 'Início', icon: 'dashboard' },
     { route: 'plataforma/empresas', label: 'Empresas', icon: 'users' },
     { route: 'plataforma/planos', label: 'Planos', icon: 'wallet' },
+    { route: 'plataforma/cobrancas', label: 'Assinaturas', icon: 'contract' },
+    { route: 'plataforma/comunicados', label: 'Comunicados', icon: 'bell' },
+    { route: 'plataforma/metricas', label: 'Métricas históricas', icon: 'chart' },
+    { route: 'plataforma/configuracoes', label: 'Configurações da Plataforma', icon: 'settings' },
     { route: 'plataforma/backup', label: 'Backup Geral', icon: 'printer' },
   ],
 };

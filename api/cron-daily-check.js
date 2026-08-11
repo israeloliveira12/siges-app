@@ -86,6 +86,9 @@ export default async function handler(req, res) {
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) { res.status(401).json({ error: 'Não autorizado' }); return; }
 
   await supabaseAdminFetch('/rest/v1/rpc/refresh_overdue_status', { method: 'POST', body: JSON.stringify({}) });
+  // Snapshot diário pra Métricas históricas (Plataforma SaaS) — não deve
+  // travar o resto do cron se falhar por qualquer motivo.
+  await supabaseAdminFetch('/rest/v1/rpc/capture_platform_metrics_snapshot', { method: 'POST', body: JSON.stringify({}) }).catch(() => null);
 
   const today = todayISO();
   const tomorrow = addDaysISO(today, 1);

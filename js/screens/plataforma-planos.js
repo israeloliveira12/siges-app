@@ -49,8 +49,8 @@ function paintPlataformaPlanos(root) {
       ${plansCache.map((p) => `
         <div class="extrato-row">
           <div style="min-width:0;flex:1 1 auto">
-            <div class="name">${escapeHtml(p.name)}${p.price_monthly != null ? ` <span class="text-soft text-sm">— ${formatMoney(p.price_monthly)}/mês</span>` : ''}</div>
-            <div class="meta">${escapeHtml(planLimitSummary(p.limits))}</div>
+            <div class="name">${escapeHtml(p.name)}${p.price_monthly != null ? ` <span class="text-soft text-sm">— ${p.price_monthly === 0 ? 'Grátis' : formatMoney(p.price_monthly) + '/mês'}</span>` : ''}</div>
+            <div class="meta">${escapeHtml(planLimitSummary(p.limits))}${p.trial_days ? ` · ${p.trial_days} dia${p.trial_days === 1 ? '' : 's'} de teste grátis` : ''}</div>
           </div>
           <div class="amt-wrap">
             <div class="flex gap-8 items-center" style="justify-content:flex-end;flex-wrap:wrap">
@@ -116,7 +116,10 @@ function openPlanoModal(plan) {
         <div class="field"><label>Nome do plano</label><input type="text" id="pf-name" value="${escapeHtml((plan && plan.name) || '')}" placeholder="Ex: Basic"></div>
         <div class="field"><label>Descrição</label><input type="text" id="pf-description" value="${escapeHtml((plan && plan.description) || '')}" placeholder="Opcional"></div>
         <div class="field"><label>Preço mensal (R$)</label><input type="text" id="pf-price" value="">
-          <span class="help">Deixe em branco se ainda não define preço — só informativo, sem cobrança automática.</span>
+          <span class="help">Deixe em branco se ainda não define preço. Digite 0 pra um plano Grátis. Só informativo, sem cobrança automática.</span>
+        </div>
+        <div class="field"><label>Dias de teste grátis (trial)</label><input type="number" min="1" step="1" id="pf-trial-days" placeholder="Sem teste" value="${plan && plan.trial_days ? plan.trial_days : ''}">
+          <span class="help">Quando uma empresa é atribuída a este plano, ela ganha esse número de dias antes de precisar virar pagante de verdade. Deixe em branco pra não ter teste (cobrança/atribuição normal desde o dia 1).</span>
         </div>
         <div class="toggle-row">
           <label class="switch"><input type="checkbox" id="pf-active" ${!plan || plan.active ? 'checked' : ''}><span class="track"></span></label>
@@ -166,6 +169,12 @@ function openPlanoModal(plan) {
     const name = overlay.querySelector('#pf-name').value.trim();
     if (!name) { feedback.innerHTML = '<div class="auth-error">Informe o nome do plano.</div>'; return; }
 
+    const trialRaw = overlay.querySelector('#pf-trial-days').value.trim();
+    if (trialRaw !== '' && (!/^\d+$/.test(trialRaw) || Number(trialRaw) <= 0)) {
+      feedback.innerHTML = '<div class="auth-error">Dias de teste grátis deve ser um número maior que zero, ou em branco.</div>';
+      return;
+    }
+
     const btn = overlay.querySelector('#pm-save');
     btn.disabled = true;
     try {
@@ -173,10 +182,14 @@ function openPlanoModal(plan) {
         p_id: plan ? plan.id : null,
         p_name: name,
         p_description: overlay.querySelector('#pf-description').value.trim() || null,
-        p_price_monthly: getMoneyValue(priceInput) || null,
+        // getMoneyValue() não distingue "campo vazio" de "digitou 0" (as duas
+        // coisas retornam 0) — checar o texto bruto do input preserva um
+        // plano Grátis (preço 0 de verdade) sem virar "sem preço definido".
+        p_price_monthly: priceInput.value.trim() === '' ? null : getMoneyValue(priceInput),
         p_active: overlay.querySelector('#pf-active').checked,
         p_sort_order: plan ? plan.sort_order : plansCache.length,
         p_limits: collectPlanLimitsFromForm(overlay),
+        p_trial_days: trialRaw === '' ? null : Number(trialRaw),
       });
       if (error) throw error;
       logAudit(isEdit ? 'plano_editado' : 'plano_criado', `Plano ${name} ${isEdit ? 'editado' : 'criado'}`, {});
