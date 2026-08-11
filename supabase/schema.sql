@@ -418,6 +418,42 @@ update system_settings set tenant_id = default_tenant_id() where tenant_id is nu
 alter table system_settings alter column tenant_id set not null;
 create index system_settings_tenant_id_idx on system_settings(tenant_id);
 
+-- Bug real corrigido (2026-08-10, achado testando o fluxo completo de uma
+-- 2ª empresa em produção): a PK original de system_settings era só `id`
+-- (boolean, sempre true) — sobrevivia do tempo de "singleton global", antes
+-- do pivô SaaS. Isso nunca foi corrigido quando tenant_id foi adicionada
+-- acima, então o banco só permitia UMA linha em toda a tabela (violação de
+-- unicidade em `id`) — nenhuma empresa criada depois da Fase 0 conseguia
+-- ter a própria linha de configurações. A tela Configurações de QUALQUER
+-- empresa assinante nova ficava permanentemente quebrada ("Não foi possível
+-- carregar as configurações agora"), e RPCs que leem system_settings pelo
+-- tenant (public_company_info, get_my_tenant_invite_info, etc.) não
+-- achavam nada pra essas empresas. `tenant_id` passa a ser a PK de verdade
+-- — `id` continua existindo (sempre true), só não é mais única/PK.
+alter table system_settings drop constraint system_settings_pkey;
+alter table system_settings add primary key (tenant_id);
+
+-- Cria automaticamente a linha de configurações de qualquer tenant novo,
+-- não importa o caminho de criação (hoje só api/create-tenant.js, mas
+-- protege qualquer fluxo futuro também) — já usa o nome escolhido pro
+-- tenant como company_name inicial, editável depois em Configurações.
+create or replace function trg_create_default_settings_for_tenant()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into system_settings (tenant_id, company_name)
+  values (new.id, new.name)
+  on conflict (tenant_id) do nothing;
+  return new;
+end;
+$$;
+
+create trigger after_tenant_created
+  after insert on tenants
+  for each row execute function trg_create_default_settings_for_tenant();
+
 alter table planning_debts add column tenant_id uuid references tenants(id) default default_tenant_id();
 update planning_debts set tenant_id = default_tenant_id() where tenant_id is null;
 alter table planning_debts alter column tenant_id set not null;
@@ -773,6 +809,18 @@ as $$
 declare
   v_limit numeric;
 begin
+  -- Bug real corrigido (2026-08-10, achado testando o fluxo completo de uma
+  -- 2ª empresa em produção): cliente-solicitar.js nunca envia `tenant_id` no
+  -- insert, então a coluna sempre caía no DEFAULT (default_tenant_id(), o
+  -- seu próprio tenant) — todo cliente de QUALQUER empresa assinante que
+  -- solicitava empréstimo tinha a solicitação parar na caixa "Solicitações"
+  -- do Administrador Master, nunca na da própria empresa. Corrigido
+  -- forçando o tenant_id correto aqui, SEMPRE a partir do próprio perfil de
+  -- quem está inserindo (current_tenant_id()) — nunca confiando em nada que
+  -- o cliente mandou (ou deixou de mandar). Roda antes da checagem de
+  -- limite abaixo, então já protege esse cálculo também.
+  new.tenant_id := current_tenant_id();
+
   -- Mesma trava de corrida do trigger acima, agora pro fluxo de solicitação.
   select credit_limit into v_limit from clients where profile_id = new.client_id for update;
   if (client_outstanding_principal(new.client_id) + new.requested_amount) > coalesce(v_limit, 0) then
@@ -2376,6 +2424,49 @@ begin
     name = coalesce(nullif(trim(p_name), ''), name),
     active = p_active
   where id = p_tenant_id;
+end;
+$$;
+
+-- Excluir empresa (fase final do pivô SaaS, 2026-08-10) — irreversível, por
+-- isso com travas: nunca a própria empresa do Administrador Master, e só
+-- funciona com a empresa já SUSPENSA (exige passar por update_tenant com
+-- active=false antes, evita exclusão de 1 clique numa empresa ainda ativa).
+-- Limpa TODO dado de negócio do tenant (mesmas tabelas de
+-- wipe_all_business_data, mas escopado a p_tenant_id em vez de
+-- current_tenant_id() — e cobre TAMBÉM planning_debts/system_settings, que
+-- wipe_all_business_data não tocava por ser "apagar meus dados", não
+-- "apagar minha empresa"). Devolve os profile_id (gerente + cliente) do
+-- tenant pra api/delete-tenant.js apagar cada um via Admin API (isso
+-- cascateia profiles automaticamente) — só depois de todos apagados é que
+-- dá pra apagar a linha de tenants (profiles.tenant_id ainda referenciaria
+-- ela até lá).
+create or replace function prepare_tenant_deletion(p_tenant_id uuid)
+returns setof uuid
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  if p_tenant_id = current_tenant_id() then raise exception 'CANNOT_DELETE_OWN_TENANT'; end if;
+  if not exists (select 1 from tenants where id = p_tenant_id) then raise exception 'NOT_FOUND'; end if;
+  if (select active from tenants where id = p_tenant_id) then raise exception 'TENANT_MUST_BE_SUSPENDED'; end if;
+
+  delete from payments where tenant_id = p_tenant_id;
+  delete from renewal_cycles where tenant_id = p_tenant_id;
+  delete from installments where tenant_id = p_tenant_id;
+  delete from loan_contracts where tenant_id = p_tenant_id;
+  delete from loan_requests where tenant_id = p_tenant_id;
+  delete from notifications_log where tenant_id = p_tenant_id;
+  delete from push_subscriptions where tenant_id = p_tenant_id;
+  delete from planning_debts where tenant_id = p_tenant_id;
+  delete from system_settings where tenant_id = p_tenant_id;
+  delete from clients where tenant_id = p_tenant_id;
+  -- audit_log é histórico cross-tenant só visível ao Administrador Master —
+  -- não apaga, só solta a referência (mesmo tratamento de eventos sem
+  -- sessão, tenant_id já é nullable).
+  update audit_log set tenant_id = null where tenant_id = p_tenant_id;
+
+  return query select id from profiles where tenant_id = p_tenant_id;
 end;
 $$;
 

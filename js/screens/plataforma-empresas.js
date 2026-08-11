@@ -146,6 +146,12 @@ function openEditEmpresaModal(tenant) {
           <button type="button" class="btn btn-ghost btn-sm mt-8" id="ee-invite-regenerate">Gerar novo link</button>
           <div id="ee-invite-feedback" class="mt-8"></div>
         </div>
+        ${!isOwnTenant && !tenant.active ? `
+        <div class="field mt-14" style="border:1px solid var(--bad);border-radius:var(--radius-sm);padding:10px 12px">
+          <label style="color:var(--bad)">Zona de risco</label>
+          <p class="text-sm text-soft mt-8">Apaga a empresa por completo — clientes, contratos, contas de administrador, tudo. Não tem como desfazer.</p>
+          <button type="button" class="btn btn-danger btn-sm mt-8" id="ee-delete-tenant">Excluir empresa</button>
+        </div>` : ''}
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="ee-cancel">Cancelar</button>
@@ -184,6 +190,11 @@ function openEditEmpresaModal(tenant) {
     }
   };
 
+  const deleteBtn = overlay.querySelector('#ee-delete-tenant');
+  if (deleteBtn) {
+    deleteBtn.onclick = () => openDeleteEmpresaModal(tenant, close);
+  }
+
   overlay.querySelector('#ee-save').onclick = async () => {
     const feedback = overlay.querySelector('#ee-feedback');
     feedback.innerHTML = '';
@@ -210,6 +221,63 @@ function openEditEmpresaModal(tenant) {
     } catch (e) {
       feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
       btn.disabled = false;
+    }
+  };
+}
+
+// Confirmação forte de exclusão — exige digitar o nome exato da empresa
+// (mesmo princípio da Zona de risco de Configurações, que exige digitar
+// "APAGAR TUDO"). closeParentModal fecha o modal "Editar empresa" por trás
+// também, já que a empresa deixou de existir.
+function openDeleteEmpresaModal(tenant, closeParentModal) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-head"><h3 style="color:var(--bad)">Excluir empresa</h3><button class="icon-btn" id="de-close">${Icons.x}</button></div>
+      <div class="modal-body">
+        <div id="de-feedback"></div>
+        <p class="text-sm">Isso apaga <strong>permanentemente</strong> a empresa "${escapeHtml(tenant.name)}" — todos os clientes, contratos, parcelas, pagamentos e as contas de administrador dela. Não há como desfazer.</p>
+        <div class="field mt-14">
+          <label>Digite <strong>${escapeHtml(tenant.name)}</strong> para confirmar</label>
+          <input type="text" id="de-confirm-name">
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="de-cancel">Cancelar</button>
+        <button class="btn btn-danger" id="de-confirm" disabled>Excluir empresa</button>
+      </div>
+    </div>`;
+  document.getElementById('app').appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#de-close').onclick = close;
+  overlay.querySelector('#de-cancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  const confirmInput = overlay.querySelector('#de-confirm-name');
+  const confirmBtn = overlay.querySelector('#de-confirm');
+  confirmInput.oninput = () => { confirmBtn.disabled = confirmInput.value.trim() !== tenant.name; };
+
+  confirmBtn.onclick = async () => {
+    const feedback = overlay.querySelector('#de-feedback');
+    feedback.innerHTML = '';
+    confirmBtn.disabled = true;
+    try {
+      const resp = await fetch('/api/delete-tenant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + App.session.access_token },
+        body: JSON.stringify({ tenant_id: tenant.id }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || 'Falha ao excluir a empresa.');
+      logAudit('empresa_excluida', `Empresa ${tenant.name} excluída`, { tenant_id: tenant.id });
+      close();
+      if (closeParentModal) closeParentModal();
+      showToast('Empresa excluída.');
+      renderPlataformaEmpresas();
+    } catch (e) {
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+      confirmBtn.disabled = false;
     }
   };
 }
