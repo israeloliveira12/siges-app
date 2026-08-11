@@ -2773,6 +2773,12 @@ security definer set search_path = public
 as $$
 begin
   if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+  -- Zera trial_ends_at de qualquer empresa que estava nesse plano ANTES de
+  -- apagar — sem isso, tenants.plan_id vira null (on delete set null) mas
+  -- trial_ends_at ficava órfão, mostrando "sem plano (ilimitado)" e "Em
+  -- teste — expira em Nd" ao mesmo tempo na tela Empresas (contraditório,
+  -- bug real achado em teste ao vivo, 2026-08-11).
+  update tenants set trial_ends_at = null where plan_id = p_id;
   delete from plans where id = p_id;
 end;
 $$;
@@ -2872,7 +2878,13 @@ begin
   if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
   if p_amount is null or p_amount < 0 then raise exception 'INVALID_AMOUNT'; end if;
   if not exists (select 1 from tenants where id = p_tenant_id) then raise exception 'NOT_FOUND'; end if;
-  if p_status not in ('pendente', 'pago', 'atrasado', 'cancelado') then raise exception 'INVALID_STATUS'; end if;
+  -- "not in" com NULL nunca dá true (lógica de 3 valores do SQL) — sem essa
+  -- checagem em separado, um p_status NULL passava direto pro INSERT/UPDATE
+  -- e quebrava com o erro cru do Postgres (violação de NOT NULL) em vez da
+  -- mensagem amigável INVALID_STATUS (bug real achado em teste ao vivo,
+  -- 2026-08-11 — inofensivo hoje porque a tela sempre envia um valor, mas é
+  -- a mesma defesa em profundidade já aplicada em outros pontos do schema).
+  if p_status is null or p_status not in ('pendente', 'pago', 'atrasado', 'cancelado') then raise exception 'INVALID_STATUS'; end if;
 
   if p_id is null then
     insert into tenant_payments (tenant_id, amount, due_date, paid_date, method, status, notes, created_by)
