@@ -323,6 +323,10 @@ create table tenants (
   -- empresa. Usado em `?convite=<token>` no cadastro público, resolvido
   -- por resolve_invite_token() e consumido por handle_new_user().
   invite_token text not null unique default replace(gen_random_uuid()::text, '-', ''),
+  -- Marcado sempre que update_tenant() suspende a empresa (nunca limpo ao
+  -- reativar — fica registrando "última vez suspensa", usado pro painel
+  -- executivo calcular tempo médio de vida até suspensão).
+  suspended_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -2422,7 +2426,8 @@ begin
   end if;
   update tenants set
     name = coalesce(nullif(trim(p_name), ''), name),
-    active = p_active
+    active = p_active,
+    suspended_at = case when p_active then suspended_at else now() end
   where id = p_tenant_id;
 end;
 $$;
@@ -2467,6 +2472,90 @@ begin
   update audit_log set tenant_id = null where tenant_id = p_tenant_id;
 
   return query select id from profiles where tenant_id = p_tenant_id;
+end;
+$$;
+
+-- Painel executivo da plataforma (Plataforma SaaS → Início) — um único
+-- jsonb com tudo que a tela precisa, calculado no servidor num round-trip
+-- só (em vez de várias queries separadas). Só o Administrador Master chama.
+-- `capital_active`/`total_capital_active` usam SUM(principal_amount) dos
+-- contratos em aberto/atrasado — uma aproximação (não desconta capital já
+-- pago via installments, diferente da metodologia "carteira ativa" mais
+-- precisa usada no Dashboard de cada tenant) deliberadamente mais simples,
+-- por ser um número de visão executiva agregada, não uma conciliação
+-- contábil exata.
+create or replace function get_platform_dashboard_stats()
+returns jsonb
+language plpgsql
+stable
+security definer set search_path = public
+as $$
+declare
+  v_result jsonb;
+  v_month_start date := date_trunc('month', current_date)::date;
+  v_prev_month_start date := date_trunc('month', current_date - interval '1 month')::date;
+  v_prev_month_end date := (v_month_start - interval '1 day')::date;
+begin
+  if not is_platform_owner() then raise exception 'FORBIDDEN'; end if;
+
+  select jsonb_build_object(
+    'generated_at', now(),
+    'summary', jsonb_build_object(
+      'total_tenants', (select count(*) from tenants),
+      'active_tenants', (select count(*) from tenants where active),
+      'suspended_tenants', (select count(*) from tenants where not active),
+      'new_this_month', (select count(*) from tenants where created_at::date >= v_month_start),
+      'new_last_month', (select count(*) from tenants where created_at::date >= v_prev_month_start and created_at::date <= v_prev_month_end),
+      'suspended_this_month', (select count(*) from tenants where suspended_at is not null and suspended_at::date >= v_month_start),
+      'deleted_this_month', (select count(*) from audit_log where action = 'empresa_excluida' and created_at::date >= v_month_start),
+      'deleted_total', (select count(*) from audit_log where action = 'empresa_excluida'),
+      'total_clients', (select count(*) from clients),
+      'total_gerentes', (select count(*) from profiles where role = 'gerente' and active),
+      'total_contracts_active', (select count(*) from loan_contracts where status in ('em_aberto', 'atrasado')),
+      'total_capital_active', (select coalesce(sum(principal_amount), 0) from loan_contracts where status in ('em_aberto', 'atrasado')),
+      'mrr', (select coalesce(sum(p.price_monthly), 0) from tenants t join plans p on p.id = t.plan_id where t.active),
+      'avg_ticket', (
+        select case when count(*) > 0 then coalesce(sum(p.price_monthly), 0) / count(*) else 0 end
+        from tenants t join plans p on p.id = t.plan_id
+        where t.active and p.price_monthly is not null
+      ),
+      'avg_lifetime_days_suspended', (
+        select coalesce(avg(extract(epoch from (suspended_at - created_at)) / 86400), 0)
+        from tenants where suspended_at is not null
+      )
+    ),
+    'by_plan', (
+      select coalesce(jsonb_agg(row), '[]'::jsonb) from (
+        select
+          coalesce(p.name, 'Sem plano') as plan_name,
+          count(t.id) as tenant_count,
+          coalesce(sum(p.price_monthly), 0) as mrr_contribution
+        from tenants t
+        left join plans p on p.id = t.plan_id
+        where t.active
+        group by p.name
+        order by count(t.id) desc
+      ) row
+    ),
+    'tenants', (
+      select coalesce(jsonb_agg(row), '[]'::jsonb) from (
+        select
+          t.id, t.name, t.active, t.created_at, t.suspended_at,
+          p.name as plan_name, p.limits as plan_limits,
+          (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente') as gerente_count,
+          (select count(*) from clients c where c.tenant_id = t.id) as cliente_count,
+          (select count(*) from loan_contracts lc where lc.tenant_id = t.id and lc.status in ('em_aberto', 'atrasado')) as contract_count,
+          (select coalesce(sum(lc.principal_amount), 0) from loan_contracts lc where lc.tenant_id = t.id and lc.status in ('em_aberto', 'atrasado')) as capital_active,
+          (select max(a.created_at) from audit_log a where a.tenant_id = t.id and a.action = 'login_sucesso') as last_login_at,
+          (select count(*) from audit_log a where a.tenant_id = t.id and a.action = 'erro_sistema' and a.created_at >= now() - interval '7 days') as errors_recent
+        from tenants t
+        left join plans p on p.id = t.plan_id
+        order by t.created_at desc
+      ) row
+    )
+  ) into v_result;
+
+  return v_result;
 end;
 $$;
 
