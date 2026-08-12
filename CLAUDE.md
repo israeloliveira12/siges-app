@@ -1018,8 +1018,9 @@ Reportado pelo usuário: o sistema tratava Administrador e Gerente como a mesma 
 - **`list_tenants_with_stats()`** (tela Empresas) e **`get_platform_dashboard_stats()`** (card "Perto do limite do plano", Início) — a subquery de `gerente_count` nas duas ganhou `and not g.is_primary_admin`. Mesma assinatura de sempre, `create or replace` substitui sem precisar de `drop function`.
 - **Rótulo em Planos**: "Máximo de administradores/gerentes" virou só "Máximo de gerentes", com um texto de ajuda explícito ("O Administrador nunca entra nessa conta — sempre existe 1, à parte").
 - **Listagem de Empresas** ganhou transparência: em vez de só "N gerentes", agora mostra "1 administrador + N gerente(s)" — deixa claro que o Administrador é sempre garantido, sem competir pelo limite do plano.
+- **Card de cada plano na tela Planos** (`planLimitSummary()`) recebeu o mesmo tratamento — usuário reportou que o resumo do card ("1 gerente · 10 clientes") ainda parecia dizer que 1 era o total de gente da empresa; virou "1 administrador + 1 gerente · 10 clientes" também aqui, consistente com a listagem de Empresas.
 - Testado ao vivo (preview local, RPC de produção — ainda com o bug antigo até a migration rodar): confirmado que o rótulo/texto de ajuda em Planos renderiza certo, e que a listagem de Empresas reflete fielmente o que a RPC devolve (`gerente_count` da "Atual Gerência" ainda aparecia como 1 antes da migration, porque o único perfil `gerente` dela hoje é o próprio Administrador — vai virar 0 assim que a migration rodar).
-- `sw.js` em `v75`.
+- `sw.js` em `v76`.
 
 **Migration a rodar manualmente no SQL Editor do Supabase:** ver [supabase/migration_047.sql](supabase/migration_047.sql) — cole o conteúdo completo do arquivo no SQL Editor e execute. Não precisa de etapas separadas.
 

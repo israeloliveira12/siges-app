@@ -38,7 +38,11 @@ async function renderPlataformaPlanos() {
 function planLimitSummary(limits) {
   const parts = [];
   const l = limits || {};
-  parts.push(typeof l.max_gerentes === 'number' ? `${l.max_gerentes} gerente${l.max_gerentes === 1 ? '' : 's'}` : 'Gerentes ilimitados');
+  // "1 administrador +" sempre na frente — o Administrador é fixo, nunca
+  // entra na conta de max_gerentes (mesmo raciocínio já aplicado na
+  // listagem de Empresas). Sem isso, o card do plano parecia dizer que "1
+  // gerente" era o total de gente da empresa inteira.
+  parts.push(typeof l.max_gerentes === 'number' ? `1 administrador + ${l.max_gerentes} gerente${l.max_gerentes === 1 ? '' : 's'}` : '1 administrador + gerentes ilimitados');
   parts.push(typeof l.max_clientes === 'number' ? `${l.max_clientes} cliente${l.max_clientes === 1 ? '' : 's'}` : 'Clientes ilimitados');
   const recursos = PLAN_LIMIT_FIELDS.filter((f) => f.type === 'boolean' && l[f.key] !== false).map((f) => f.label);
   if (recursos.length) parts.push(recursos.join(', '));
