@@ -47,10 +47,16 @@ export default async function handler(req, res) {
   const limitKey = role === 'gerente' ? 'max_gerentes' : 'max_clientes';
   const maxAllowed = limits[limitKey];
   if (typeof maxAllowed === 'number') {
-    const countRes = await supabaseAdminFetch(
-      `/rest/v1/profiles?role=eq.${role}&tenant_id=eq.${caller.tenant_id}&select=id`,
-      { method: 'GET' }
-    );
+    // O Administrador (is_primary_admin=true) nunca conta pro limite de
+    // gerentes do plano — ele é sempre 1, fixo, à parte; o limite é só
+    // sobre gerentes SECUNDÁRIOS. Sem esse filtro, um plano com "1
+    // gerente" já nascia sem vaga nenhuma (o próprio Administrador já
+    // ocupava a única vaga), tornando o limite impossível de usar de
+    // verdade (bug real corrigido 2026-08-11).
+    const countUrl = role === 'gerente'
+      ? `/rest/v1/profiles?role=eq.gerente&is_primary_admin=eq.false&tenant_id=eq.${caller.tenant_id}&select=id`
+      : `/rest/v1/profiles?role=eq.${role}&tenant_id=eq.${caller.tenant_id}&select=id`;
+    const countRes = await supabaseAdminFetch(countUrl, { method: 'GET' });
     const currentCount = countRes.ok ? countRes.data.length : 0;
     if (currentCount >= maxAllowed) {
       res.status(403).json({ error: `Limite de ${role === 'gerente' ? 'gerentes' : 'clientes'} do plano atual atingido (${maxAllowed}).` });

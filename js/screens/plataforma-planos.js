@@ -9,7 +9,13 @@
 // Chaves de limite conhecidas hoje — adicionar uma nova no futuro é só uma
 // entrada nova aqui + tratamento no ponto de checagem (nenhuma migration).
 const PLAN_LIMIT_FIELDS = [
-  { key: 'max_gerentes', label: 'Máximo de administradores/gerentes', type: 'number' },
+  // O Administrador (dono da conta) nunca entra nessa conta — sempre existe
+  // 1, à parte, garantido pra toda empresa. Esse limite é só sobre contas
+  // de Gerente adicionais que o Administrador cria (2026-08-11, correção de
+  // um bug real: a contagem antes somava os dois juntos, então um plano
+  // com "1 gerente" já nascia sem nenhuma vaga sobrando pro Administrador
+  // criar um gerente de verdade).
+  { key: 'max_gerentes', label: 'Máximo de gerentes', type: 'number', help: 'O Administrador (dono da conta) nunca entra nessa conta — sempre existe 1, à parte. Esse limite é só sobre gerentes adicionais.' },
   { key: 'max_clientes', label: 'Máximo de clientes', type: 'number' },
   { key: 'allow_extrato_pdf', label: 'Gerar extrato em PDF', type: 'boolean' },
   { key: 'allow_promissoria_pdf', label: 'Gerar nota promissória em PDF', type: 'boolean' },
@@ -79,6 +85,7 @@ function planoLimitFieldsHtml(limits) {
         <div class="field">
           <label>${f.label}</label>
           <input type="number" min="0" step="1" id="pf-${f.key}" placeholder="Ilimitado" value="${val}">
+          ${f.help ? `<span class="help">${f.help}</span>` : ''}
         </div>`;
     }
     const checked = l[f.key] !== false; // ausente ou true = liberado

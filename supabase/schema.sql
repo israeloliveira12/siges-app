@@ -2460,7 +2460,12 @@ begin
   select
     t.id, t.name, t.active, t.referrals_enabled, t.created_at, t.owner_profile_id,
     p.full_name, p.email,
-    (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente'),
+    -- Só gerentes SECUNDÁRIOS contam pro limite do plano — o Administrador
+    -- (is_primary_admin=true) é sempre 1, fixo, nunca disputa a vaga do
+    -- limite (bug real corrigido 2026-08-11: antes contava os dois juntos,
+    -- então um plano com "1 gerente" já nascia sem vaga nenhuma pro
+    -- Administrador criar um gerente de verdade).
+    (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente' and not g.is_primary_admin),
     (select count(*) from clients c where c.tenant_id = t.id),
     (select count(*) from loan_contracts lc where lc.tenant_id = t.id),
     t.invite_token,
@@ -2621,7 +2626,9 @@ begin
         select
           t.id, t.name, t.active, t.created_at, t.suspended_at, t.trial_ends_at,
           p.name as plan_name, p.limits as plan_limits,
-          (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente') as gerente_count,
+          -- Mesmo critério de list_tenants_with_stats — só gerentes
+          -- secundários contam pro limite ("Perto do limite do plano").
+          (select count(*) from profiles g where g.tenant_id = t.id and g.role = 'gerente' and not g.is_primary_admin) as gerente_count,
           (select count(*) from clients c where c.tenant_id = t.id) as cliente_count,
           (select count(*) from loan_contracts lc where lc.tenant_id = t.id and lc.status in ('em_aberto', 'atrasado')) as contract_count,
           (select coalesce(sum(lc.principal_amount), 0) from loan_contracts lc where lc.tenant_id = t.id and lc.status in ('em_aberto', 'atrasado')) as capital_active,

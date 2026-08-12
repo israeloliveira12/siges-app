@@ -1010,6 +1010,19 @@ Achado testando a rodada acima em viewport mobile. **Não é regressão desta ro
 
 **Migration a rodar manualmente no SQL Editor do Supabase:** ver [supabase/migration_046.sql](supabase/migration_046.sql) — cole o conteúdo completo do arquivo no SQL Editor e execute. Não precisa de etapas separadas (sem enum novo envolvido).
 
+## Bug real corrigido: limite de "gerentes" do plano contava o Administrador junto (2026-08-12, `migration_047.sql`)
+
+Reportado pelo usuário: o sistema tratava Administrador e Gerente como a mesma coisa em qualquer lugar que contasse gente pro limite do plano. **O modelo de dados já estava certo** — cada empresa sempre tem exatamente 1 conta com `is_primary_admin=true` (o Administrador, criado junto com a empresa) e N contas com `is_primary_admin=false` (os Gerentes, criados pelo Administrador); a tela Administradores (`gerente-gerentes.js`) já distinguia os dois com badges diferentes. O bug era só na CONTAGEM: em 3 lugares, `count(*) from profiles where role='gerente'` somava os dois papéis juntos, sem filtrar `is_primary_admin`. Na prática, um plano com "1 gerente" já nascia sem nenhuma vaga sobrando — o próprio Administrador ocupava a única vaga do limite, e nunca era possível criar um gerente secundário de verdade.
+
+- **`api/create-user.js`** (checagem de limite ao criar conta) — a query de contagem agora exclui `is_primary_admin` quando `role==='gerente'` (`&is_primary_admin=eq.false`). Não precisou de migration, é só lógica do endpoint serverless.
+- **`list_tenants_with_stats()`** (tela Empresas) e **`get_platform_dashboard_stats()`** (card "Perto do limite do plano", Início) — a subquery de `gerente_count` nas duas ganhou `and not g.is_primary_admin`. Mesma assinatura de sempre, `create or replace` substitui sem precisar de `drop function`.
+- **Rótulo em Planos**: "Máximo de administradores/gerentes" virou só "Máximo de gerentes", com um texto de ajuda explícito ("O Administrador nunca entra nessa conta — sempre existe 1, à parte").
+- **Listagem de Empresas** ganhou transparência: em vez de só "N gerentes", agora mostra "1 administrador + N gerente(s)" — deixa claro que o Administrador é sempre garantido, sem competir pelo limite do plano.
+- Testado ao vivo (preview local, RPC de produção — ainda com o bug antigo até a migration rodar): confirmado que o rótulo/texto de ajuda em Planos renderiza certo, e que a listagem de Empresas reflete fielmente o que a RPC devolve (`gerente_count` da "Atual Gerência" ainda aparecia como 1 antes da migration, porque o único perfil `gerente` dela hoje é o próprio Administrador — vai virar 0 assim que a migration rodar).
+- `sw.js` em `v75`.
+
+**Migration a rodar manualmente no SQL Editor do Supabase:** ver [supabase/migration_047.sql](supabase/migration_047.sql) — cole o conteúdo completo do arquivo no SQL Editor e execute. Não precisa de etapas separadas.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

@@ -49,7 +49,7 @@ function paintPlataformaEmpresas(root) {
           ${avatarHtml(t.name, 34)}
           <div style="min-width:0;flex:1 1 auto">
             <div class="name">${escapeHtml(t.name || '—')}${t.id === myTenantId ? ' <span class="text-soft text-sm">(sua empresa)</span>' : ''}</div>
-            <div class="meta">${escapeHtml(t.admin_name || t.admin_email || 'sem administrador')} · ${t.gerente_count} gerente${Number(t.gerente_count) === 1 ? '' : 's'} · ${t.cliente_count} cliente${Number(t.cliente_count) === 1 ? '' : 's'} · ${t.contract_count} contrato${Number(t.contract_count) === 1 ? '' : 's'} · Plano: ${escapeHtml(t.plan_name || 'sem plano (ilimitado)')} · Criada em ${formatDate(t.created_at)}</div>
+            <div class="meta">${escapeHtml(t.admin_name || t.admin_email || 'sem administrador')} · 1 administrador + ${t.gerente_count} gerente${Number(t.gerente_count) === 1 ? '' : 's'} · ${t.cliente_count} cliente${Number(t.cliente_count) === 1 ? '' : 's'} · ${t.contract_count} contrato${Number(t.contract_count) === 1 ? '' : 's'} · Plano: ${escapeHtml(t.plan_name || 'sem plano (ilimitado)')} · Criada em ${formatDate(t.created_at)}</div>
           </div>
           <div class="amt-wrap">
             <div class="flex gap-8 items-center" style="justify-content:flex-end;flex-wrap:wrap">
