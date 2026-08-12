@@ -89,6 +89,10 @@ export default async function handler(req, res) {
   // Snapshot diário pra Métricas históricas (Plataforma SaaS) — não deve
   // travar o resto do cron se falhar por qualquer motivo.
   await supabaseAdminFetch('/rest/v1/rpc/capture_platform_metrics_snapshot', { method: 'POST', body: JSON.stringify({}) }).catch(() => null);
+  // Marca como 'atrasado' toda cobrança de assinatura vencida e ainda
+  // pendente (tela Assinaturas) — mesmo papel que refresh_overdue_status
+  // cumpre pras parcelas dos clientes.
+  await supabaseAdminFetch('/rest/v1/rpc/refresh_tenant_payment_status', { method: 'POST', body: JSON.stringify({}) }).catch(() => null);
 
   const today = todayISO();
   const tomorrow = addDaysISO(today, 1);

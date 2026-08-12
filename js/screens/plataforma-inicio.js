@@ -45,6 +45,15 @@ function trialNote(t) {
   return `Expirado há ${Math.abs(days)} dia${Math.abs(days) === 1 ? '' : 's'}`;
 }
 
+function overdueNote(t) {
+  const parts = [`${formatMoney(t.overdue_amount)} em ${t.overdue_count} cobrança${Number(t.overdue_count) === 1 ? '' : 's'}`];
+  if (t.overdue_oldest_due) {
+    const days = Math.floor((Date.now() - new Date(t.overdue_oldest_due + 'T00:00:00').getTime()) / 86400000);
+    if (days > 0) parts.push(`mais antiga há ${days} dia${days === 1 ? '' : 's'}`);
+  }
+  return parts.join(' · ');
+}
+
 async function renderPlataformaInicio() {
   const root = document.getElementById('screen-plataforma-inicio');
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
@@ -90,6 +99,13 @@ function paintPlataformaInicio(root, data) {
   const inTrial = tenants
     .filter((t) => t.active && t.trial_ends_at)
     .sort((a, b) => new Date(a.trial_ends_at) - new Date(b.trial_ends_at));
+
+  // Inadimplência — empresas com cobrança de assinatura vencida (status
+  // 'atrasado', setado sozinho pelo cron diário). Só avisa, nunca suspende
+  // automaticamente — mesma decisão já tomada pro trial vencido.
+  const overdue = tenants
+    .filter((t) => Number(t.overdue_count) > 0)
+    .sort((a, b) => Number(b.overdue_amount) - Number(a.overdue_amount));
 
   const churnCount = s.suspended_this_month + s.deleted_this_month;
   const churnRate = s.total_tenants > 0 ? (churnCount / s.total_tenants) * 100 : 0;
@@ -163,7 +179,11 @@ function paintPlataformaInicio(root, data) {
     </div>
 
     <h3 class="mt-20">Saúde operacional</h3>
-    <div class="grid grid-4 mt-14" style="align-items:start">
+    <div class="grid grid-3 mt-14" style="align-items:start">
+      <div class="card" ${overdue.length ? 'style="border-color:var(--bad)"' : ''}>
+        <h4>Cobranças vencidas${s.overdue_payments_count > 0 ? ` <span class="text-sm" style="color:var(--bad)">${formatMoney(s.overdue_payments_amount)}</span>` : ''}</h4>
+        ${overdue.length ? overdue.map((t) => tenantHealthRowHtml(t, overdueNote(t))).join('') : '<p class="text-sm text-soft mt-8">Nenhuma empresa inadimplente.</p>'}
+      </div>
       <div class="card">
         <h4>Testes (trial)</h4>
         ${inTrial.length ? inTrial.map((t) => tenantHealthRowHtml(t, trialNote(t))).join('') : '<p class="text-sm text-soft mt-8">Nenhuma empresa em teste.</p>'}

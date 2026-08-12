@@ -61,7 +61,10 @@ function paintPlataformaCobrancas(root) {
           ${Object.keys(TENANT_PAYMENT_STATUS_LABELS).map((k) => `<option value="${k}" ${cobrancasFiltroStatus === k ? 'selected' : ''}>${TENANT_PAYMENT_STATUS_LABELS[k]}</option>`).join('')}
         </select>
       </div>
-      <button class="btn btn-primary" id="nova-cobranca-btn">${Icons.plus} Nova cobrança</button>
+      <div class="flex gap-8" style="flex-wrap:wrap">
+        <button class="btn btn-outline" id="gerar-mes-btn">${Icons.calendar} Gerar cobranças do mês</button>
+        <button class="btn btn-primary" id="nova-cobranca-btn">${Icons.plus} Nova cobrança</button>
+      </div>
     </div>
 
     <div class="mt-14">
@@ -88,6 +91,7 @@ function paintPlataformaCobrancas(root) {
   document.getElementById('cb-filtro-empresa').onchange = (e) => { cobrancasFiltroTenant = e.target.value; paintPlataformaCobrancas(root); };
   document.getElementById('cb-filtro-status').onchange = (e) => { cobrancasFiltroStatus = e.target.value; paintPlataformaCobrancas(root); };
   document.getElementById('nova-cobranca-btn').onclick = () => openCobrancaModal(null);
+  document.getElementById('gerar-mes-btn').onclick = openGerarMesModal;
   root.querySelectorAll('.edit-cobranca-btn').forEach((btn) => {
     btn.onclick = () => openCobrancaModal(cobrancasCache.find((p) => p.id === btn.dataset.id));
   });
@@ -107,6 +111,77 @@ async function markCobrancaPaid(payment) {
   logAudit('cobranca_editada', `Cobrança de ${payment.tenant_name} marcada como paga`, { tenant_id: payment.tenant_id });
   showToast('Cobrança marcada como paga.');
   renderPlataformaCobrancas();
+}
+
+// Geração em lote das cobranças do mês — cria 1 cobrança pendente por
+// empresa ativa com plano pago, com o valor vindo do próprio plano. A
+// prévia (preview_monthly_tenant_payments) roda a cada troca de data, pra
+// o usuário ver exatamente quantas serão criadas antes de confirmar.
+function openGerarMesModal() {
+  // Sugere o dia 10 do mês que vem como vencimento padrão.
+  const now = new Date();
+  const suggested = new Date(now.getFullYear(), now.getMonth() + 1, 10);
+  const suggestedISO = `${suggested.getFullYear()}-${String(suggested.getMonth() + 1).padStart(2, '0')}-10`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:440px">
+      <div class="modal-head"><h3>Gerar cobranças do mês</h3><button class="icon-btn" id="gm-close">${Icons.x}</button></div>
+      <div class="modal-body">
+        <div id="gm-feedback"></div>
+        <p class="text-sm text-soft">Cria uma cobrança pendente para cada empresa ativa com plano pago, já com o valor do plano. Empresas em teste grátis e empresas que já têm cobrança nesse mês são puladas automaticamente.</p>
+        <div class="field mt-14"><label>Vencimento</label><input type="date" id="gm-due-date" value="${suggestedISO}"></div>
+        <div id="gm-preview" class="text-sm text-soft">Calculando...</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="gm-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="gm-confirm" disabled>Gerar cobranças</button>
+      </div>
+    </div>`;
+  document.getElementById('app').appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#gm-close').onclick = close;
+  overlay.querySelector('#gm-cancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  const dateInput = overlay.querySelector('#gm-due-date');
+  const previewEl = overlay.querySelector('#gm-preview');
+  const confirmBtn = overlay.querySelector('#gm-confirm');
+
+  async function refreshPreview() {
+    confirmBtn.disabled = true;
+    if (!dateInput.value) { previewEl.textContent = 'Escolha uma data de vencimento.'; return; }
+    previewEl.textContent = 'Calculando...';
+    const { data, error } = await supa.rpc('preview_monthly_tenant_payments', { p_due_date: dateInput.value });
+    if (error) { previewEl.innerHTML = `<span style="color:var(--bad)">${escapeHtml(error.message)}</span>`; return; }
+    const toCreate = Number(data.to_create);
+    const toSkip = Number(data.to_skip);
+    previewEl.innerHTML = toCreate > 0
+      ? `Serão criadas <strong>${toCreate} cobrança${toCreate === 1 ? '' : 's'}</strong>, somando <strong>${formatMoney(data.total_amount)}</strong>.${toSkip > 0 ? ` ${toSkip} empresa${toSkip === 1 ? '' : 's'} já tem cobrança nesse mês e será pulada.` : ''}`
+      : `Nenhuma cobrança a criar${toSkip > 0 ? ` — ${toSkip} empresa${toSkip === 1 ? '' : 's'} já tem cobrança nesse mês.` : ' (nenhuma empresa ativa com plano pago fora de teste).'}`;
+    confirmBtn.disabled = toCreate === 0;
+  }
+
+  dateInput.onchange = refreshPreview;
+  refreshPreview();
+
+  confirmBtn.onclick = async () => {
+    const feedback = overlay.querySelector('#gm-feedback');
+    feedback.innerHTML = '';
+    confirmBtn.disabled = true;
+    try {
+      const { data, error } = await supa.rpc('generate_monthly_tenant_payments', { p_due_date: dateInput.value });
+      if (error) throw error;
+      logAudit('cobranca_criada', `${data.created} cobrança(s) geradas em lote (venc. ${dateInput.value})`, { created: data.created, skipped: data.skipped });
+      close();
+      showToast(`${data.created} cobrança${Number(data.created) === 1 ? '' : 's'} criada${Number(data.created) === 1 ? '' : 's'}.`);
+      renderPlataformaCobrancas();
+    } catch (e) {
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(e.message || String(e))}</div>`;
+      confirmBtn.disabled = false;
+    }
+  };
 }
 
 function openCobrancaModal(payment) {

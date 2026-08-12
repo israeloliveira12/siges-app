@@ -142,6 +142,23 @@ function renderShellForRole() {
   renderBell();
 }
 
+// O shell decide rótulo curto vs. completo do seletor de modo ("Negócio/SaaS"
+// vs "Empréstimos/Plataforma SaaS") no MOMENTO em que é montado, via
+// window.innerWidth<=640 — sem isto, uma janela que começa em desktop e
+// depois encolhe pra largura de celular (tablet girando de paisagem pra
+// retrato, ou navegador redimensionado) fica com o rótulo completo num
+// topbar estreito demais, estourando a largura da tela na horizontal (bug
+// real medido: 423px de conteúdo num viewport de 375px). Só re-renderiza
+// quando o lado do breakpoint realmente MUDA — um resize contínuo não
+// dispara repaint a cada pixel.
+let wasMobileViewport = window.innerWidth <= 640;
+window.addEventListener('resize', () => {
+  const isMobile = window.innerWidth <= 640;
+  if (isMobile === wasMobileViewport) return;
+  wasMobileViewport = isMobile;
+  if (App.profile) renderShellForRole();
+});
+
 // Captura erros JS não tratados e promises rejeitadas sem catch — alimenta a
 // tela de Auditoria com "falhas do sistema" sem precisar instrumentar cada
 // try/catch manualmente. Best-effort: nunca deve gerar loop (logAudit já
