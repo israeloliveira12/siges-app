@@ -1058,11 +1058,67 @@ Pedido do usuário: "monte um plano de melhoria para a plataforma maior ainda, c
 
 **Próximo passo combinado**: usuário decide qual bloco atacar primeiro; a IA aprofunda esse bloco específico em itens implementáveis (mesmo padrão usado em toda a transformação SaaS até aqui — propor, aprovar, só depois implementar).
 
+## Auditoria técnica completa + implementação das 52 correções (2026-08-23, `migration_048`)
+
+Varredura linha a linha de todo o sistema (frontend, API serverless, schema, 46 migrations, RLS, matemática financeira, design e acessibilidade) pedida pelo usuário como "bateria ultra intensiva de QA". Resultado: 52 achados, todos corrigidos nesta mesma rodada. O relatório visual com os mockups foi entregue como Artifact.
+
+**Nomenclatura dos achados** (usada nos comentários de código espalhados pelo repositório — procure por eles antes de "simplificar" qualquer coisa que pareça defensiva demais): `SEC-nn` segurança, `FIN-nn` dinheiro/documento legal, `OPS-nn` operação e escala, `UX-nn` experiência e acessibilidade.
+
+### Os 4 críticos
+
+1. **SEC-01 — `profiles.tenant_id` era editável pelo próprio usuário.** `profiles_update_self` permite editar a própria linha sem restringir coluna, e o gatilho `prevent_profile_privilege_escalation` só disparava em `role`/`is_primary_admin`/`active`/`platform_owner`. Como `current_tenant_id()` lê essa coluna, um único PATCH movia o administrador da Empresa A para dentro da Empresa B, com leitura total da carteira dela. **Correção**: `tenant_id`, `email` e `cpf` entraram na lista de colunas do gatilho.
+
+2. **SEC-02 — as políticas de escrita não filtravam por empresa.** Seis policies terminavam em `with check (is_gerente())` sem comparar `tenant_id` — o `USING` foi corrigido na Fase 1a/1c, o `WITH CHECK` nunca (o próprio comentário do schema registrava como pendente). Permitia inserir contrato/parcela/ciclo/pagamento na empresa alheia, MOVER uma linha própria pra outra empresa, e notificar qualquer usuário de qualquer empresa. **Correção**: filtro no `WITH CHECK` das seis + gatilhos `trg_force_tenant_id` (INSERT) e `trg_freeze_tenant_id` (UPDATE) em toda tabela de negócio. `notifications_log` ganhou também a exigência de o destinatário ser do mesmo tenant.
+
+3. **OPS-01 — `refresh_overdue_status()` estava quebrada em produção.** `(select loss_days_threshold from system_settings)` é subconsulta escalar, e `system_settings` virou uma linha por empresa quando a PK mudou para `tenant_id` (migration_046). Com 2+ empresas o Postgres aborta com *"more than one row returned by a subquery used as an expression"* e, como é tudo uma transação, TODA a função reverte. O cron chamava a RPC com `await` solto, sem conferir o resultado — falha 100% silenciosa. Consequência diária: parcelas nunca passavam a `atrasada` no banco, perdas nunca eram reconhecidas, status de contrato nunca sincronizava, score de inadimplente nunca recalculava e o aviso de "parcela em atraso" nunca saía. A interface mascarava parte disso via `effectiveInstallmentStatus()`, que recalcula o atraso na tela — por isso passou despercebido enquanto os relatórios, que leem a coluna real, ficavam errados. **Correção**: subconsulta correlacionada por `i.tenant_id`/`rc.tenant_id`.
+
+4. **SEC-03 — XSS armazenado na Auditoria, disparável sem login.** `log_audit_event()` é `security definer` sem checagem de autorização (intencional: precisa registrar "login falhou" antes de existir sessão), então qualquer pessoa na internet gravava linhas com `action` à escolha. E `gerente-auditoria.js` renderizava `<option value="${a}">` sem escape enquanto o rótulo ao lado já usava `escapeHtml`. O código executava no navegador do Administrador Master. **Correção**: `escapeHtml` no atributo + `log_audit_event` agora valida `action` contra `^[a-z0-9_]+$`, limita o tamanho dos textos e só aceita `login_falho`/`login_sucesso` sem sessão.
+
+### O que mudou de arquitetura (e por quê importa pro futuro)
+
+- **Dinheiro não é mais somado no navegador (FIN-01).** Existiam 74 consultas sem `.limit()` somando linhas cruas com `.reduce()`, e o PostgREST corta em 1.000 linhas por padrão — passando disso o total simplesmente parava de crescer, sem erro. Novas RPCs de agregação: `dashboard_totals()`, `dashboard_trend()`, `financial_totals()`, `financial_series()`. **Regra daqui pra frente: nenhum total financeiro deve ser calculado a partir de um array vindo do PostgREST.** Onde ainda é preciso trazer linhas (projeção por mês, top de clientes no Dashboard), o limite é explícito e a tela avisa quando não coube tudo — ver `truncAviso` em `gerente-dashboard.js`.
+
+- **O cron deixou de falhar em silêncio (OPS-01/OPS-02).** Cada tarefa registra o desfecho em `cron_runs` via `record_cron_run()`, e a tela nova **Saúde da Plataforma** (`js/screens/plataforma-saude.js`, modo Plataforma SaaS) mostra a última execução de cada uma, com o que falhou no topo. O despacho de avisos virou lote: `pending_due_notifications()` devolve a fila do dia já deduplicada e o serverless só envia, em paralelo com concorrência limitada — antes eram ~5 chamadas HTTP em série POR PARCELA, com corte em 1.000 pra plataforma inteira.
+
+- **Web Push agora leva conteúdo (UX-19).** `api/_lib/webpush.js` implementa a cifragem da RFC 8291 (`aes128gcm`) com o `crypto` nativo do Node — antes saía push vazio e o service worker sempre caía no genérico "Você tem uma nova notificação". A cifragem foi validada decifrando de volta antes de subir.
+
+- **O texto do e-mail é gerado no servidor (SEC-04).** `notifyEvent(event, clientId, context)` manda só NÚMEROS; `api/notify-event.js` escreve o texto a partir do tipo de evento. Antes `title`/`body` vinham crus do navegador e eram interpolados sem escape no HTML — para `solicitacao_criada` quem dispara é o CLIENTE e quem recebe são os administradores, ou seja, um cliente montava o conteúdo de um e-mail saindo do domínio verificado da financeira. **Não volte a aceitar texto de e-mail vindo do cliente.**
+
+- **Numeração de contrato é por empresa (OPS-08).** Era sorteio de 5 dígitos com unicidade GLOBAL: o laço degradava conforme o espaço enchia e **nunca terminava** ao esgotar (90.000 contratos travariam a transação). Agora é sequencial por tenant a partir de 10000, com `pg_advisory_xact_lock` na chave do tenant. Índice único passou a ser `(tenant_id, contract_number)`.
+
+- **Regra de senha única, replicada no servidor (SEC-14).** `passwordProblem()` existe em `js/utils.js` (retorno imediato) **e** em `api/_lib/password.js` (a trava real). Mínimo 8, letras+números, lista de senhas óbvias. **Se mudar a regra, mude nos dois.**
+
+### Achados que mudam como a interface se comporta
+
+- Modais: foco preso, Escape fecha, foco volta a quem abriu (`wireModal()` em `js/utils.js`, aplicado aos 23 modais). Antes havia 3 referências a `keydown` no projeto inteiro.
+- `.icon-btn` vai a 44×44 em telas de toque; no desktop segue 34px com área de clique expandida por `::after`.
+- Avisos (`showToast`) empilham em vez de sobrescrever — antes uma segunda ação apagava o "Desfazer" da primeira.
+- Gráficos ganharam tabela equivalente escondida (`.sr-only-table`), que reaparece na impressão.
+- O `touchmove` dos gráficos de área só bloqueia a rolagem quando o gesto é horizontal — antes travava a página inteira se o dedo começasse sobre o gráfico.
+- Service worker não assume mais no meio da sessão: fica em `waiting` e o app convida a recarregar (`notifyUpdateReady`).
+- A permissão de notificação virou botão em Configurações — não é mais pedida automaticamente no login.
+
+### Cuidados novos ao mexer no código
+
+- **`refresh_overdue_status()` e qualquer coisa que leia `system_settings`**: sempre correlacione por `tenant_id`. A tabela tem uma linha POR EMPRESA desde a migration_046 — subconsulta escalar sem filtro quebra assim que existir mais de uma.
+- **`WITH CHECK` de policy nova**: repita o filtro de tenant. O `USING` sozinho não protege escrita — foi exatamente esse o buraco de SEC-02.
+- **Datas**: use `toLocalISO()` (novo em `js/utils.js`), nunca `.toISOString().slice(0,10)` sobre uma data montada em horário local — isso só funciona em fuso negativo (OPS-09).
+- **SRI**: as 3 bibliotecas de CDN em `index.html` têm `integrity`. **Trocar de versão exige recalcular o hash** (`openssl dgst -sha384 -binary arquivo | openssl base64 -A`), senão o script não carrega e o app não sobe. `xlsx` saiu do npm 0.18.5 (CVE de poluição de protótipo e ReDoS) para 0.20.3 do CDN oficial da SheetJS — as correções nunca foram publicadas no npm.
+- **CSP em `vercel.json`**: qualquer origem nova de script precisa entrar em `script-src`, senão é bloqueada em produção (e não no preview local, o que torna o erro fácil de não notar).
+
+### Verificado em execução, não só por leitura
+
+- Cifragem do push: decifrada de volta em Node, payload íntegro.
+- `valueByExtenso`: os 7 casos com resposta conhecida conferidos (100, 101, 150, 199, 1000, 1100, 2030).
+- `isValidCpf`: 8 casos, incluindo os repetidos que passam no cálculo mas não existem.
+- Hashes SRI: as 3 bibliotecas carregaram no navegador (se o hash estivesse errado, não carregariam).
+- Tela Saúde da Plataforma: renderizada em claro, escuro e 375px, sem estouro horizontal.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.
 - WhatsApp é só via link `wa.me` (zero custo, sem API paga) — não há envio automático de WhatsApp pelo servidor.
-- Sem paginação em nenhuma listagem (`gerente-clientes.js`, `gerente-contratos-lista.js` etc.) — inofensivo no volume atual, mas é o primeiro ponto a atacar se o negócio crescer muito.
+- Sem paginação nas listagens de tela (`gerente-clientes.js`, `gerente-contratos-lista.js` etc.) — inofensivo no volume atual. Os TOTAIS financeiros já não dependem mais disso (viraram RPC de agregação na auditoria de 2026-08-23, achado FIN-01); o que falta é só o conforto de navegar listas longas.
 - Sem testes automatizados — valide sempre manualmente no preview, incluindo viewport mobile.
 
 ## Onde procurar o quê

@@ -76,6 +76,23 @@ async function renderGerenteConfiguracoes() {
         <div id="cfg-invite-feedback" class="mt-8"></div>
       </div>` : ''}
 
+      <!-- UX-21 (auditoria 2026-08-23): a permissão de notificação era pedida
+           automaticamente LOGO NO LOGIN, sem explicação nenhuma. O Chrome
+           penaliza esse padrão (o pedido vira um ícone discreto que ninguém
+           vê), o Safari e o iOS exigem gesto do usuário — o resultado era
+           muita negativa permanente, e negativa permanente não tem volta pela
+           interface do app. Agora é um botão, com o texto dizendo antes o que
+           vai acontecer. -->
+      <div class="card mt-14">
+        <h3>Notificações no aparelho</h3>
+        <p class="text-sm text-soft mt-8">Avisos de parcela vencendo, pagamento recebido e novas solicitações podem aparecer como notificação do sistema, mesmo com o SIGES fechado.</p>
+        <div class="flex items-center gap-10 mt-14" style="flex-wrap:wrap">
+          <span class="badge" id="cfg-push-badge">—</span>
+          <button type="button" class="btn btn-outline btn-sm" id="cfg-push-enable">Ativar notificações</button>
+        </div>
+        <div id="cfg-push-feedback" class="mt-8"></div>
+      </div>
+
       <div class="card mt-14">
         <h3>Configurações de atraso e perda</h3>
         <p class="text-sm text-soft mt-8">Esses dias controlam quando um contrato atrasado passa a ser tratado como "perda" nos relatórios.</p>
@@ -189,6 +206,35 @@ async function renderGerenteConfiguracoes() {
     const panelRisco = document.getElementById('cfg-panel-risco');
     if (panelRisco) panelRisco.classList.toggle('hidden', tab !== 'risco');
   };
+  // Notificações no aparelho (UX-21).
+  const pushBadge = document.getElementById('cfg-push-badge');
+  const pushBtn = document.getElementById('cfg-push-enable');
+  const pushFeedback = document.getElementById('cfg-push-feedback');
+  const paintPushState = () => {
+    const st = pushStatus();
+    const cls = { granted: 'badge-good', denied: 'badge-bad', unsupported: 'badge-neutral', default: 'badge-warn' }[st.key];
+    pushBadge.className = 'badge ' + cls;
+    pushBadge.textContent = st.label;
+    pushBtn.style.display = st.key === 'granted' || st.key === 'unsupported' ? 'none' : '';
+    if (st.key === 'denied') {
+      // Uma vez bloqueada no navegador, a permissão não pode ser pedida de
+      // novo por código — só a pessoa consegue reverter, nas configurações do
+      // site. Dizer isso é mais útil que um botão que não faria nada.
+      pushFeedback.innerHTML = '<p class="text-sm text-soft">Você bloqueou as notificações para este site. Para reativar, abra as permissões do site no seu navegador (ícone de cadeado na barra de endereço) e permita notificações.</p>';
+    }
+  };
+  paintPushState();
+  pushBtn.onclick = async () => {
+    pushBtn.disabled = true;
+    pushFeedback.innerHTML = '';
+    const result = await enablePushFromUserGesture();
+    pushBtn.disabled = false;
+    paintPushState();
+    if (result === 'granted') showToast('Notificações ativadas neste aparelho.');
+    else if (result === 'dismissed') pushFeedback.innerHTML = '<p class="text-sm text-soft">Você fechou o pedido sem responder. Pode tentar de novo quando quiser.</p>';
+    else if (result === 'error') pushFeedback.innerHTML = '<div class="auth-error">Não foi possível ativar as notificações agora. Tente novamente em instantes.</div>';
+  };
+
   document.getElementById('cfg-tab-empresa').onclick = () => setCfgTab('empresa');
   document.getElementById('cfg-tab-backup').onclick = () => setCfgTab('backup');
   const tabRisco = document.getElementById('cfg-tab-risco');
@@ -333,6 +379,10 @@ function openWipeDataModal() {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   wirePasswordToggles(overlay);

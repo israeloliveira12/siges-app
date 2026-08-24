@@ -605,13 +605,27 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
    Toast
 --------------------------------------------------------------------------- */
 
-#toast-root { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 200; }
+/* UX-07: os avisos agora se EMPILHAM. Antes o container inteiro era
+   sobrescrito a cada showToast(), e uma segunda ação apagava o "Desfazer" da
+   primeira antes de a pessoa conseguir clicar nele. */
+#toast-root {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 200;
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+  max-width: calc(100vw - 32px);
+}
 .toast {
   display: flex; align-items: center; gap: 14px; background: var(--ink);
   color: #fff; padding: 11px 16px; border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(0,0,0,.25);
   font-size: 13.5px; animation: toast-in .15s ease-out;
+  transition: opacity .18s ease, transform .18s ease;
 }
-.toast button { background: none; border: none; color: var(--accent); font-weight: 700; }
+.toast.leaving { opacity: 0; transform: translateY(6px); }
+.toast button { background: none; border: none; color: var(--accent); font-weight: 700; cursor: pointer; }
+.toast .toast-close {
+  color: rgba(255,255,255,.55); font-size: 18px; line-height: 1; font-weight: 400;
+  padding: 2px 2px; margin-left: -6px;
+}
+.toast .toast-close:hover { color: #fff; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ---------------------------------------------------------------------------
@@ -840,4 +854,222 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
     transition-duration: .001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ===========================================================================
+   Auditoria 2026-08-23 — acessibilidade, novos componentes e impressão
+   =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   UX-01 / UX-02 / UX-04 — teclado e leitor de tela
+--------------------------------------------------------------------------- */
+
+/* Primeiro Tab da página pula a navegação inteira. Fica fora da tela até
+   receber foco — quem usa mouse nunca vê, quem usa teclado economiza uma
+   dúzia de tabulações em toda troca de tela. */
+.skip-link {
+  position: absolute; left: 50%; top: -60px; transform: translateX(-50%);
+  z-index: 400; background: var(--brand-dark); color: #fff;
+  padding: 10px 18px; border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  font-size: 13.5px; font-weight: 600; text-decoration: none;
+  transition: top .15s ease;
+}
+.skip-link:focus { top: 0; }
+
+/* UX-04: só os campos de formulário tinham anel de foco próprio. Botões e
+   links ficavam com o contorno padrão do navegador, que some contra vários dos
+   fundos usados aqui (sidebar navy, card hero quase preto, botão primário).
+   :focus-visible aplica só à navegação por teclado — o clique de mouse não
+   ganha anel, então nada muda para quem usa mouse. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.sidebar :focus-visible,
+.tabbar-mobile :focus-visible,
+.topbar :focus-visible {
+  outline-color: #fff;
+}
+/* O anel do input já existe via box-shadow; evita anel duplo. */
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+
+/* Conteúdo lido por leitor de tela mas não exibido. Não usa display:none nem
+   visibility:hidden, que removem o elemento da árvore de acessibilidade. */
+.sr-only-table {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* UX-05: envolve o SVG do gráfico + a tabela equivalente. */
+.chart-wrap { position: relative; }
+
+/* main recebe tabindex="-1" para o skip-link poder focá-lo; sem isso o
+   navegador move a rolagem mas não o foco, e o Tab seguinte volta ao topo. */
+.main:focus { outline: none; }
+
+/* ---------------------------------------------------------------------------
+   UX-03 — alvo de toque de 44px
+--------------------------------------------------------------------------- */
+
+/* Em telas de toque, .icon-btn passa a 44x44 (mínimo recomendado). No
+   desktop o botão continua compacto (34px) mas ganha uma área de clique
+   expandida por ::after, invisível, que não afeta o layout. */
+.icon-btn::after {
+  content: ""; position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 44px; height: 44px;
+}
+@media (pointer: coarse), (max-width: 640px) {
+  .icon-btn { width: 44px; height: 44px; }
+  .icon-btn svg { width: 19px; height: 19px; }
+  .icon-btn::after { display: none; }
+  /* Linhas de lista ganham mais ar para os alvos maiores não colarem. */
+  .extrato-row { padding-top: 12px; padding-bottom: 12px; }
+}
+
+/* ---------------------------------------------------------------------------
+   Faixas de aviso (informação, alerta, falha)
+--------------------------------------------------------------------------- */
+
+.info-banner, .warn-banner, .alert-banner {
+  display: flex; align-items: flex-start; gap: 12px;
+  border-radius: var(--radius-sm); padding: 12px 14px;
+  font-size: 13.5px; line-height: 1.5;
+}
+.info-banner { background: var(--brand-soft); border: 1px solid var(--line); }
+.warn-banner { background: var(--warn-soft); border: 1px solid var(--line); }
+.alert-banner { background: var(--bad-soft); border: 1px solid var(--line); }
+
+.info-banner-mark, .warn-banner-mark, .alert-banner-mark {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #fff; margin-top: 1px;
+}
+.info-banner-mark { background: var(--brand); }
+.warn-banner-mark { background: var(--warn); }
+.alert-banner-mark { background: var(--bad); }
+
+.info-banner code, .warn-banner code, .alert-banner code {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--panel); padding: 1px 5px; border-radius: 4px;
+}
+
+.alert-banner-body { flex: 1; min-width: 0; }
+.alert-banner-title { font-weight: 700; color: var(--bad); }
+.alert-banner-detail { color: var(--ink-soft); margin-top: 3px; font-size: 13px; overflow-wrap: anywhere; }
+.alert-banner-impact { color: var(--ink-soft); margin-top: 7px; font-size: 12.5px; }
+
+/* ---------------------------------------------------------------------------
+   Saúde da Plataforma
+--------------------------------------------------------------------------- */
+
+.health-rows { display: flex; flex-direction: column; gap: 8px; }
+.health-row {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px;
+  background: var(--panel);
+}
+.health-row.is-bad { background: var(--bad-soft); }
+.health-ico {
+  flex: none; width: 38px; height: 38px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 700;
+}
+.health-ico.good { color: var(--good); }
+.health-ico.warn { color: var(--warn); }
+.health-ico.bad { color: var(--bad); }
+.health-ico.neutral { color: var(--ink-soft); }
+.health-row-main { flex: 1; min-width: 0; }
+.health-row-title { font-weight: 600; font-size: 14px; }
+.health-row-meta {
+  font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+  margin-top: 2px; overflow-wrap: anywhere;
+}
+.health-row-msg { font-size: 12.5px; color: var(--bad); margin-top: 5px; overflow-wrap: anywhere; }
+
+.health-checks { display: flex; flex-direction: column; gap: 10px; }
+.health-check { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.health-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.health-dot.good { background: var(--good); }
+.health-dot.bad { background: var(--bad); }
+.health-check-label { flex: 1; min-width: 0; }
+.health-check-value { font-weight: 600; }
+
+@media (max-width: 640px) {
+  /* No celular o selo ("6 falhas seguidas") não cabe ao lado do texto: sem
+     forçar a quebra, ele espremia .health-row-main até o título sair uma
+     palavra por linha e o nome da função quebrar caractere a caractere.
+     `flex-basis: calc(100% - 50px)` (38px do ícone + 12px do gap) faz o
+     conteúdo ocupar o resto da primeira linha e empurra o selo pra segunda,
+     alinhado com o texto acima. */
+  .health-row { align-items: flex-start; flex-wrap: wrap; row-gap: 8px; }
+  .health-row-main { flex: 1 1 calc(100% - 50px); }
+  .health-row .badge { flex: 0 0 auto; margin-left: 50px; }
+  .health-row-meta { word-break: normal; overflow-wrap: break-word; }
+  .health-row-meta code { white-space: nowrap; }
+}
+
+/* ---------------------------------------------------------------------------
+   SEC-14 — medidor de força da senha
+--------------------------------------------------------------------------- */
+
+.pw-meter-wrap { display: flex; align-items: center; gap: 9px; margin-top: 7px; min-height: 16px; }
+.pw-meter { display: flex; gap: 4px; flex: 1; max-width: 160px; }
+.pw-meter span {
+  flex: 1; height: 4px; border-radius: 99px; background: var(--line);
+  transition: background .15s ease;
+}
+.pw-meter span.on.s1 { background: var(--bad); }
+.pw-meter span.on.s2 { background: var(--warn); }
+.pw-meter span.on.s3 { background: var(--good); }
+.pw-meter-label { font-size: 11.5px; font-weight: 600; color: var(--ink-soft); }
+.pw-meter-label.s0, .pw-meter-label.s1 { color: var(--bad); }
+.pw-meter-label.s2 { color: var(--warn); }
+.pw-meter-label.s3 { color: var(--good); }
+
+/* ---------------------------------------------------------------------------
+   UX-12 — "ver mais antigas" no painel de notificações
+--------------------------------------------------------------------------- */
+
+.notif-more {
+  display: block; width: 100%; border: none; border-top: 1px solid var(--line);
+  background: none; color: var(--accent); font-weight: 600; font-size: 13px;
+  padding: 11px; cursor: pointer;
+}
+.notif-more:hover { background: var(--bg); }
+.notif-more:disabled { color: var(--ink-soft); cursor: default; }
+
+/* ---------------------------------------------------------------------------
+   UX-13 — impressão
+--------------------------------------------------------------------------- */
+
+@media print {
+  /* Navegação, ações e avisos não fazem sentido no papel. */
+  .sidebar, .topbar, .tabbar-mobile, .mobile-more-menu, .mobile-more-backdrop,
+  #toast-root, .skip-link, .modal-overlay, .icon-btn, .btn, .notif-panel,
+  .bell-wrap, #mode-switch-wrap {
+    display: none !important;
+  }
+  html, body { background: #fff !important; }
+  #app { display: block !important; }
+  .app-shell, .main-col, .main { display: block !important; margin: 0 !important; padding: 0 !important; }
+  .main { max-width: none !important; }
+  .card {
+    border: 1px solid #ccc !important; box-shadow: none !important;
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  table { break-inside: auto; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  /* A tabela equivalente do gráfico volta a ser visível: no papel o SVG
+     perde o hover, então o número precisa estar escrito. */
+  .sr-only-table {
+    position: static !important; width: auto !important; height: auto !important;
+    clip: auto !important; margin: 10px 0 0 !important; white-space: normal !important;
+    border-collapse: collapse; font-size: 11px;
+  }
+  .sr-only-table th, .sr-only-table td { border: 1px solid #ddd; padding: 3px 6px; text-align: left; }
 }

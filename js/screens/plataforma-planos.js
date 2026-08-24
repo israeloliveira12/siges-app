@@ -150,6 +150,10 @@ function openPlanoModal(plan) {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   overlay.querySelector('#pm-close').onclick = close;
   overlay.querySelector('#pm-cancel').onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };

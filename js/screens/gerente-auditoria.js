@@ -89,7 +89,14 @@ async function renderGerenteAuditoria() {
 }
 
 function paintAuditoria(root, { logs, summary }) {
-  const actionsPresent = Array.from(new Set(logs.map((l) => l.action))).sort();
+  // UX-15: a lista de ações do filtro vinha só dos registros JÁ CARREGADOS —
+  // com "Exibir 20", uma ação que aconteceu ontem não aparecia como opção,
+  // então filtrar por ela era impossível. Agora o catálogo conhecido entra
+  // sempre, unido ao que está na página (que pode trazer ações antigas ou
+  // futuras ainda não mapeadas).
+  const actionsPresent = Array.from(
+    new Set([...Object.keys(AUDIT_ACTION_LABELS), ...logs.map((l) => l.action)])
+  ).sort((a, b) => auditActionLabel(a).localeCompare(auditActionLabel(b), 'pt-BR'));
   // Derivado dos próprios logs (não uma query fixa em profiles role=gerente)
   // — o filtro precisa listar QUALQUER ator que já gerou um evento, cliente
   // ou gerente (ex: login_sucesso/login_falho de cliente, cliente_criado
@@ -134,7 +141,17 @@ function paintAuditoria(root, { logs, summary }) {
           <label>Ação</label>
           <select id="aud-action">
             <option value="todos">Todas as ações</option>
-            ${actionsPresent.map((a) => `<option value="${a}" ${auditActionFilter === a ? 'selected' : ''}>${escapeHtml(auditActionLabel(a))}</option>`).join('')}
+            ${/* SEC-03 (auditoria 2026-08-23): este `value` era interpolado SEM
+                  escape enquanto o rótulo ao lado já usava escapeHtml — e o
+                  conteúdo vem de audit_log.action, que log_audit_event()
+                  aceitava de qualquer pessoa NÃO AUTENTICADA (a função precisa
+                  ser anônima pra registrar "login falhou"). Um `action` com
+                  aspas quebrava o atributo e executava código no navegador do
+                  Administrador Master — a única conta com platform_owner, que
+                  enxerga todas as empresas. A origem também foi fechada na
+                  migration_048 (action agora só aceita [a-z0-9_]), mas o
+                  escape aqui é a correção que fecha o vetor de verdade. */''}
+            ${actionsPresent.map((a) => `<option value="${escapeHtml(a)}" ${auditActionFilter === a ? 'selected' : ''}>${escapeHtml(auditActionLabel(a))}</option>`).join('')}
           </select>
         </div>
         <div class="field" style="min-width:160px;margin-bottom:0">

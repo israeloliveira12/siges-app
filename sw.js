@@ -4,13 +4,14 @@
    .js/.css, e suba CACHE_NAME quando a lista mudar de forma significativa.
    ============================================================================ */
 
-const CACHE_NAME = 'siges-cache-v76';
+const CACHE_NAME = 'siges-cache-v77';
 
 const FILES_TO_CACHE = [
   './',
   './index.html',
   './style.css',
   './manifest.json',
+  './favicon.ico',
   './js/icons.js',
   './js/utils.js',
   './js/state.js',
@@ -43,6 +44,7 @@ const FILES_TO_CACHE = [
   './js/screens/pdf-gerador.js',
   './js/screens/backup-export.js',
   './js/screens/plataforma-inicio.js',
+  './js/screens/plataforma-saude.js',
   './js/screens/plataforma-empresas.js',
   './js/screens/plataforma-planos.js',
   './js/screens/plataforma-cobrancas.js',
@@ -53,17 +55,26 @@ const FILES_TO_CACHE = [
   './js/main.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
   './fonts/inter-var-latin.woff2',
 ];
 
 self.addEventListener('install', (event) => {
+  // UX-10 (auditoria 2026-08-23): sem skipWaiting() aqui. Antes a versão nova
+  // assumia no meio da sessão, misturando o JS já carregado na página com
+  // arquivos novos vindos do cache — agora ela fica em "waiting" e só assume
+  // quando a pessoa aceita o convite de recarregar (ver a mensagem SKIP_WAITING
+  // logo abaixo, disparada por notifyUpdateReady() em main.js).
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => Promise.all(
         FILES_TO_CACHE.map((url) => cache.add(url).catch(() => { /* arquivo ainda não existe nesta fase, ignora */ }))
       ))
-      .then(() => self.skipWaiting())
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -89,8 +100,13 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request, { cache: 'no-store' })
       .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        // OPS-11: só guarda resposta BOA. Antes qualquer resposta da própria
+        // origem era cacheada, inclusive 404 e 500 — e offline elas voltavam
+        // como se fossem conteúdo válido, quebrando a tela sem explicação.
+        if (response && response.ok && response.type === 'basic') {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
         return response;
       })
       .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
@@ -107,6 +123,10 @@ self.addEventListener('push', (event) => {
       body,
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
+      // `tag` + renotify: um segundo aviso sobre o MESMO assunto substitui o
+      // anterior em vez de empilhar mais um card na bandeja.
+      tag: payload.tag || 'siges-geral',
+      renotify: true,
       data: { url: payload.url || './' },
     })
   );
@@ -114,11 +134,20 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || './';
+  const target = (event.notification.data && event.notification.data.url) || './';
+  const targetUrl = new URL(target, self.location.origin).href;
   event.waitUntil(
-    self.clients.matchAll({ type: 'window' }).then((clients) => {
-      for (const c of clients) { if ('focus' in c) return c.focus(); }
-      if (self.clients.openWindow) return self.clients.openWindow(url);
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // UX-20: antes isso só focava a janela e RETORNAVA, sem navegar — quem
+      // clicava em "parcela em atraso" caía na tela em que estava. Agora a
+      // janela existente é levada até o destino do aviso.
+      for (const c of clients) {
+        if ('focus' in c) {
+          if ('navigate' in c) return c.navigate(targetUrl).then((client) => (client || c).focus());
+          return c.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     })
   );
 });

@@ -15,22 +15,58 @@
   // escuro (decisão explícita do usuário, 2026-07-12) — não olha
   // prefers-color-scheme de propósito. Só muda depois que a pessoa escolhe
   // no toggle (aí sim persiste via localStorage, pros 3 papéis).
+  //
+  // UX-14 (auditoria 2026-08-23): a barra do navegador também é ajustada
+  // aqui, no mesmo passo. Antes o theme-color ficava fixo no azul-marinho do
+  // <meta> e só era corrigido por applyTheme() quando a pessoa ALTERNAVA o
+  // tema — quem já usava modo escuro via a barra clara em todo carregamento.
   (function () {
     try {
       var saved = localStorage.getItem('siges-theme');
-      document.documentElement.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light');
+      var dark = saved === 'dark';
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', dark ? '#0F161F' : '#0B416B');
     } catch (e) { /* localStorage indisponível (ex: modo privado) — segue claro */ }
   })();
 </script>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="favicon.ico">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!--
+  SEC-06 (auditoria 2026-08-23). Três mudanças nestas tags:
+
+  1. Versão FIXA. `@supabase/supabase-js@2` era uma faixa aberta — qualquer
+     2.x publicada entrava em produção sem ninguém aprovar. 2.112.3 é
+     exatamente o que a faixa aberta já servia (conferido byte a byte).
+
+  2. `integrity` + `crossorigin`. Sem isso, um comprometimento do CDN
+     executaria código com acesso total à sessão, incluindo o token do
+     Supabase no localStorage. O navegador agora recusa qualquer arquivo que
+     não bata com o hash. ATENÇÃO: ao trocar de versão, o hash TEM que ser
+     recalculado junto (openssl dgst -sha384 -binary arquivo | openssl base64 -A),
+     senão o script simplesmente não carrega.
+
+  3. xlsx saiu de 0.18.5 (última no npm, com CVE conhecido de poluição de
+     protótipo e ReDoS) para 0.20.3, distribuída pelo CDN oficial da SheetJS —
+     as correções nunca foram publicadas no npm.
+-->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3"
+        integrity="sha384-l8ah+VgaWtk1mvOe9VC+OirC6qHFF4yH7l7mKRidV9MSti3E9F463bMp6ZVN4kuC"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+        integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
+        integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"
+        crossorigin="anonymous"></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- Atalho de teclado: primeiro Tab da página pula a navegação e vai direto
+     ao conteúdo. Invisível até receber foco (ver .skip-link em style.css). -->
+<a href="#main-content" class="skip-link">Pular para o conteúdo</a>
 
 <!-- Tela de autenticação (login/cadastro) -->
 <div id="auth-screen" class="active"></div>
@@ -41,22 +77,22 @@
 
     <aside class="sidebar">
       <div class="sidebar-logo">
-        <span id="sidebar-logo-svg"></span>
+        <span id="sidebar-logo-svg" aria-hidden="true"></span>
         <div>
           <div class="name">SIGES</div>
           <div class="sub">Serviços Financeiros</div>
         </div>
       </div>
-      <nav id="sidebar-nav" class="nav-group"></nav>
+      <nav id="sidebar-nav" class="nav-group" aria-label="Menu principal"></nav>
       <div class="sidebar-footer">
         <div class="flex items-center gap-10" style="padding:8px 10px 12px">
-          <div id="sidebar-user-avatar"></div>
+          <div id="sidebar-user-avatar" aria-hidden="true"></div>
           <div style="min-width:0">
             <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="sidebar-user-name">—</div>
             <div style="font-size:11px;color:rgba(255,255,255,.55)" id="sidebar-user-role">—</div>
           </div>
         </div>
-        <button class="nav-link" id="sidebar-signout"><span id="sidebar-signout-icon"></span><span>Sair</span></button>
+        <button class="nav-link" id="sidebar-signout"><span id="sidebar-signout-icon" aria-hidden="true"></span><span>Sair</span></button>
       </div>
     </aside>
 
@@ -65,13 +101,13 @@
         <div class="topbar-title" id="topbar-title">SIGES</div>
         <div class="topbar-actions">
           <div id="mode-switch-wrap"></div>
-          <button class="icon-btn" id="topbar-theme-toggle" title="Alternar modo escuro"></button>
+          <button class="icon-btn" id="topbar-theme-toggle" title="Alternar modo escuro" aria-label="Alternar modo escuro"></button>
           <div id="bell-wrap" class="bell-wrap"></div>
-          <button class="icon-btn" id="topbar-signout" title="Sair"></button>
+          <button class="icon-btn" id="topbar-signout" title="Sair" aria-label="Sair da conta"></button>
         </div>
       </header>
 
-      <main class="main">
+      <main class="main" id="main-content" tabindex="-1">
         <section id="screen-cliente-dashboard" class="screen"></section>
         <section id="screen-cliente-solicitar" class="screen"></section>
         <section id="screen-cliente-emprestimos" class="screen"></section>
@@ -94,6 +130,7 @@
         <section id="screen-gerente-configuracoes" class="screen"></section>
 
         <section id="screen-plataforma-inicio" class="screen"></section>
+        <section id="screen-plataforma-saude" class="screen"></section>
         <section id="screen-plataforma-empresas" class="screen"></section>
         <section id="screen-plataforma-planos" class="screen"></section>
         <section id="screen-plataforma-cobrancas" class="screen"></section>
@@ -105,12 +142,14 @@
     </div>
   </div>
 
-  <nav id="tabbar-mobile" class="tabbar-mobile"></nav>
+  <nav id="tabbar-mobile" class="tabbar-mobile" aria-label="Navegação principal"></nav>
   <div id="mobile-more-backdrop" class="mobile-more-backdrop hidden"></div>
-  <div id="mobile-more-menu" class="mobile-more-menu hidden"></div>
+  <div id="mobile-more-menu" class="mobile-more-menu hidden" role="dialog" aria-modal="true" aria-label="Mais opções"></div>
 </div>
 
-<div id="toast-root"></div>
+<!-- aria-live="polite": o leitor de tela anuncia o aviso quando ele aparece,
+     sem interromper o que estiver sendo lido (UX-01). -->
+<div id="toast-root" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <script src="js/icons.js"></script>
 <script src="js/utils.js"></script>
@@ -144,6 +183,7 @@
 <script src="js/screens/pdf-gerador.js"></script>
 <script src="js/screens/backup-export.js"></script>
 <script src="js/screens/plataforma-inicio.js"></script>
+<script src="js/screens/plataforma-saude.js"></script>
 <script src="js/screens/plataforma-empresas.js"></script>
 <script src="js/screens/plataforma-planos.js"></script>
 <script src="js/screens/plataforma-cobrancas.js"></script>
@@ -160,8 +200,33 @@
   document.getElementById('sidebar-signout').onclick = handleSignOut;
   document.getElementById('topbar-theme-toggle').innerHTML = currentTheme() === 'dark' ? Icons.sun : Icons.moon;
   document.getElementById('topbar-theme-toggle').onclick = toggleTheme;
+
+  // UX-10: o service worker antigo assumia no meio da sessão (skipWaiting +
+  // clients.claim), misturando o JS já carregado com arquivos novos. Agora a
+  // versão nova FICA ESPERANDO e o app convida a recarregar — quem estiver no
+  // meio de um cadastro não perde o que digitou.
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').then((reg) => {
+        if (reg.waiting) notifyUpdateReady(reg.waiting);
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', () => {
+            // controller != null significa que já havia uma versão rodando —
+            // sem isso, o convite apareceria no PRIMEIRO acesso de todo mundo.
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) notifyUpdateReady(sw);
+          });
+        });
+      }).catch(() => {});
+
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloading) return;
+        reloading = true;
+        location.reload();
+      });
+    });
   }
 </script>
 </body>

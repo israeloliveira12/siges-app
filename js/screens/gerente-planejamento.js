@@ -283,6 +283,10 @@ function openDebtModal(monthKeys, existingDebt) {
   attachMoneyMask(amountInput);
   if (isEdit) setMoneyValue(amountInput, existingDebt.amount);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   document.getElementById('confirm-debt').onclick = async (e) => {

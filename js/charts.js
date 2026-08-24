@@ -24,6 +24,30 @@ function chartSize(desktopW, desktopH, mobileW, mobileH) {
   return isMobile ? { width: mobileW, height: mobileH } : { width: desktopW, height: desktopH };
 }
 
+// Série vazia quebrava sparklineSVG/areaChartSVG com TypeError (leitura de
+// `points[points.length-1].x` e `series[peakIdx].value` em array vazio). Hoje
+// nenhuma tela chega a passar array vazio — as séries são construídas com
+// generate-series de datas — mas isso é uma armadilha para o próximo gráfico
+// que alguém adicionar. Guarda única, reusada por todos.
+function emptyChartHtml(msg) {
+  return `<p class="text-soft text-sm" style="text-align:center;padding:18px 0;margin:0">${escapeHtml(msg || 'Sem dados no período.')}</p>`;
+}
+
+// Tabela equivalente ao gráfico, escondida visualmente mas lida por leitor de
+// tela e alcançável por teclado (UX-05). Os valores dos gráficos viviam só em
+// <title> de SVG e no hover do mouse — quem navega por teclado ou usa leitor
+// de tela não alcançava número nenhum.
+function chartDataTable(series, opts = {}) {
+  const fmt = opts.valueFormatter || formatMoney;
+  const caption = opts.caption || 'Dados do gráfico';
+  return `
+    <table class="sr-only-table">
+      <caption>${escapeHtml(caption)}</caption>
+      <thead><tr><th scope="col">${escapeHtml(opts.labelHeader || 'Período')}</th><th scope="col">${escapeHtml(opts.valueHeader || 'Valor')}</th></tr></thead>
+      <tbody>${series.map((p) => `<tr><td>${escapeHtml(p.label || '')}</td><td>${escapeHtml(fmt(p.value))}</td></tr>`).join('')}</tbody>
+    </table>`;
+}
+
 // `width:100%` combinado com `max-width:${w}px` deixa o SVG estreito sempre
 // que o card é mais largo que o viewBox pensado pro desktop (ex: 600px de
 // gráfico dentro de um card de 900px+ em Relatórios) — sem `margin:0 auto`,
@@ -39,6 +63,7 @@ function chartSize(desktopW, desktopH, mobileW, mobileH) {
 // com um gráfico completo. Cor fixa (default branco), porque hoje só é usado
 // sobre fundo --hero-dark, que não muda entre os temas claro/escuro.
 function sparklineSVG(series, opts = {}) {
+  if (!series || !series.length) return '';
   const w = opts.width || 110, h = opts.height || 34, pad = 3;
   const color = opts.color || '#fff';
   const values = series.map((p) => p.value);
@@ -50,7 +75,9 @@ function sparklineSVG(series, opts = {}) {
   const linePath = points.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
   const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - pad} L ${points[0].x.toFixed(1)} ${h - pad} Z`;
   const last = points[points.length - 1];
-  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block">
+  // Decorativo por definição (o número "herói" ao lado já diz o valor) —
+  // aria-hidden evita que o leitor de tela leia um SVG sem significado.
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block" aria-hidden="true" focusable="false">
     <path d="${areaPath}" fill="${color}" opacity="0.15"/>
     <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.4" fill="${color}"/>
@@ -58,6 +85,7 @@ function sparklineSVG(series, opts = {}) {
 }
 
 function lineChartSVG(series, opts = {}) {
+  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
   const w = opts.width || 600, h = opts.height || 200, pad = 28;
   const fmt = opts.valueFormatter || formatMoney;
   const values = series.map((p) => p.value);
@@ -74,7 +102,14 @@ function lineChartSVG(series, opts = {}) {
     return `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${w - pad}" y2="${yy.toFixed(1)}" stroke="${CHART_COLORS.line}" stroke-width="1"/>`;
   }).join('');
 
-  const showStaticLabels = series.length <= 14;
+  // UX-09 (auditoria 2026-08-23): antes o valor era escrito em TODO ponto
+  // sempre que a série tinha até 14 itens — quatorze valores em reais
+  // ("R$ 1.234,56") em 600px se atropelam e viram uma faixa ilegível. O
+  // gráfico de área já resolvia isso mostrando só o pico e o último ponto;
+  // aqui a régua é a mesma, mas por largura disponível: só rotula se cada
+  // rótulo tiver pelo menos 68px de espaço só pra ele.
+  const spacingPerPoint = (w - pad * 2) / Math.max(1, series.length - 1);
+  const showStaticLabels = spacingPerPoint >= 68;
 
   const labels = series.map((p, i) => {
     if (series.length > 10 && i % Math.ceil(series.length / 8) !== 0) return '';
@@ -88,13 +123,16 @@ function lineChartSVG(series, opts = {}) {
     ${showStaticLabels ? `<text x="${x(i).toFixed(1)}" y="${(y(p.value) - 8).toFixed(1)}" font-size="9.5" fill="${opts.color || CHART_COLORS.accent}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
   `).join('');
 
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto">
-    ${gridLines}
-    <path d="${area}" fill="${opts.color || CHART_COLORS.accent}" opacity="0.08"/>
-    <path d="${path}" fill="none" stroke="${opts.color || CHART_COLORS.accent}" stroke-width="2.2" stroke-linejoin="round"/>
-    ${points}
-    ${labels}
-  </svg>`;
+  return `<div class="chart-wrap">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" role="img" aria-label="${escapeHtml(opts.caption || 'Gráfico de linha')}">
+      ${gridLines}
+      <path d="${area}" fill="${opts.color || CHART_COLORS.accent}" opacity="0.08"/>
+      <path d="${path}" fill="none" stroke="${opts.color || CHART_COLORS.accent}" stroke-width="2.2" stroke-linejoin="round"/>
+      ${points}
+      ${labels}
+    </svg>
+    ${chartDataTable(series, opts)}
+  </div>`;
 }
 
 // Área preenchida com crosshair + tooltip no hover — usada em projeções e
@@ -103,6 +141,7 @@ function lineChartSVG(series, opts = {}) {
 // wirePasswordToggles: função de wiring chamada explicitamente pela tela).
 let areaChartSeq = 0;
 function areaChartSVG(series, opts = {}) {
+  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
   const w = opts.width || 600, h = opts.height || 220, pad = 32;
   const fmt = opts.valueFormatter || formatMoney;
   const color = opts.color || CHART_COLORS.purple;
@@ -161,16 +200,21 @@ function areaChartSVG(series, opts = {}) {
   const dots = series.map((p, i) => `<circle class="area-chart-dot" data-x="${points[i].x.toFixed(1)}" data-y="${points[i].y.toFixed(1)}" data-value="${p.value}" data-label="${escapeHtml(p.label || '')}" cx="${points[i].x.toFixed(1)}" cy="${points[i].y.toFixed(1)}" r="${dotR}" fill="var(--panel)" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
 
   const chartId = 'ac' + (++areaChartSeq);
+  // O id do gradiente usa o chartId (único por render) e não só opts.gradId:
+  // dois gráficos de área sem gradId na mesma tela produziriam ids duplicados
+  // e o segundo herdaria a COR do primeiro, porque url(#id) resolve sempre
+  // para o primeiro elemento com aquele id no documento.
+  const gradId = 'areaGrad-' + (opts.gradId || '') + chartId;
   return `<div class="area-chart" data-chart-id="${chartId}" data-dot-r="${dotR}" data-dot-r-active="${dotR + 1.8}" data-fmt="${opts.valueFormatterName === 'number' ? 'number' : 'money'}">
-    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" class="area-chart-svg">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" class="area-chart-svg" role="img" aria-label="${escapeHtml(opts.caption || 'Gráfico de área')}">
       <defs>
-        <linearGradient id="areaGrad${opts.gradId || ''}" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
           <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
         </linearGradient>
       </defs>
       ${gridLines}
-      <path d="${areaPath}" fill="url(#areaGrad${opts.gradId || ''})"/>
+      <path d="${areaPath}" fill="url(#${gradId})"/>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
       <line class="area-chart-crosshair" x1="0" y1="${pad}" x2="0" y2="${h - pad}" stroke="var(--ink-soft)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
       <g>${dots}</g>
@@ -178,6 +222,7 @@ function areaChartSVG(series, opts = {}) {
       ${labels}
     </svg>
     <div class="area-chart-tooltip"><span class="area-chart-tooltip-key" style="background:${color}"></span><span class="area-chart-tooltip-val"></span><div class="area-chart-tooltip-lbl"></div></div>
+    ${chartDataTable(series, { ...opts, valueFormatter: fmt })}
   </div>`;
 }
 
@@ -225,12 +270,44 @@ function initAreaCharts(root) {
     };
     wrap.addEventListener('mousemove', (e) => move(e.clientX));
     wrap.addEventListener('mouseleave', leave);
-    wrap.addEventListener('touchmove', (e) => { if (e.touches[0]) move(e.touches[0].clientX); e.preventDefault(); }, { passive: false });
-    wrap.addEventListener('touchend', leave);
+
+    // UX-06 (auditoria 2026-08-23): o touchmove chamava preventDefault()
+    // INCONDICIONALMENTE. Se o dedo começasse em cima do gráfico, a página
+    // simplesmente não rolava — e num celular o gráfico ocupa a largura toda
+    // do card, então isso acontecia o tempo todo. Agora a direção do gesto
+    // decide: arrasto horizontal é leitura do gráfico (bloqueia a rolagem),
+    // arrasto vertical é rolagem da página (deixa passar). O eixo é decidido
+    // uma vez por gesto, senão a intenção muda no meio do movimento.
+    let touchStartX = 0, touchStartY = 0, axis = null;
+    wrap.addEventListener('touchstart', (e) => {
+      if (!e.touches[0]) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      axis = null;
+    }, { passive: true });
+
+    wrap.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      if (!t) return;
+      if (axis === null) {
+        const dx = Math.abs(t.clientX - touchStartX);
+        const dy = Math.abs(t.clientY - touchStartY);
+        // Zona morta de 8px: abaixo disso o gesto ainda não tem direção.
+        if (dx < 8 && dy < 8) return;
+        axis = dx > dy ? 'x' : 'y';
+      }
+      if (axis !== 'x') return; // rolagem vertical — não interfere
+      move(t.clientX);
+      e.preventDefault();
+    }, { passive: false });
+
+    wrap.addEventListener('touchend', () => { axis = null; leave(); });
+    wrap.addEventListener('touchcancel', () => { axis = null; leave(); });
   });
 }
 
 function barChartSVG(series, opts = {}) {
+  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
   const w = opts.width || 600, h = opts.height || 200, pad = 28;
   const fmt = opts.valueFormatter || formatMoney;
   const values = series.map((p) => p.value);
@@ -278,10 +355,13 @@ function barChartSVG(series, opts = {}) {
     return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
   }).join('');
 
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto">
-    <line x1="${pad}" y1="${y0.toFixed(1)}" x2="${w - pad}" y2="${y0.toFixed(1)}" stroke="${CHART_COLORS.line}"/>
-    ${bars}${labels}
-  </svg>`;
+  return `<div class="chart-wrap">
+    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" role="img" aria-label="${escapeHtml(opts.caption || 'Gráfico de barras')}">
+      <line x1="${pad}" y1="${y0.toFixed(1)}" x2="${w - pad}" y2="${y0.toFixed(1)}" stroke="${CHART_COLORS.line}"/>
+      ${bars}${labels}
+    </svg>
+    ${chartDataTable(series, opts)}
+  </div>`;
 }
 
 function donutChartSVG(segments, opts = {}) {
@@ -307,7 +387,10 @@ function donutChartSVG(segments, opts = {}) {
     acc += len;
     return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${thickness}" stroke-dasharray="${dasharray}" stroke-dashoffset="${dashoffset}" transform="rotate(-90 ${cx} ${cy})"><title>${escapeHtml(s.label)}: ${escapeHtml(fmt(s.value))} (${formatNumber((s.value / total) * 100, 0)}%)</title></circle>`;
   }).join('');
-  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="max-width:100%;height:auto;flex:none">
+  // A legenda ao lado (donutLegendHtml) já expõe rótulo, valor e percentual em
+  // texto real, então aqui o SVG é decorativo — marcar aria-hidden evita que o
+  // leitor de tela leia a mesma informação duas vezes.
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="max-width:100%;height:auto;flex:none" aria-hidden="true" focusable="false">
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CHART_COLORS.line}" stroke-width="${thickness}"/>
     ${arcs}
   </svg>`;

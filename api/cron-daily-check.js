@@ -1,25 +1,37 @@
 /* ============================================================================
    GET /api/cron-daily-check — roda 1x/dia (Vercel Cron, ver vercel.json).
-   1. Chama refresh_overdue_status() no banco.
-   2. Notifica clientes: parcela vence amanhã, vence hoje, ou está atrasada
-      (atrasada dispara TODO dia enquanto continuar em atraso).
-   3. Evita notificação duplicada no mesmo dia checando notifications_log.
+
+   Reescrito na auditoria de 2026-08-23 (achados OPS-01, OPS-02, SEC-10).
+   O que mudou e por quê:
+
+   - SEC-10: o segredo do cron falhava ABERTO. `authHeader !== 'Bearer ' +
+     process.env.CRON_SECRET` com a variável ausente comparava contra a string
+     literal "Bearer undefined" — quem adivinhasse isso entrava. Agora recusa
+     tudo quando a variável não está configurada.
+
+   - OPS-01: as chamadas de RPC eram `await` solto, sem conferir o resultado.
+     refresh_overdue_status() estava quebrada havia tempo (subconsulta escalar
+     sobre system_settings, que virou uma linha por empresa) e ninguém sabia,
+     porque a falha não aparecia em lugar nenhum. Agora cada tarefa registra o
+     próprio desfecho em cron_runs, que alimenta a tela "Saúde da Plataforma".
+
+   - OPS-02: a busca de parcelas não tinha `limit` (então o PostgREST cortava
+     em 1.000 para a plataforma INTEIRA) e cada parcela disparava ~5 chamadas
+     HTTP em série — mil parcelas eram cinco mil idas e voltas, uma de cada
+     vez, e a função estourava o tempo no meio. Agora uma única RPC devolve a
+     fila do dia já montada e deduplicada, e o despacho é paralelo com
+     concorrência limitada.
    ============================================================================ */
 
 import { supabaseAdminFetch } from './_lib/supabaseAdmin.js';
-import { sendEmailViaResend } from './_lib/email.js';
-import { sendEmptyPush } from './_lib/webpush.js';
+import { sendEmailViaResend, renderEmailHtml } from './_lib/email.js';
+import { sendPush } from './_lib/webpush.js';
 
-function todayISO() {
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
-function addDaysISO(iso, days) {
-  const d = new Date(iso + 'T00:00:00Z');
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-function money(v) { return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+// Teto de itens despachados por execução. Com CONCURRENCY=8 e ~4 chamadas por
+// item, cabe folgado no limite de tempo da função; o que sobrar é reportado
+// como "na fila" e sai na execução seguinte.
+const BATCH_LIMIT = 400;
+const CONCURRENCY = 8;
 
 const EVENT_TITLES = {
   vence_amanha: 'Parcela vence amanhã',
@@ -27,120 +39,190 @@ const EVENT_TITLES = {
   atrasada: 'Parcela em atraso',
 };
 
-async function alreadyNotifiedToday(recipientId, event, relatedField, relatedId) {
-  const startOfDay = todayISO() + 'T00:00:00Z';
-  const query = `/rest/v1/notifications_log?recipient_id=eq.${recipientId}&event=eq.${event}&${relatedField}=eq.${relatedId}&sent_at=gte.${startOfDay}&select=id&limit=1`;
-  const res = await supabaseAdminFetch(query, { method: 'GET' });
-  return res.ok && Array.isArray(res.data) && res.data.length > 0;
+const EMAIL_SUBJECTS = {
+  vence_amanha: 'Parcela vence amanhã — SIGES',
+  vence_hoje: 'Parcela vence hoje — SIGES',
+  atrasada: 'Parcela em atraso — SIGES',
+};
+
+function money(v) {
+  return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-async function notifyClient({ clientId, event, title, body, contractId, installmentId }) {
-  const dedupField = installmentId ? 'related_installment_id' : 'related_contract_id';
-  const dedupId = installmentId || contractId;
-  if (await alreadyNotifiedToday(clientId, event, dedupField, dedupId)) return false;
+function dateBR(iso) {
+  return String(iso || '').split('-').reverse().join('/');
+}
 
-  await supabaseAdminFetch('/rest/v1/notifications_log', {
+async function recordRun(job, status, extra = {}) {
+  await supabaseAdminFetch('/rest/v1/rpc/record_cron_run', {
+    method: 'POST',
+    body: JSON.stringify({
+      p_job: job,
+      p_status: status,
+      p_message: extra.message || null,
+      p_duration_ms: extra.durationMs != null ? Math.round(extra.durationMs) : null,
+      p_processed: extra.processed != null ? extra.processed : null,
+      p_remaining: extra.remaining != null ? extra.remaining : null,
+    }),
+  });
+}
+
+// Roda uma RPC sem parâmetros e registra o desfecho. Devolve true se deu certo.
+async function runJob(job, rpcName) {
+  const started = Date.now();
+  const res = await supabaseAdminFetch(`/rest/v1/rpc/${rpcName}`, { method: 'POST', body: JSON.stringify({}) });
+  const durationMs = Date.now() - started;
+  if (res.ok) {
+    await recordRun(job, 'ok', { durationMs });
+    return true;
+  }
+  const message = (res.data && (res.data.message || res.data.hint || res.data.details)) || `HTTP ${res.status}`;
+  await recordRun(job, 'falhou', { durationMs, message });
+  return false;
+}
+
+// Despacha um item da fila: grava o in_app, manda e-mail e push.
+async function dispatchOne(item, companyByTenant) {
+  const isInstallment = item.kind === 'installment';
+  const title = EVENT_TITLES[item.event] || 'SIGES';
+  const body = isInstallment
+    ? `Contrato #${item.contract_number}, parcela de ${money(item.amount)}, vencimento ${dateBR(item.due_date)}.`
+    : `Contrato #${item.contract_number} (renovação), valor de ${money(item.amount)}, vencimento ${dateBR(item.due_date)}.`;
+
+  // O in_app entra primeiro: é ele que a próxima execução usa para deduplicar.
+  const logRes = await supabaseAdminFetch('/rest/v1/notifications_log', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({
-      recipient_id: clientId, event, channel: 'in_app', title, body,
-      related_contract_id: contractId || null, related_installment_id: installmentId || null,
+      recipient_id: item.client_id,
+      event: item.event,
+      channel: 'in_app',
+      title,
+      body,
+      related_contract_id: item.contract_id,
+      related_installment_id: isInstallment ? item.ref_id : null,
     }),
   });
+  if (!logRes.ok) return false;
 
-  const clientRes = await supabaseAdminFetch(`/rest/v1/profiles?id=eq.${clientId}&select=email`, { method: 'GET' });
-  const email = clientRes.ok && clientRes.data[0] && clientRes.data[0].email;
+  const companyName = companyByTenant.get(item.client_id) || null;
 
-  const tasks = [];
-  if (email) {
-    tasks.push((async () => {
+  await Promise.allSettled([
+    (async () => {
+      if (!item.client_email) return;
       const result = await sendEmailViaResend({
-        to: email, subject: title + ' — SIGES',
-        html: `<div style="font-family:Arial,sans-serif"><h2 style="color:#0B416B">${title}</h2><p>${body}</p><p style="color:#5B6B74;font-size:12px">Siges Serviços Financeiros</p></div>`,
+        to: item.client_email,
+        subject: EMAIL_SUBJECTS[item.event] || 'SIGES',
+        html: renderEmailHtml({ title, body, companyName }),
       });
-      // Grava o resultado (mesmo em falha) — dá pra diagnosticar problemas de
-      // entrega (ex: domínio do Resend não verificado) direto na tabela.
       await supabaseAdminFetch('/rest/v1/notifications_log', {
         method: 'POST',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
-          recipient_id: clientId, event, channel: 'email', title, body,
-          related_contract_id: contractId || null, related_installment_id: installmentId || null,
+          recipient_id: item.client_id, event: item.event, channel: 'email', title, body,
+          related_contract_id: item.contract_id,
+          related_installment_id: isInstallment ? item.ref_id : null,
           delivery_status: result.ok ? 'sent' : 'failed',
           provider_response: result.ok ? result.data : { error: result.error, ...result.data },
         }),
       });
-    })());
-  }
-  const subsRes = await supabaseAdminFetch(`/rest/v1/push_subscriptions?profile_id=eq.${clientId}&select=*`, { method: 'GET' });
-  const subs = subsRes.ok ? subsRes.data : [];
-  for (const sub of subs) {
-    tasks.push(sendEmptyPush(sub).catch(() => null));
-  }
-  await Promise.allSettled(tasks);
+    })(),
+    (async () => {
+      const subsRes = await supabaseAdminFetch(`/rest/v1/push_subscriptions?profile_id=eq.${item.client_id}&select=*`, { method: 'GET' });
+      for (const sub of (subsRes.ok ? subsRes.data : [])) {
+        try {
+          const r = await sendPush(sub, { title, body, url: './#/cliente/emprestimos' });
+          if (r.status === 404 || r.status === 410) {
+            await supabaseAdminFetch(`/rest/v1/push_subscriptions?id=eq.${sub.id}`, { method: 'DELETE' });
+          }
+        } catch (e) { /* uma inscrição morta não derruba as outras */ }
+      }
+    })(),
+  ]);
+
   return true;
 }
 
+// Pool simples de trabalhadores — mantém no máximo CONCURRENCY despachos em
+// voo ao mesmo tempo, sem depender de biblioteca externa.
+async function runPool(items, worker, concurrency) {
+  let index = 0;
+  let done = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      const i = index++;
+      try { if (await worker(items[i])) done++; } catch (e) { /* item isolado */ }
+    }
+  });
+  await Promise.all(runners);
+  return done;
+}
+
 export default async function handler(req, res) {
-  const authHeader = req.headers.authorization || '';
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) { res.status(401).json({ error: 'Não autorizado' }); return; }
-
-  await supabaseAdminFetch('/rest/v1/rpc/refresh_overdue_status', { method: 'POST', body: JSON.stringify({}) });
-  // Snapshot diário pra Métricas históricas (Plataforma SaaS) — não deve
-  // travar o resto do cron se falhar por qualquer motivo.
-  await supabaseAdminFetch('/rest/v1/rpc/capture_platform_metrics_snapshot', { method: 'POST', body: JSON.stringify({}) }).catch(() => null);
-  // Marca como 'atrasado' toda cobrança de assinatura vencida e ainda
-  // pendente (tela Assinaturas) — mesmo papel que refresh_overdue_status
-  // cumpre pras parcelas dos clientes.
-  await supabaseAdminFetch('/rest/v1/rpc/refresh_tenant_payment_status', { method: 'POST', body: JSON.stringify({}) }).catch(() => null);
-
-  const today = todayISO();
-  const tomorrow = addDaysISO(today, 1);
-  let notified = 0;
-
-  // Parcelas: vence amanhã / vence hoje / atrasada
-  const instRes = await supabaseAdminFetch(
-    `/rest/v1/installments?status=in.(pendente,atrasada)&select=id,contract_id,due_date,amount_due,status,loan_contracts!installments_contract_id_fkey(client_id,contract_number)`,
-    { method: 'GET' }
-  );
-  for (const inst of (instRes.ok ? instRes.data : [])) {
-    const contract = inst.loan_contracts;
-    if (!contract) continue;
-    let event = null;
-    if (inst.status === 'atrasada') event = 'atrasada';
-    else if (inst.due_date === today) event = 'vence_hoje';
-    else if (inst.due_date === tomorrow) event = 'vence_amanha';
-    if (!event) continue;
-
-    const body = `Contrato #${contract.contract_number}, parcela de ${money(inst.amount_due)}, vencimento ${inst.due_date.split('-').reverse().join('/')}.`;
-    const sent = await notifyClient({
-      clientId: contract.client_id, event, title: EVENT_TITLES[event], body,
-      contractId: inst.contract_id, installmentId: inst.id,
-    });
-    if (sent) notified++;
+  // SEC-10: falha fechada. Sem CRON_SECRET configurado, ninguém entra.
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) { res.status(500).json({ error: 'CRON_SECRET não configurado' }); return; }
+  if ((req.headers.authorization || '') !== `Bearer ${cronSecret}`) {
+    res.status(401).json({ error: 'Não autorizado' });
+    return;
   }
 
-  // Ciclos de renovação: mesmas regras, usando new_due_date
-  const cycRes = await supabaseAdminFetch(
-    `/rest/v1/renewal_cycles?status=in.(pendente,atrasada)&select=id,contract_id,new_due_date,full_debt_amount,status,loan_contracts!renewal_cycles_contract_id_fkey(client_id,contract_number)`,
-    { method: 'GET' }
-  );
-  for (const cyc of (cycRes.ok ? cycRes.data : [])) {
-    const contract = cyc.loan_contracts;
-    if (!contract) continue;
-    let event = null;
-    if (cyc.status === 'atrasada') event = 'atrasada';
-    else if (cyc.new_due_date === today) event = 'vence_hoje';
-    else if (cyc.new_due_date === tomorrow) event = 'vence_amanha';
-    if (!event) continue;
+  const summary = {};
 
-    const body = `Contrato #${contract.contract_number} (renovação), valor de ${money(cyc.full_debt_amount)}, vencimento ${cyc.new_due_date.split('-').reverse().join('/')}.`;
-    const sent = await notifyClient({
-      clientId: contract.client_id, event, title: EVENT_TITLES[event], body,
-      contractId: cyc.contract_id, installmentId: null,
-    });
-    if (sent) notified++;
+  // 1. Manutenção de status. Se refresh_overdue_status falhar, a fila de
+  // avisos abaixo fica incompleta (depende dos status recalculados), mas o
+  // resto ainda roda — e agora a falha fica registrada.
+  summary.refresh_overdue_status = await runJob('refresh_overdue_status', 'refresh_overdue_status');
+  summary.capture_platform_metrics_snapshot = await runJob('capture_platform_metrics_snapshot', 'capture_platform_metrics_snapshot');
+  summary.refresh_tenant_payment_status = await runJob('refresh_tenant_payment_status', 'refresh_tenant_payment_status');
+
+  // 2. Avisos de vencimento — uma RPC devolve a fila inteira já deduplicada.
+  const started = Date.now();
+  const queueRes = await supabaseAdminFetch('/rest/v1/rpc/pending_due_notifications', {
+    method: 'POST',
+    body: JSON.stringify({ p_limit: BATCH_LIMIT }),
+    timeoutMs: 20000,
+  });
+
+  if (!queueRes.ok) {
+    const message = (queueRes.data && (queueRes.data.message || queueRes.data.hint)) || `HTTP ${queueRes.status}`;
+    await recordRun('avisos_vencimento', 'falhou', { durationMs: Date.now() - started, message });
+    res.status(200).json({ ok: false, ...summary, notified: 0, error: message });
+    return;
   }
 
-  res.status(200).json({ ok: true, notified });
+  const queue = Array.isArray(queueRes.data) ? queueRes.data : [];
+
+  // Nome da empresa por tenant, resolvido de uma vez só (o rodapé do e-mail
+  // usa isso) — evita uma consulta por destinatário.
+  const companyByTenant = new Map();
+  if (queue.length) {
+    const clientIds = [...new Set(queue.map((q) => q.client_id))];
+    const profRes = await supabaseAdminFetch(
+      `/rest/v1/profiles?id=in.(${clientIds.join(',')})&select=id,tenant_id`, { method: 'GET' }
+    );
+    const settingsRes = await supabaseAdminFetch('/rest/v1/system_settings?select=tenant_id,company_name', { method: 'GET' });
+    const nameByTenant = new Map((settingsRes.ok ? settingsRes.data : []).map((s) => [s.tenant_id, s.company_name]));
+    for (const p of (profRes.ok ? profRes.data : [])) {
+      companyByTenant.set(p.id, nameByTenant.get(p.tenant_id) || null);
+    }
+  }
+
+  const notified = await runPool(queue, (item) => dispatchOne(item, companyByTenant), CONCURRENCY);
+  const durationMs = Date.now() - started;
+
+  // Quantos sobraram para a próxima execução.
+  const remainingRes = await supabaseAdminFetch('/rest/v1/rpc/pending_due_notifications_count', {
+    method: 'POST', body: JSON.stringify({}),
+  });
+  const remaining = remainingRes.ok && typeof remainingRes.data === 'number' ? remainingRes.data : null;
+
+  await recordRun('avisos_vencimento', remaining ? 'parcial' : 'ok', {
+    durationMs,
+    processed: notified,
+    remaining,
+    message: remaining ? `${remaining} ainda na fila para a próxima execução` : null,
+  });
+
+  res.status(200).json({ ok: true, ...summary, notified, remaining });
 }

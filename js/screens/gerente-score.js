@@ -174,6 +174,10 @@ function openScoreHelpModal() {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('close-modal-2').onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };

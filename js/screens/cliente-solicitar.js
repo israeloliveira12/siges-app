@@ -132,9 +132,9 @@ async function renderClienteSolicitar() {
         message,
       });
       if (error) throw error;
-      notifyEvent('solicitacao_criada', null,
-        'Nova solicitação de empréstimo',
-        `${userDisplayName()} solicitou ${formatMoney(amount)}.`);
+      // O servidor resolve o NOME de quem solicitou a partir do perfil
+      // autenticado — o navegador não escolhe mais o texto (SEC-04).
+      notifyEvent('solicitacao_criada', null, { amount });
       logAudit('emprestimo_solicitado', `${userDisplayName()} solicitou empréstimo de ${formatMoney(amount)}`, { amount });
       showToast('Solicitação enviada! O administrador foi notificado.');
       await renderClienteSolicitar();

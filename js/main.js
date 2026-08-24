@@ -37,6 +37,12 @@ const NAV_ITEMS = {
   // chegam numa próxima fase.
   plataforma: [
     { route: 'plataforma/inicio', label: 'Início', icon: 'dashboard' },
+    // "Saúde da Plataforma" (auditoria 2026-08-23): as rotinas automáticas
+    // falhavam em silêncio — refresh_overdue_status() estava quebrada havia
+    // tempo e nada no sistema dizia isso. Esta tela transforma o silêncio em
+    // sinal. Fica logo depois de Início de propósito: é a segunda coisa que o
+    // dono da plataforma deve olhar no dia.
+    { route: 'plataforma/saude', label: 'Saúde da Plataforma', icon: 'pulse' },
     { route: 'plataforma/empresas', label: 'Empresas', icon: 'users' },
     { route: 'plataforma/planos', label: 'Planos', icon: 'wallet' },
     { route: 'plataforma/cobrancas', label: 'Assinaturas', icon: 'contract' },
@@ -56,11 +62,14 @@ const NAV_ITEMS = {
 const MOBILE_TAB_ROUTES = {
   cliente: ['cliente/dashboard', 'cliente/solicitar', 'cliente/emprestimos', 'cliente/indicacoes', 'cliente/score'],
   gerente: ['gerente/dashboard', 'gerente/cobrar', 'gerente/lancamentos', 'gerente/contratos'],
-  plataforma: ['plataforma/inicio', 'plataforma/empresas', 'plataforma/planos', 'plataforma/backup'],
+  plataforma: ['plataforma/inicio', 'plataforma/saude', 'plataforma/empresas', 'plataforma/planos'],
 };
 
 function navLinkHtml(item, mobile) {
-  return `<a href="#/${item.route}" class="nav-link" data-route="${item.route}">${Icons[item.icon] || ''}<span>${item.label}</span></a>`;
+  // aria-current="page" é o que um leitor de tela usa pra anunciar "item
+  // atual" — a classe .active sozinha é puramente visual (UX-01). O valor é
+  // atualizado a cada navegação por updateActiveNavLinks().
+  return `<a href="#/${item.route}" class="nav-link" data-route="${item.route}">${Icons[item.icon] || ''}<span>${escapeHtml(item.label)}</span></a>`;
 }
 
 function toggleMobileMoreMenu(forceOpen) {
@@ -163,12 +172,66 @@ window.addEventListener('resize', () => {
 // tela de Auditoria com "falhas do sistema" sem precisar instrumentar cada
 // try/catch manualmente. Best-effort: nunca deve gerar loop (logAudit já
 // engole a própria falha).
+//
+// OPS-05 (auditoria 2026-08-23): antes isso não tinha freio nenhum. Um erro
+// dentro de um laço de render gravava MILHARES de linhas em audit_log, e cada
+// gravação executa um `DELETE ... OFFSET 500` — a trilha de auditoria virava
+// ruído e o banco levava a carga junto. Agora cada mensagem distinta é
+// registrada no máximo uma vez por sessão, com teto global de 10 por sessão.
+const loggedErrors = new Set();
+let errorLogBudget = 10;
+
+function logErrorOnce(action, message, metadata) {
+  const key = action + '|' + message;
+  if (loggedErrors.has(key) || errorLogBudget <= 0) return;
+  loggedErrors.add(key);
+  errorLogBudget -= 1;
+  logAudit(action, message.slice(0, 300), metadata || {});
+}
+
 window.addEventListener('error', (e) => {
-  logAudit('erro_sistema', `Erro não tratado: ${e.message}`, { source: e.filename, line: e.lineno });
+  logErrorOnce('erro_sistema', `Erro não tratado: ${e.message}`, { source: e.filename, line: e.lineno });
 });
 window.addEventListener('unhandledrejection', (e) => {
   const msg = (e.reason && e.reason.message) || String(e.reason);
-  logAudit('erro_sistema', `Promise rejeitada sem tratamento: ${msg}`, {});
+  logErrorOnce('erro_sistema', `Promise rejeitada sem tratamento: ${msg}`, {});
+});
+
+// UX-10: convite pra recarregar quando uma versão nova do app já baixou.
+// index.html chama isto; o service worker fica em "waiting" até a pessoa
+// aceitar, então ninguém perde o que estava digitando.
+function notifyUpdateReady(waitingWorker) {
+  showToast('Uma versão nova do SIGES está pronta.', {
+    duration: 30000,
+    onUndo: null,
+  });
+  const root = document.getElementById('toast-root');
+  const last = root && root.lastElementChild;
+  if (!last) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Atualizar agora';
+  btn.onclick = () => waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  last.insertBefore(btn, last.querySelector('.toast-close'));
+}
+
+// UX-11 (auditoria 2026-08-23): não havia nada que recarregasse dados quando a
+// pessoa voltava pra aba. Uma aba deixada aberta a noite toda mostrava os
+// números de ontem como se fossem de agora — num sistema onde a tela decide
+// quem vai ser cobrado hoje, isso não é detalhe. Recarrega a tela atual quando
+// a aba volta ao primeiro plano depois de 2 minutos fora.
+let hiddenSince = null;
+const STALE_AFTER_MS = 2 * 60 * 1000;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenSince = Date.now(); return; }
+  if (!hiddenSince || !App.profile) return;
+  const away = Date.now() - hiddenSince;
+  hiddenSince = null;
+  if (away < STALE_AFTER_MS) return;
+  try {
+    router.handleHashChange();
+    if (typeof refreshUnreadCount === 'function') refreshUnreadCount();
+  } catch (e) { /* nunca deve quebrar o retorno à aba */ }
 });
 
 router.init();

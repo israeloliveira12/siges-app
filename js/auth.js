@@ -62,15 +62,32 @@ async function loadGlobalReferenceData() {
   } catch (e) { App.planLimits = {}; }
 }
 
+// OPS-04 (auditoria 2026-08-23): a espera pelo profile se reagendava a cada
+// 800ms PARA SEMPRE quando a linha não existia — sem contador, sem desistência
+// e sem mensagem. A tela ficava em branco e o navegador martelava o banco
+// indefinidamente. Agora são 6 tentativas (~5s) e depois uma tela que explica
+// o que houve e oferece uma saída.
+const PROFILE_MAX_ATTEMPTS = 6;
+let profileAttempts = 0;
+
 async function onAuthenticated(session) {
   App.session = session;
   await loadProfileAndClient(session.user.id);
 
   if (!App.profile) {
     // Trigger de criação de profile ainda não propagou (raríssimo) — tenta de novo em breve.
+    profileAttempts += 1;
+    if (profileAttempts >= PROFILE_MAX_ATTEMPTS) {
+      profileAttempts = 0;
+      document.getElementById('app').classList.remove('ready');
+      document.getElementById('auth-screen').classList.add('active');
+      renderProfileMissingScreen();
+      return;
+    }
     setTimeout(() => onAuthenticated(session), 800);
     return;
   }
+  profileAttempts = 0;
 
   await loadGlobalReferenceData();
 
@@ -220,9 +237,16 @@ async function doSignIn(emailOrCpf, password) {
   const looksLikeCpf = !email.includes('@') && digitsOnly.length === 11;
 
   if (looksLikeCpf) {
+    // SEC-13: confere o dígito verificador antes de consultar. Além de dar uma
+    // mensagem melhor pra quem só errou um número, evita gastar uma consulta
+    // de CPF→e-mail com entrada que nunca poderia existir.
+    if (!isValidCpf(digitsOnly)) {
+      setAuthError('Esse CPF não é válido. Confira os números.');
+      return;
+    }
     const { data, error: cpfError } = await supa.rpc('email_for_cpf', { p_cpf: formatCpf(digitsOnly) });
     if (cpfError || !data) {
-      setAuthError('Nenhuma conta encontrada para esse CPF.');
+      setAuthError('E-mail/CPF ou senha incorretos.');
       logAudit('login_falho', `Tentativa de login com CPF não encontrado`, { identifier: emailOrCpf.trim() });
       return;
     }
@@ -238,7 +262,10 @@ async function doSignIn(emailOrCpf, password) {
 
 async function doSignUp(email, password, profileData) {
   if (!email || !password) { setAuthError('Preencha e-mail e senha.'); return; }
-  if (password.length < 6) { setAuthError('A senha precisa ter pelo menos 6 caracteres.'); return; }
+  // SEC-14: regra única de senha, compartilhada com a redefinição e com a
+  // criação de conta pelo administrador.
+  const pwdProblem = passwordProblem(password);
+  if (pwdProblem) { setAuthError(pwdProblem); return; }
   location.hash = '';
   const { data, error } = await supa.auth.signUp({
     email: email.trim().toLowerCase(),
@@ -264,10 +291,34 @@ async function doGoogleSignIn() {
   });
 }
 
-async function doPasswordReset(email) {
-  if (!email) { setAuthError('Informe seu e-mail para recuperar a senha.'); return; }
+// UX-22 (auditoria 2026-08-23): o campo diz "E-mail ou CPF" e o login aceita
+// os dois — mas a recuperação só funcionava com e-mail, e ainda assim
+// respondia "se esse e-mail existir, você vai receber um link". Quem digitava
+// CPF ficava esperando um e-mail que nunca vinha. Agora o CPF é resolvido pelo
+// mesmo caminho do login antes de disparar a recuperação.
+async function doPasswordReset(emailOrCpf) {
+  const raw = String(emailOrCpf || '').trim();
+  if (!raw) { setAuthError('Informe seu e-mail ou CPF para recuperar a senha.'); return; }
+
+  let email = raw;
+  const digitsOnly = raw.replace(/\D/g, '');
+  if (!raw.includes('@') && digitsOnly.length === 11) {
+    if (!isValidCpf(digitsOnly)) { setAuthError('Esse CPF não é válido. Confira os números.'); return; }
+    const { data, error } = await supa.rpc('email_for_cpf', { p_cpf: formatCpf(digitsOnly) });
+    // Resposta deliberadamente idêntica ao caso de sucesso: confirmar que um
+    // CPF "não existe" aqui transformaria a tela num verificador de cadastro.
+    if (error || !data) {
+      setAuthMessage('Se essa conta existir, você vai receber um link de recuperação.');
+      return;
+    }
+    email = data;
+  } else if (!raw.includes('@')) {
+    setAuthError('Informe um e-mail válido ou um CPF com 11 dígitos.');
+    return;
+  }
+
   await supa.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
-  setAuthMessage('Se esse e-mail existir, você vai receber um link de recuperação.');
+  setAuthMessage('Se essa conta existir, você vai receber um link de recuperação.');
 }
 
 async function handleSignOut() {
@@ -276,6 +327,14 @@ async function handleSignOut() {
   if (App.session) {
     await logAudit('logout', `Logoff realizado por ${App.session.user.email || App.session.user.id}`, { user_id: App.session.user.id });
   }
+
+  // SEC-12: cancela a inscrição de push ANTES de encerrar a sessão. Sem isso,
+  // num aparelho compartilhado o usuário ANTERIOR continuava recebendo avisos
+  // (parcela vencendo, pagamento recebido) até que alguém entrasse de novo e
+  // a inscrição fosse reatribuída. Precisa acontecer com a sessão ainda
+  // válida, senão o DELETE na tabela é barrado pela RLS.
+  await unregisterPushOnSignOut();
+
   await supa.auth.signOut();
   // Descarta qualquer resposta de API cacheada pelo service worker — evita
   // que, num dispositivo compartilhado, o próximo usuário a logar reaproveite
@@ -296,6 +355,17 @@ function traduzErroAuth(error) {
   if (msg.includes('CLIENT_LIMIT_EXCEEDED')) return 'Esta empresa atingiu o limite de clientes do plano atual. Fale com o administrador dela.';
   if (msg.includes('email_address_invalid')) return 'Informe um e-mail válido.';
   if (msg.includes('duplicate key value')) return 'Alguns dos dados informados já estão em uso por outra conta.';
-  if (msg.startsWith('{') || msg.length > 200) return 'Ocorreu um erro. Tente novamente em instantes.';
+  if (msg.includes('RECEIVED_AT_IN_FUTURE')) return 'A data do pagamento não pode ser no futuro.';
+  if (msg.includes('RECEIVED_AT_TOO_OLD')) return 'A data do pagamento não pode ser anterior a um ano.';
+  if (msg.includes('NEW_DUE_DATE_NOT_FUTURE')) return 'O novo vencimento precisa ser depois da data do pagamento.';
+  if (msg.includes('INVALID_INTEREST_RATE')) return 'A taxa de juros informada está fora da faixa aceita.';
+  if (msg.includes('INVALID_DATE_ORDER')) return 'A primeira parcela não pode vencer antes da data do contrato.';
+  if (msg.includes('INSTALLMENTS_COUNT_MISMATCH')) return 'A quantidade de parcelas não bate com as parcelas informadas.';
+  if (msg.includes('FORBIDDEN')) return 'Você não tem permissão para esta ação.';
+  // Nunca repassar a mensagem crua do banco/Auth pro usuário: além de não
+  // ajudar em nada, expõe nome de coluna, de função e de restrição interna.
+  if (msg.startsWith('{') || msg.length > 120 || /[a-z_]+\.[a-z_]+|pg_|relation |column /i.test(msg)) {
+    return 'Ocorreu um erro. Tente novamente em instantes.';
+  }
   return msg || 'Ocorreu um erro. Tente novamente.';
 }

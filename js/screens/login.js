@@ -95,9 +95,16 @@ function renderLoginScreen() {
             <input type="${authMode === 'login' ? 'text' : 'email'}" id="f-email" autocomplete="email" required>
           </div>
           <div class="field">
-            <label>Senha</label>
+            <label for="f-password">Senha</label>
             ${passwordFieldHtml('f-password', `autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}" required`)}
+            ${authMode === 'signup' ? `<div id="f-password-meter" class="pw-meter-wrap"></div><span class="help">Pelo menos 8 caracteres, misturando letras e números.</span>` : ''}
           </div>
+          ${authMode === 'signup' ? `
+            <div class="field">
+              <label for="f-password2">Confirme a senha</label>
+              ${passwordFieldHtml('f-password2', 'autocomplete="new-password" required')}
+            </div>
+          ` : ''}
           ${authMode === 'login' ? `<div class="text-sm mt-8"><a href="#" id="forgot-link" style="color:var(--accent)">Esqueci minha senha</a></div>` : ''}
           <button type="submit" class="btn btn-primary btn-block mt-14" id="submit-btn" ${authMode === 'signup' && inviteToken && (!inviteInfo || inviteInfo.invalid) ? 'disabled' : ''}>
             ${authMode === 'login' ? 'Entrar' : 'Criar conta de cliente'}
@@ -127,13 +134,17 @@ function renderLoginScreen() {
   if (cpfInput) cpfInput.oninput = () => { cpfInput.value = formatCpf(cpfInput.value); };
   attachPhoneMask(document.getElementById('f-phone'));
   wirePasswordToggles();
+  if (authMode === 'signup') wirePasswordStrength('f-password', 'f-password-meter');
 
   const forgotLink = document.getElementById('forgot-link');
   if (forgotLink) {
     forgotLink.onclick = (e) => {
       e.preventDefault();
-      const email = document.getElementById('f-email').value.trim();
-      withAuthButtonsDisabled(['submit-btn'], () => doPasswordReset(email));
+      // UX-22: o campo aceita e-mail OU CPF, e doPasswordReset() agora resolve
+      // os dois — antes o CPF era enviado como se fosse e-mail e a pessoa
+      // ficava esperando uma mensagem que nunca chegava.
+      const identifier = document.getElementById('f-email').value.trim();
+      withAuthButtonsDisabled(['submit-btn'], () => doPasswordReset(identifier));
     };
   }
 
@@ -147,7 +158,11 @@ function renderLoginScreen() {
         await doSignIn(email, password);
       } else {
         const cpf = document.getElementById('f-cpf').value.trim();
-        if (cpf.replace(/\D/g, '').length !== 11) { setAuthError('Informe um CPF válido (11 dígitos).'); return; }
+        // SEC-13: dígito verificador, não só comprimento — "000.000.000-00"
+        // passava na checagem anterior.
+        if (!isValidCpf(cpf)) { setAuthError('Esse CPF não é válido. Confira os números.'); return; }
+        const password2 = document.getElementById('f-password2').value;
+        if (password !== password2) { setAuthError('As duas senhas não são iguais.'); return; }
         // Defesa em profundidade: o botão já vem `disabled` quando o token é
         // inválido, mas nunca confiar só nisso — um cadastro com link quebrado
         // não pode silenciosamente cair no tenant padrão (misturaria cliente
@@ -246,7 +261,7 @@ function renderCompleteRegistrationScreen() {
     clearAuthFeedback();
     withAuthButtonsDisabled(['cr-submit'], async () => {
       const cpf = document.getElementById('cr-cpf').value.trim();
-      if (cpf.replace(/\D/g, '').length !== 11) { setAuthError('Informe um CPF válido (11 dígitos).'); return; }
+      if (!isValidCpf(cpf)) { setAuthError('Esse CPF não é válido. Confira os números.'); return; }
       const { error } = await supa.rpc('complete_client_registration', {
         p_full_name: document.getElementById('cr-name').value.trim(),
         p_cpf: cpf,
@@ -341,17 +356,30 @@ function renderTenantSuspendedScreen() {
   document.getElementById('tenant-suspended-signout').onclick = handleSignOut;
 }
 
+// SEC-14 / UX-02 (auditoria 2026-08-23): a versão anterior tinha UM campo de
+// senha, sem confirmação — um erro de digitação aqui trancava a conta, e o
+// caminho de volta era pedir OUTRO link de recuperação. Também não tinha botão
+// de fechar: quem abrisse por engano ficava preso até recarregar a página.
 function renderResetPasswordModal() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal" style="max-width:400px">
-      <div class="modal-head"><h3>Definir nova senha</h3></div>
+      <div class="modal-head">
+        <h3>Definir nova senha</h3>
+        <button class="icon-btn" id="reset-close" aria-label="Fechar">${Icons.x}</button>
+      </div>
       <div class="modal-body">
         <div id="reset-feedback"></div>
         <div class="field">
-          <label>Nova senha</label>
-          ${passwordFieldHtml('new-password', 'minlength="6" required')}
+          <label for="new-password">Nova senha</label>
+          ${passwordFieldHtml('new-password', 'autocomplete="new-password" required')}
+          <div id="new-password-meter" class="pw-meter-wrap"></div>
+          <span class="help">Pelo menos 8 caracteres, misturando letras e números.</span>
+        </div>
+        <div class="field">
+          <label for="new-password2">Confirme a nova senha</label>
+          ${passwordFieldHtml('new-password2', 'autocomplete="new-password" required')}
         </div>
         <button class="btn btn-primary btn-block" id="reset-submit">Salvar nova senha</button>
       </div>
@@ -359,20 +387,56 @@ function renderResetPasswordModal() {
   `;
   document.body.appendChild(overlay);
   wirePasswordToggles(overlay);
+  wirePasswordStrength('new-password', 'new-password-meter');
+
+  const close = () => { releaseModal(); overlay.remove(); };
+  const releaseModal = wireModal(overlay, () => close());
+  document.getElementById('reset-close').onclick = close;
+
   document.getElementById('reset-submit').onclick = async () => {
+    const feedback = document.getElementById('reset-feedback');
     const pwd = document.getElementById('new-password').value;
-    if (pwd.length < 6) {
-      document.getElementById('reset-feedback').innerHTML = '<div class="auth-error">Mínimo de 6 caracteres.</div>';
-      return;
-    }
+    const pwd2 = document.getElementById('new-password2').value;
+
+    const problem = passwordProblem(pwd);
+    if (problem) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(problem)}</div>`; return; }
+    if (pwd !== pwd2) { feedback.innerHTML = '<div class="auth-error">As duas senhas não são iguais.</div>'; return; }
+
+    const btn = document.getElementById('reset-submit');
+    btn.disabled = true;
     const { error } = await supa.auth.updateUser({ password: pwd });
     if (error) {
-      document.getElementById('reset-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`;
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(traduzErroAuth(error))}</div>`;
+      btn.disabled = false;
       return;
     }
-    overlay.remove();
+    close();
     showToast('Senha atualizada com sucesso.');
   };
+}
+
+// OPS-04: a linha de `profiles` não apareceu depois de várias tentativas. Antes
+// isso era um laço infinito de 800ms com a tela em branco; agora a pessoa vê o
+// que houve e tem uma saída, em vez de ficar olhando para o nada.
+function renderProfileMissingScreen() {
+  const root = document.getElementById('auth-screen');
+  root.innerHTML = `
+    <div class="auth-shell">
+      <div class="auth-card text-center">
+        <div class="auth-logo">
+          ${Icons.logo}
+          <div class="name">SIGES</div>
+          <div class="sub">Serviços Financeiros</div>
+        </div>
+        <div class="auth-error">Não conseguimos carregar seu cadastro.</div>
+        <p class="text-sm text-soft mt-14">Sua conta de acesso existe, mas o cadastro ligado a ela ainda não foi encontrado. Isso costuma se resolver sozinho em alguns segundos — tente de novo. Se continuar assim, avise o administrador da sua empresa.</p>
+        <button class="btn btn-primary btn-block mt-20" id="profile-missing-retry">Tentar de novo</button>
+        <button class="btn btn-ghost btn-block mt-8" id="profile-missing-signout">Sair</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('profile-missing-retry').onclick = () => location.reload();
+  document.getElementById('profile-missing-signout').onclick = handleSignOut;
 }
 
 // Detecta `?convite=<token>` na URL (link de convite, Fase 4) e resolve 1x

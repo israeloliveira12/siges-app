@@ -1,5 +1,17 @@
 .vercel
+.netlify
 .DS_Store
 Thumbs.db
 *.log
 .claude/
+
+# Segredos — SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, VAPID_PRIVATE_KEY e
+# CRON_SECRET vivem só como variáveis de ambiente no painel da Vercel. Um .env
+# local com qualquer um deles nunca pode entrar no repositório: a service_role
+# ignora RLS por completo, então vazá-la equivale a publicar o banco inteiro
+# de todas as empresas (achado SEC-08 da auditoria de 2026-08-23).
+.env
+.env.*
+!.env.example
+
+node_modules/

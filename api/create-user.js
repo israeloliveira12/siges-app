@@ -5,7 +5,8 @@
    Body: { email, password, full_name, role: 'cliente' | 'gerente' }
    ============================================================================ */
 
-import { supabaseAdminFetch, getCallerProfile } from './_lib/supabaseAdmin.js';
+import { supabaseAdminFetch, getCallerProfile, countRows } from './_lib/supabaseAdmin.js';
+import { passwordProblem } from './_lib/password.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Método não permitido' }); return; }
@@ -25,7 +26,9 @@ export default async function handler(req, res) {
     res.status(400).json({ error: 'Parâmetros inválidos.' });
     return;
   }
-  if (password.length < 6) { res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' }); return; }
+  // SEC-14: a checagem do navegador é conveniência; esta aqui é a trava.
+  const pwdProblem = passwordProblem(password);
+  if (pwdProblem) { res.status(400).json({ error: pwdProblem }); return; }
 
   // Só o admin primário pode criar novas contas de gerente — qualquer
   // gerente comum ainda pode criar clientes normalmente.
@@ -53,11 +56,19 @@ export default async function handler(req, res) {
     // gerente" já nascia sem vaga nenhuma (o próprio Administrador já
     // ocupava a única vaga), tornando o limite impossível de usar de
     // verdade (bug real corrigido 2026-08-11).
+    // OPS-06 (auditoria 2026-08-23): antes isso contava `countRes.data.length`,
+    // que herda o teto de 1.000 linhas do PostgREST — uma empresa com mais de
+    // mil clientes era bloqueada mesmo tendo plano maior. `Prefer: count=exact`
+    // + `head` devolve o total real no cabeçalho Content-Range, sem trazer
+    // linha nenhuma.
     const countUrl = role === 'gerente'
       ? `/rest/v1/profiles?role=eq.gerente&is_primary_admin=eq.false&tenant_id=eq.${caller.tenant_id}&select=id`
       : `/rest/v1/profiles?role=eq.${role}&tenant_id=eq.${caller.tenant_id}&select=id`;
-    const countRes = await supabaseAdminFetch(countUrl, { method: 'GET' });
-    const currentCount = countRes.ok ? countRes.data.length : 0;
+    const currentCount = await countRows(countUrl);
+    if (currentCount == null) {
+      res.status(500).json({ error: 'Não foi possível verificar o limite do plano agora. Tente novamente.' });
+      return;
+    }
     if (currentCount >= maxAllowed) {
       res.status(403).json({ error: `Limite de ${role === 'gerente' ? 'gerentes' : 'clientes'} do plano atual atingido (${maxAllowed}).` });
       return;
@@ -93,7 +104,12 @@ export default async function handler(req, res) {
       body: JSON.stringify({ role: 'gerente', full_name: full_name || '', created_by: caller.id }),
     });
     if (!updateRes.ok) {
-      res.status(500).json({ error: 'Usuário criado, mas falhou ao definir papel de gerente.' });
+      // OPS-07 (auditoria 2026-08-23): sem este desfazer, uma promoção que
+      // falhasse deixava uma conta de login órfã com papel de CLIENTE — quem
+      // deveria virar gerente aparecia na lista de clientes da empresa, com
+      // acesso de cliente. create-tenant.js já fazia esse rollback; aqui não.
+      await supabaseAdminFetch(`/auth/v1/admin/users/${newUserId}`, { method: 'DELETE' });
+      res.status(500).json({ error: 'Não foi possível concluir a criação do gerente. Nada foi salvo — tente novamente.' });
       return;
     }
   } else {

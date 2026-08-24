@@ -66,9 +66,11 @@ function openEditGerenteModal(gerente) {
         <div class="field" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg)">
           <label>Redefinir senha</label>
           <div class="flex gap-8 mt-8" style="align-items:flex-start">
-            <div style="flex:1">${passwordFieldHtml('eg-reset-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
+            <div style="flex:1">${passwordFieldHtml('eg-reset-password', 'autocomplete="new-password" placeholder="Nova senha"')}</div>
             <button type="button" class="btn btn-outline btn-sm" id="eg-reset-password-btn" style="flex:none">Redefinir</button>
           </div>
+          <div id="eg-reset-password-meter" class="pw-meter-wrap"></div>
+          <span class="help">Pelo menos 8 caracteres, misturando letras e números.</span>
           <div id="eg-reset-password-feedback" class="mt-8"></div>
         </div>
       </div>
@@ -79,17 +81,23 @@ function openEditGerenteModal(gerente) {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   attachPhoneMask(document.getElementById('eg-phone'));
   wirePasswordToggles(overlay);
+  wirePasswordStrength('eg-reset-password', 'eg-reset-password-meter');
 
   document.getElementById('eg-reset-password-btn').onclick = async () => {
     const feedback = document.getElementById('eg-reset-password-feedback');
     const input = document.getElementById('eg-reset-password');
     const newPassword = input.value;
     feedback.innerHTML = '';
-    if (newPassword.length < 6) { feedback.innerHTML = `<div class="auth-error">A senha precisa ter pelo menos 6 caracteres.</div>`; return; }
+    const pwdProblem = passwordProblem(newPassword);
+    if (pwdProblem) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(pwdProblem)}</div>`; return; }
     const btn = document.getElementById('eg-reset-password-btn');
     btn.disabled = true;
     try {
@@ -155,7 +163,7 @@ function openNovoGerenteModal() {
         <div id="ng-feedback"></div>
         <div class="field"><label>Nome completo</label><input type="text" id="ng-name"></div>
         <div class="field"><label>E-mail</label><input type="email" id="ng-email"></div>
-        <div class="field"><label>Senha inicial</label>${passwordFieldHtml('ng-password', 'minlength="6"')}</div>
+        <div class="field"><label for="ng-password">Senha inicial</label>${passwordFieldHtml('ng-password', 'autocomplete="new-password"')}<div id="ng-password-meter" class="pw-meter-wrap"></div><span class="help">Pelo menos 8 caracteres, misturando letras e números.</span></div>
         <p class="text-sm text-soft">Este gerente terá acesso operacional ao sistema (Contratos, Clientes, Cobrar, Score etc.), mas não a Planejamento nem Configurações — exclusivas do Administrador.</p>
       </div>
       <div class="modal-foot">
@@ -165,16 +173,23 @@ function openNovoGerenteModal() {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   wirePasswordToggles(overlay);
+  wirePasswordStrength('ng-password', 'ng-password-meter');
   document.getElementById('save-modal').onclick = async () => {
     const feedback = document.getElementById('ng-feedback');
     feedback.innerHTML = '';
     const email = document.getElementById('ng-email').value.trim();
     const password = document.getElementById('ng-password').value;
     const fullName = document.getElementById('ng-name').value.trim();
-    if (!email || password.length < 6) { feedback.innerHTML = '<div class="auth-error">Preencha e-mail e senha (mín. 6 caracteres).</div>'; return; }
+    if (!email) { feedback.innerHTML = '<div class="auth-error">Preencha o e-mail.</div>'; return; }
+    const pwdProblem = passwordProblem(password);
+    if (pwdProblem) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(pwdProblem)}</div>`; return; }
 
     const btn = document.getElementById('save-modal');
     btn.disabled = true;

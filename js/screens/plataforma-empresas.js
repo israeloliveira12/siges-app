@@ -81,7 +81,7 @@ function openNovaEmpresaModal() {
         <p class="text-sm text-soft mt-8">A conta abaixo será o administrador dessa empresa — terá acesso total ao universo dela (clientes, contratos, relatórios), sem ver nada de nenhuma outra empresa da plataforma.</p>
         <div class="field"><label>Nome do administrador</label><input type="text" id="ne-admin-name"></div>
         <div class="field"><label>E-mail do administrador</label><input type="email" id="ne-admin-email"></div>
-        <div class="field"><label>Senha inicial</label>${passwordFieldHtml('ne-admin-password', 'minlength="6"')}</div>
+        <div class="field"><label for="ne-admin-password">Senha inicial</label>${passwordFieldHtml('ne-admin-password', 'autocomplete="new-password"')}<div id="ne-admin-password-meter" class="pw-meter-wrap"></div><span class="help">Pelo menos 8 caracteres, misturando letras e números.</span></div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
@@ -90,9 +90,14 @@ function openNovaEmpresaModal() {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   wirePasswordToggles(overlay);
+  wirePasswordStrength('ne-admin-password', 'ne-admin-password-meter');
 
   document.getElementById('save-modal').onclick = async () => {
     const feedback = document.getElementById('ne-feedback');
@@ -101,8 +106,9 @@ function openNovaEmpresaModal() {
     const adminName = document.getElementById('ne-admin-name').value.trim();
     const adminEmail = document.getElementById('ne-admin-email').value.trim();
     const adminPassword = document.getElementById('ne-admin-password').value;
-    if (!companyName || !adminEmail || adminPassword.length < 6) {
-      feedback.innerHTML = '<div class="auth-error">Preencha o nome da empresa, e-mail e senha (mín. 6 caracteres) do administrador.</div>';
+    const pwdProblem = adminPassword ? passwordProblem(adminPassword) : 'Informe a senha inicial do administrador.';
+    if (!companyName || !adminEmail || pwdProblem) {
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(!companyName || !adminEmail ? 'Preencha o nome da empresa e o e-mail do administrador.' : pwdProblem)}</div>`;
       return;
     }
 
@@ -179,6 +185,10 @@ function openEditEmpresaModal(tenant) {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   overlay.querySelector('#ee-close').onclick = close;
   overlay.querySelector('#ee-cancel').onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
@@ -283,6 +293,10 @@ function openDeleteEmpresaModal(tenant, closeParentModal) {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   overlay.querySelector('#de-close').onclick = close;
   overlay.querySelector('#de-cancel').onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };

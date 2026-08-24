@@ -87,6 +87,10 @@ function openRejectModal(requestId) {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   document.getElementById('confirm-reject').onclick = async () => {
@@ -98,8 +102,7 @@ function openRejectModal(requestId) {
       const { error } = await supa.rpc('reject_request', { p_request_id: requestId, p_reason: reason || null });
       if (error) throw error;
       if (reqRow) {
-        notifyEvent('solicitacao_reprovada', reqRow.client_id, 'Solicitação reprovada',
-          reason ? `Motivo: ${reason}` : 'Sua solicitação de empréstimo foi reprovada.');
+        notifyEvent('solicitacao_reprovada', reqRow.client_id, { reason: reason || null });
       }
       close();
       showToast('Solicitação reprovada.');

@@ -22,71 +22,64 @@ async function renderGerenteDashboard() {
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
   const today = todayISO();
-  const monthStart = today.slice(0, 7) + '-01';
-  const trend30Start = addDaysISO(today, -29);
 
-  // Período comparável do mês anterior (mesmo intervalo de dias, do dia 1 até
-  // o mesmo dia-do-mês de hoje) — comparar mês corrente parcial com mês
-  // anterior INTEIRO seria injusto (mês em andamento sempre perde).
-  const todayDate = new Date(today + 'T00:00:00');
-  const dayOfMonth = todayDate.getDate();
-  const prevMonthRef = new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1);
-  const prevMonthStart = prevMonthRef.getFullYear() + '-' + String(prevMonthRef.getMonth() + 1).padStart(2, '0') + '-01';
-  const prevMonthLastDay = new Date(prevMonthRef.getFullYear(), prevMonthRef.getMonth() + 1, 0).getDate();
-  const prevMonthSameDay = Math.min(dayOfMonth, prevMonthLastDay);
-  const prevMonthEnd = prevMonthRef.getFullYear() + '-' + String(prevMonthRef.getMonth() + 1).padStart(2, '0') + '-' + String(prevMonthSameDay).padStart(2, '0');
-  const tomorrow = addDaysISO(today, 1);
-  const prevMonthEndExclusive = addDaysISO(prevMonthEnd, 1);
+  // O recorte do "mesmo período do mês anterior" (dia 1 até o mesmo dia-do-mês
+  // de hoje — comparar um mês em andamento com o mês anterior INTEIRO seria
+  // injusto) agora é calculado dentro de dashboard_totals(), junto das somas.
+  // Manter essa aritmética de datas nos dois lados era a receita para os dois
+  // divergirem com o tempo.
+
+  // FIN-01 (auditoria 2026-08-23): TODO valor financeiro agregado agora é
+  // somado no banco (RPC dashboard_totals / dashboard_trend), não no
+  // navegador. Antes as linhas cruas de `payments` eram baixadas e somadas
+  // aqui com .reduce() — e o PostgREST corta a resposta em 1.000 linhas por
+  // padrão. Passando de 1.000 pagamentos no período, o total simplesmente
+  // parava de crescer: sem erro, sem aviso, só um número menor que a
+  // realidade. Um relatório que trava em zero levanta suspeita; um que mostra
+  // R$ 180 mil quando o correto é R$ 240 mil, não.
+  //
+  // As duas consultas de LINHA que sobraram (dueSoon/cyclesSoon) existem
+  // porque alimentam listas por cliente e projeção mês a mês, que precisam
+  // mesmo das linhas. Elas ganharam limite EXPLÍCITO + contagem exata, e a
+  // tela avisa quando não coube tudo (ver truncAviso abaixo) em vez de
+  // silenciosamente mostrar menos.
+  const ROW_LIMIT = 2000;
 
   const [
-    { data: paymentsToday, error: e1 },
-    { data: paymentsMonth, error: e2 },
-    { data: paymentsPrevPeriod, error: e3 },
-    { data: contractsStatus, error: e4 },
-    { data: paymentsTrend, error: e5 },
+    totalsRes,
+    trendRes,
     { count: pendingRequests, error: e6 },
-    { data: dueSoon, error: e7 },
-    { data: cyclesSoon, error: e8 },
-    { data: entryFeesMonth, error: e9 },
-    { data: exitFeesMonth, error: e10 },
-    { data: exitFeesPrevPeriod, error: e11 },
-    { data: lostInstallmentsMonth, error: e12 },
-    { data: lostCyclesMonth, error: e13 },
-    { data: lostInstallmentsPrevPeriod, error: e14 },
-    { data: lostCyclesPrevPeriod, error: e15 },
+    { data: dueSoon, error: e7, count: dueSoonCount },
+    { data: cyclesSoon, error: e8, count: cyclesSoonCount },
   ] = await Promise.all([
-    supa.from('payments').select('amount_received').gte('received_at', today),
-    // .lte(today): sem limite superior, um pagamento lançado com data futura
-    // por engano (received_at editável manualmente no modal de recebimento)
-    // inflava o "lucro do mês"/"recebido no mês" antes mesmo do dia chegar —
-    // "mês corrente" deve sempre significar "até hoje", nunca "até o fim do
-    // mês", já que o resto do dashboard já trata hoje como o corte real.
-    supa.from('payments').select('amount_received, net_profit').gte('received_at', monthStart).lte('received_at', today),
-    supa.from('payments').select('amount_received, net_profit').gte('received_at', prevMonthStart).lte('received_at', prevMonthEnd),
-    supa.from('loan_contracts').select('status, created_at, contract_date'),
-    supa.from('payments').select('amount_received, received_at').gte('received_at', trend30Start),
+    supa.rpc('dashboard_totals'),
+    supa.rpc('dashboard_trend', { p_days: 30 }),
     supa.from('loan_requests').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
-    supa.from('installments').select('amount_due, due_date, status, principal_share, interest_share, principal_paid_partial, interest_paid_partial, loan_contracts!installments_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
-    supa.from('renewal_cycles').select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))').in('status', ['pendente', 'atrasada']),
-    supa.from('payments').select('operational_fee_amount').eq('has_operational_fee', true).gte('received_at', monthStart).lte('received_at', today),
-    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', monthStart).lte('contract_date', today),
-    supa.from('loan_contracts').select('operational_fee_amount').eq('has_operational_fee', true).gte('contract_date', prevMonthStart).lte('contract_date', prevMonthEnd),
-    // Capital em perda — parcelas/ciclos reconhecidos como perda (automática
-    // ou manual) NO MÊS, pelo campo loss_recognized_at (nunca due_date nem
-    // created_at, que não representam quando a perda foi de fato
-    // contabilizada). Abate do lucro líquido do mês, igual à taxa de saída.
-    supa.from('installments').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', monthStart).lt('loss_recognized_at', tomorrow),
-    supa.from('renewal_cycles').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', monthStart).lt('loss_recognized_at', tomorrow),
-    supa.from('installments').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', prevMonthStart).lt('loss_recognized_at', prevMonthEndExclusive),
-    supa.from('renewal_cycles').select('principal_lost').eq('status', 'perda').gte('loss_recognized_at', prevMonthStart).lt('loss_recognized_at', prevMonthEndExclusive),
+    supa.from('installments')
+      .select('amount_due, due_date, status, principal_share, interest_share, principal_paid_partial, interest_paid_partial, loan_contracts!installments_contract_id_fkey(client_id, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))', { count: 'exact' })
+      .in('status', ['pendente', 'atrasada'])
+      .order('due_date', { ascending: true })
+      .limit(ROW_LIMIT),
+    supa.from('renewal_cycles')
+      .select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))', { count: 'exact' })
+      .in('status', ['pendente', 'atrasada'])
+      .order('new_due_date', { ascending: true })
+      .limit(ROW_LIMIT),
   ]);
 
-  const loadErrors = [e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15].filter(Boolean);
+  const loadErrors = [totalsRes.error, trendRes.error, e6, e7, e8].filter(Boolean);
   if (loadErrors.length) {
     console.error('Erro ao carregar dados do dashboard:', loadErrors);
     root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar os dados do dashboard agora. Recarregue a página ou tente novamente em instantes.</p></div>`;
     return;
   }
+
+  const T = totalsRes.data || {};
+  const num = (k) => Number(T[k] || 0);
+
+  // Quantas linhas em aberto ficaram de fora do recorte acima.
+  const truncadas = Math.max(0, (dueSoonCount || 0) - (dueSoon || []).length)
+                  + Math.max(0, (cyclesSoonCount || 0) - (cyclesSoon || []).length);
 
   const sum = (rows, field) => (rows || []).reduce((s, r) => s + Number(r[field] || 0), 0);
   // Saldo remanescente real de uma parcela (valor cheio menos o que já foi
@@ -94,8 +87,8 @@ async function renderGerenteDashboard() {
   // exibido em telas de gestão sempre que houve pagamento parcial.
   const netAmountDue = (i) => Number(i.amount_due || 0) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0);
   const netInterestShare = (i) => Number(i.interest_share || 0) - Number(i.interest_paid_partial || 0);
-  const recebidoHoje = sum(paymentsToday, 'amount_received');
-  const recebidoMes = sum(paymentsMonth, 'amount_received');
+  const recebidoHoje = num('recebido_hoje');
+  const recebidoMes = num('recebido_mes');
   // Lucro líquido = payments.net_profit (juros − taxa de ENTRADA, já embutido
   // na coluna gerada) MENOS a taxa de SAÍDA dos contratos criados no período
   // — essa segunda parte NÃO está em net_profit (é cobrada uma vez, na
@@ -115,16 +108,16 @@ async function renderGerenteDashboard() {
   // divergir do dia real de criação). Contrato criado num mês mas com
   // `contract_date` de outro mês caía em meses diferentes conforme a tela.
   // Corrigido usando `contract_date` aqui também, igual aos relatórios.
-  const taxaSaidaMes = sum(exitFeesMonth, 'operational_fee_amount');
-  const taxaSaidaPrevPeriod = sum(exitFeesPrevPeriod, 'operational_fee_amount');
+  const taxaSaidaMes = num('taxa_saida_mes');
+  const taxaSaidaPrevPeriod = num('taxa_saida_prev');
   // Capital em perda no mês — soma o capital não recuperado de toda parcela/
   // ciclo reconhecido como perda (automática pelo cron ou manual pelo botão
   // "Marcar como perda") dentro do período. Abate do lucro líquido, igual à
   // taxa de saída — é dinheiro que saiu do caixa e não vai mais voltar.
-  const perdaMes = sum(lostInstallmentsMonth, 'principal_lost') + sum(lostCyclesMonth, 'principal_lost');
-  const perdaPrevPeriod = sum(lostInstallmentsPrevPeriod, 'principal_lost') + sum(lostCyclesPrevPeriod, 'principal_lost');
-  const lucroMes = sum(paymentsMonth, 'net_profit') - taxaSaidaMes - perdaMes;
-  const lucroPrevPeriod = sum(paymentsPrevPeriod, 'net_profit') - taxaSaidaPrevPeriod - perdaPrevPeriod;
+  const perdaMes = num('perda_mes');
+  const perdaPrevPeriod = num('perda_prev');
+  const lucroMes = num('lucro_mes') - taxaSaidaMes - perdaMes;
+  const lucroPrevPeriod = num('lucro_prev') - taxaSaidaPrevPeriod - perdaPrevPeriod;
   const vencidosHoje = (dueSoon || []).filter((i) => i.due_date === today);
   // Compara due_date direto (não confia só na coluna status) — o cron que
   // marca status='atrasada' roda 1x/dia, então uma parcela vencida há poucas
@@ -139,8 +132,14 @@ async function renderGerenteDashboard() {
   const aReceberMes = (dueSoon || []).filter((i) => i.due_date && i.due_date.slice(0, 7) === today.slice(0, 7));
   const aReceberMesCiclos = (cyclesSoon || []).filter((c) => c.new_due_date && c.new_due_date.slice(0, 7) === today.slice(0, 7));
 
-  const statusCounts = { em_aberto: 0, atrasado: 0, quitado: 0, perda: 0 };
-  (contractsStatus || []).forEach((c) => { statusCounts[c.status] = (statusCounts[c.status] || 0) + 1; });
+  // Contagens vindas do banco — antes eram derivadas de um SELECT de TODOS os
+  // contratos trazido pro navegador, que travava em 1.000 linhas.
+  const statusCounts = {
+    em_aberto: num('contratos_em_aberto'),
+    atrasado: num('contratos_atrasado'),
+    quitado: num('contratos_quitado'),
+    perda: num('contratos_perda'),
+  };
   const openContracts = statusCounts.em_aberto + statusCounts.atrasado;
   const finishedContracts = statusCounts.quitado + statusCounts.perda;
   // Conta por contract_date (data do contrato firmado), não created_at (data
@@ -148,7 +147,7 @@ async function renderGerenteDashboard() {
   // data de contrato do mês passado não deve aparecer como "novo do mês".
   // Mesmo critério já usado pra bucketar lucro/taxa de saída por mês (ver
   // achado QA-12 no CLAUDE.md sobre não misturar contract_date/created_at).
-  const newThisMonth = (contractsStatus || []).filter((c) => String(c.contract_date).slice(0, 7) === today.slice(0, 7)).length;
+  const newThisMonth = num('contratos_novos_mes');
 
   // Carteira ativa — capital (não saldo com juros) ainda emprestado, ou seja,
   // não recuperado ainda. Parcelas: principal_share menos o que já foi pago
@@ -227,7 +226,7 @@ async function renderGerenteDashboard() {
   // que optou por cobrar) — já compõe o net_profit de cada payment; aqui só
   // soma pra dar visibilidade agregada mensal na nota do card de lucro
   // (taxaSaidaMes já foi calculada mais acima, usada no próprio lucroMes).
-  const taxaEntradaMes = sum(entryFeesMonth, 'operational_fee_amount');
+  const taxaEntradaMes = num('taxa_entrada_mes');
 
   // Top clientes por saldo em aberto — soma o que falta de cada parcela
   // (amount_due menos o que já foi pago parcialmente) + ciclos de renovação
@@ -260,16 +259,29 @@ async function renderGerenteDashboard() {
   const topClientes = Object.values(outstandingByClient).sort((a, b) => b.total - a.total).slice(0, 5);
   const topClientesPctSum = carteiraAtiva > 0 ? (topClientes.reduce((s, c) => s + c.principal, 0) / carteiraAtiva) * 100 : 0;
 
-  const trendByDay = {};
-  (paymentsTrend || []).forEach((p) => {
-    const day = String(p.received_at).slice(0, 10);
-    trendByDay[day] = (trendByDay[day] || 0) + Number(p.amount_received || 0);
-  });
-  const trendSeries = [];
-  for (let i = 29; i >= 0; i--) {
-    const day = addDaysISO(today, -i);
-    trendSeries.push({ label: formatDate(day).slice(0, 5), value: trendByDay[day] || 0 });
-  }
+  // A série de 30 dias vem pronta do banco (dashboard_trend), já agrupada por
+  // dia e sem buraco — antes era montada baixando os pagamentos do período e
+  // agrupando aqui, o que sofria do mesmo corte de 1.000 linhas.
+  const trendSeries = (trendRes.data || []).map((r) => ({
+    label: formatDate(r.dia).slice(0, 5),
+    value: Number(r.recebido || 0),
+  }));
+
+  // FIN-01 / MOCK-03: quando o recorte de linhas não cobre tudo, a tela DIZ
+  // isso. O número grande continua correto (vem do banco); o que fica parcial
+  // são as listas derivadas de linha (projeção por mês, top clientes) — e é
+  // exatamente essa distinção que o aviso precisa deixar clara, senão a pessoa
+  // desconfia do total errado.
+  const truncAviso = truncadas > 0 ? `
+    <div class="warn-banner mt-14">
+      <span class="warn-banner-mark" aria-hidden="true">!</span>
+      <div>
+        <strong>Listas parciais.</strong> Existem ${formatNumber(truncadas)} parcelas/ciclos em aberto além dos ${formatNumber(ROW_LIMIT)} carregados aqui.
+        Os valores em destaque acima (recebido, lucro, carteira) são somados no servidor e continuam corretos —
+        o que está incompleto é a <strong>projeção por mês</strong> e o <strong>top de clientes</strong> abaixo.
+        Use <a href="#/gerente/relatorios">Relatórios</a> para os números fechados do período.
+      </div>
+    </div>` : '';
 
   root.innerHTML = `
     <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
@@ -286,6 +298,7 @@ async function renderGerenteDashboard() {
       </div>
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)${perdaMes > 0 ? ` + ${formatMoney(perdaMes)} em capital perdido` : ''}</div>
     </div>
+    ${truncAviso}
 
     <div class="grid grid-3 kpi-grid-3 mt-14">
       <div class="card stat-card">

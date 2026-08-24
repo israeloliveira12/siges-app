@@ -38,42 +38,87 @@ async function openReceberModal(source, onDone) {
   // parcela/ciclo (taxa % é ao dia, capitalizada a cada dia de atraso) +
   // multa fixa — sugestão editável pelo gerente, cobrada por cima do saldo
   // contratual, sem alterar o amount_due histórico.
+  //
+  // FIN-03 (auditoria 2026-08-23): isto era calculado UMA VEZ, na abertura do
+  // modal, contra todayISO() — e o campo "Data do pagamento" logo acima podia
+  // ser mudado sem que nada recalculasse. Ao registrar hoje um pagamento que
+  // aconteceu há dez dias, o sistema sugeria os juros de HOJE, não os do dia em
+  // que o dinheiro entrou. Como a sugestão já vem preenchida e o valor recebido
+  // é sincronizado a partir dela, o caminho natural (abrir → marcar "aplicar
+  // encargo" → confirmar) COBRAVA A MAIS do cliente. Agora tudo é função da
+  // data escolhida.
   const dueDateStr = isInstallment ? item.due_date : item.new_due_date;
-  const diasAtraso = Math.max(0, Math.round((new Date(todayISO()) - new Date(dueDateStr)) / 86400000));
   const lateInterestPercent = Number(contract.late_interest_percent || 0);
   const lateFeePercent = Number(contract.late_fee_percent || 0);
-  const jurosAtrasoSugerido = diasAtraso > 0 ? Math.round(totalDue * (Math.pow(1 + lateInterestPercent / 100, diasAtraso) - 1) * 100) / 100 : 0;
-  const multaAtrasoSugerida = diasAtraso > 0 ? Math.round(totalDue * (lateFeePercent / 100) * 100) / 100 : 0;
+
+  function computeLate(receivedAtISO) {
+    const ref = receivedAtISO || todayISO();
+    const dias = Math.max(0, daysBetween(dueDateStr, ref));
+    return {
+      dias,
+      juros: dias > 0 ? Math.round(totalDue * (Math.pow(1 + lateInterestPercent / 100, dias) - 1) * 100) / 100 : 0,
+      multa: dias > 0 ? Math.round(totalDue * (lateFeePercent / 100) * 100) / 100 : 0,
+    };
+  }
+
+  // Data selecionada no momento (fonte da verdade para todo o cálculo abaixo).
+  let receivedAt = todayISO();
+  // Limite inferior espelha assert_received_at_valid() no banco (FIN-04): sem
+  // isso o campo aceitava qualquer data e só o servidor recusava, depois de a
+  // pessoa já ter preenchido o resto.
+  const minReceivedAt = addDaysISO(todayISO(), -365);
+
   const exitFeeAmount = contract.has_operational_fee ? Number(contract.operational_fee_amount || 0) : 0;
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   document.getElementById('app').appendChild(overlay);
+  let releaseModal = () => {};
+  const closeModal = () => { releaseModal(); overlay.remove(); };
 
   function paint() {
+    const late = computeLate(receivedAt);
+    const diasAteHoje = Math.max(0, daysBetween(dueDateStr, todayISO()));
+    const isRetroativo = receivedAt !== todayISO();
+
     overlay.innerHTML = `
       <div class="modal">
         <div class="modal-head">
           <h3>Receber pagamento — ${isInstallment ? 'Parcela ' + item.sequence_number : 'Ciclo de renovação ' + item.cycle_number}</h3>
-          <button class="icon-btn" id="close-modal">${Icons.x}</button>
+          <button class="icon-btn" id="close-modal" aria-label="Fechar">${Icons.x}</button>
         </div>
         <div class="modal-body">
           <div class="grid grid-2 mt-0">
-            <div class="stat-card"><div class="label">Vencimento</div><div class="value" style="font-size:15px">${formatDate(isInstallment ? item.due_date : item.new_due_date)}</div></div>
+            <div class="stat-card"><div class="label">Vencimento</div><div class="value" style="font-size:15px">${formatDate(dueDateStr)}</div></div>
             <div class="stat-card"><div class="label">${alreadyPaid > 0 ? 'Restante em aberto' : 'Total (sem encargo de atraso)'}</div><div class="value mono">${formatMoney(totalDue)}</div></div>
           </div>
           ${alreadyPaid > 0 ? `<p class="text-sm text-soft mt-8">Já foi recebido ${formatMoney(alreadyPaid)} desta parcela em pagamento(s) parcial(is) anterior(es).</p>` : ''}
-          ${diasAtraso > 0 ? `<p class="text-sm mt-8" style="color:var(--bad)">Em atraso há ${diasAtraso} dia(s).</p>` : ''}
+          ${late.dias > 0 && !isRetroativo ? `<p class="text-sm mt-8" style="color:var(--bad)">Em atraso há ${late.dias} dia(s).</p>` : ''}
           ${exitFeeAmount > 0 ? `<p class="text-sm text-soft mt-8">Taxa de saída deste contrato: ${formatMoney(exitFeeAmount)} (já cobrada na criação do contrato — não entra na conta deste recebimento).</p>` : ''}
+
           <div class="field mt-8">
-            <label>Data do pagamento</label>
-            <input type="date" id="r-received-at" value="${todayISO()}" max="${todayISO()}">
+            <label for="r-received-at">Data do pagamento</label>
+            <div class="flex gap-8 items-center">
+              <input type="date" id="r-received-at" value="${receivedAt}" min="${minReceivedAt}" max="${todayISO()}" style="flex:1">
+              <button type="button" class="btn btn-ghost btn-sm" id="r-received-today" ${!isRetroativo ? 'disabled' : ''}>Hoje</button>
+            </div>
           </div>
 
+          ${isRetroativo ? `
+            <div class="info-banner mt-8">
+              <span class="info-banner-mark" aria-hidden="true">i</span>
+              <div>
+                <strong>Pagamento retroativo — ${daysBetween(receivedAt, todayISO())} dia(s) atrás.</strong>
+                ${late.dias > 0
+                  ? ` O encargo foi recalculado para <strong>${late.dias} dia(s) de atraso</strong> (${formatDate(dueDateStr)} a ${formatDate(receivedAt)}), não para os ${diasAteHoje} dias até hoje.`
+                  : ` Nesta data a parcela ainda não estava vencida, então não há encargo de atraso a cobrar.`}
+              </div>
+            </div>` : ''}
+
           ${canRenew ? `
-          <div class="auth-tabs mt-14">
-            <button class="auth-tab ${receberMode === 'quitar' ? 'active' : ''}" id="tab-quitar">Quitar</button>
-            <button class="auth-tab ${receberMode === 'renovar' ? 'active' : ''}" id="tab-renovar">Renovar</button>
+          <div class="auth-tabs mt-14" role="tablist">
+            <button class="auth-tab ${receberMode === 'quitar' ? 'active' : ''}" id="tab-quitar" role="tab" aria-selected="${receberMode === 'quitar'}">Quitar</button>
+            <button class="auth-tab ${receberMode === 'renovar' ? 'active' : ''}" id="tab-renovar" role="tab" aria-selected="${receberMode === 'renovar'}">Renovar</button>
           </div>` : ''}
 
           <div id="receber-feedback"></div>
@@ -86,33 +131,52 @@ async function openReceberModal(source, onDone) {
       </div>
     `;
 
-    document.getElementById('close-modal').onclick = () => overlay.remove();
-    document.getElementById('cancel-modal').onclick = () => overlay.remove();
+    document.getElementById('close-modal').onclick = closeModal;
+    document.getElementById('cancel-modal').onclick = closeModal;
     document.getElementById('confirm-receber').onclick = confirmReceber;
+
+    // Mudar a data repinta TUDO — é o que faz o encargo acompanhar o dia em
+    // que o dinheiro realmente entrou.
+    const dateInput = document.getElementById('r-received-at');
+    dateInput.onchange = () => {
+      const v = dateInput.value;
+      if (!v) return;
+      if (v > todayISO()) { dateInput.value = receivedAt; return; }
+      if (v < minReceivedAt) { dateInput.value = receivedAt; return; }
+      receivedAt = v;
+      paint();
+    };
+    document.getElementById('r-received-today').onclick = () => { receivedAt = todayISO(); paint(); };
+
     const tabQuitar = document.getElementById('tab-quitar');
     const tabRenovar = document.getElementById('tab-renovar');
     if (tabQuitar) tabQuitar.onclick = () => { receberMode = 'quitar'; paint(); };
     if (tabRenovar) tabRenovar.onclick = () => { receberMode = 'renovar'; paint(); };
 
     paintFields();
+    releaseModal();
+    releaseModal = wireModal(overlay, closeModal, { label: 'Receber pagamento' });
   }
 
   function paintFields() {
+    // Sempre derivado da data escolhida no momento — nunca de um valor
+    // congelado na abertura do modal (FIN-03).
+    const late = computeLate(receivedAt);
     const fields = document.getElementById('receber-fields');
     if (receberMode === 'quitar') {
       fields.innerHTML = `
-        ${diasAtraso > 0 ? `
-        <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-late-toggle"><span class="track"></span></label><span>Aplicar encargo de atraso (${diasAtraso}d) nesta parcela?</span></div>
+        ${late.dias > 0 ? `
+        <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-late-toggle"><span class="track"></span></label><span>Aplicar encargo de atraso (${late.dias}d) nesta parcela?</span></div>
         <div id="r-late-fields" class="hidden mt-8">
           <div class="field-row">
-            <div class="field"><label>Juros de atraso (${diasAtraso}d)</label><input type="text" id="r-late-interest"></div>
-            <div class="field"><label>Multa por atraso</label><input type="text" id="r-late-fee"></div>
+            <div class="field"><label for="r-late-interest">Juros de atraso (${late.dias}d)</label><input type="text" id="r-late-interest"></div>
+            <div class="field"><label for="r-late-fee">Multa por atraso</label><input type="text" id="r-late-fee"></div>
           </div>
-          <span class="help">Sugestão calculada automaticamente — pode ajustar antes de confirmar.</span>
+          <span class="help">Sugestão calculada para a data do pagamento acima — pode ajustar antes de confirmar.</span>
         </div>
         ` : ''}
         <div class="field mt-8">
-          <label>Valor recebido (R$)</label>
+          <label for="r-amount">Valor recebido (R$)</label>
           <input type="text" id="r-amount">
           <span class="help" id="r-partial-hint"></span>
         </div>
@@ -181,8 +245,8 @@ async function openReceberModal(source, onDone) {
         lateToggle.onchange = () => {
           document.getElementById('r-late-fields').classList.toggle('hidden', !lateToggle.checked);
           if (lateToggle.checked && !getMoneyValue(lateInterestInput) && !getMoneyValue(lateFeeInput)) {
-            setMoneyValue(lateInterestInput, jurosAtrasoSugerido);
-            setMoneyValue(lateFeeInput, multaAtrasoSugerida);
+            setMoneyValue(lateInterestInput, late.juros);
+            setMoneyValue(lateFeeInput, late.multa);
           }
           syncAmountFromLate();
         };
@@ -198,11 +262,11 @@ async function openReceberModal(source, onDone) {
           <input type="date" id="r-new-due-date">
           <span class="help">Sugestão automática com base no prazo do contrato — pode ajustar antes de confirmar.</span>
         </div>
-        ${diasAtraso > 0 ? `
-        <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-late-toggle"><span class="track"></span></label><span>Aplicar encargo de atraso (${diasAtraso}d) nesta renovação?</span></div>
+        ${late.dias > 0 ? `
+        <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-late-toggle"><span class="track"></span></label><span>Aplicar encargo de atraso (${late.dias}d) nesta renovação?</span></div>
         <div id="r-late-fields" class="hidden mt-8">
           <div class="field-row">
-            <div class="field"><label>Juros de atraso (${diasAtraso}d)</label><input type="text" id="r-late-interest"></div>
+            <div class="field"><label for="r-late-interest">Juros de atraso (${late.dias}d)</label><input type="text" id="r-late-interest"></div>
             <div class="field"><label>Multa por atraso</label><input type="text" id="r-late-fee"></div>
           </div>
           <span class="help">Sugestão calculada automaticamente — pode ajustar antes de confirmar.</span>
@@ -256,8 +320,8 @@ async function openReceberModal(source, onDone) {
         lateToggle.onchange = () => {
           document.getElementById('r-late-fields').classList.toggle('hidden', !lateToggle.checked);
           if (lateToggle.checked && !getMoneyValue(lateInterestInput) && !getMoneyValue(lateFeeInput)) {
-            setMoneyValue(lateInterestInput, jurosAtrasoSugerido);
-            setMoneyValue(lateFeeInput, multaAtrasoSugerida);
+            setMoneyValue(lateInterestInput, late.juros);
+            setMoneyValue(lateFeeInput, late.multa);
           }
           syncInterestFromLate();
         };
@@ -275,8 +339,8 @@ async function openReceberModal(source, onDone) {
     btn.disabled = true;
     feedback.innerHTML = '';
     try {
-      const receivedAtEl = document.getElementById('r-received-at');
-      const receivedAt = (receivedAtEl && receivedAtEl.value) || todayISO();
+      // `receivedAt` é a variável do modal, mantida em sincronia pelo onchange
+      // do campo — a mesma data que alimentou o cálculo do encargo exibido.
       if (receberMode === 'quitar') {
         const amount = getMoneyValue(document.getElementById('r-amount'));
         const hasFee = document.getElementById('r-fee-toggle').checked;
@@ -312,10 +376,13 @@ async function openReceberModal(source, onDone) {
           if (error) throw error;
         }
         const isPartial = amount < totalDue - 0.005;
-        notifyEvent('pagamento_recebido', contract.client_id, isPartial ? 'Pagamento parcial recebido' : 'Pagamento recebido',
-          isPartial
-            ? `Recebemos ${formatMoney(amount)}. Restam ${formatMoney(totalDue - amount)} desta parcela.`
-            : `Recebemos seu pagamento de ${formatMoney(amount)}.`);
+        // O texto do e-mail é montado no SERVIDOR a partir destes números
+        // (SEC-04) — o navegador não escolhe mais o conteúdo da mensagem.
+        notifyEvent('pagamento_recebido', contract.client_id, {
+          amount,
+          remaining: isPartial ? totalDue - amount : null,
+          contract_number: contract.contract_number,
+        });
         logAudit('pagamento_recebido', `Pagamento de ${formatMoney(amount)} recebido no contrato #${contract.contract_number}`, { contract_id: contract.id, amount });
         showToast(isPartial ? 'Pagamento parcial registrado.' : 'Pagamento registrado.');
       } else {
@@ -343,21 +410,33 @@ async function openReceberModal(source, onDone) {
           p_new_due_date: newDueDate,
         });
         if (error) throw error;
-        notifyEvent('renovacao_registrada', contract.client_id, 'Renovação registrada',
-          `Recebemos os juros de ${formatMoney(interestAmount)}. Sua dívida foi renovada, novo vencimento ${formatDate(newDueDate)}.`);
+        notifyEvent('renovacao_registrada', contract.client_id, {
+          amount: interestAmount,
+          due_date: newDueDate,
+          contract_number: contract.contract_number,
+        });
         logAudit('renovacao_registrada', `Renovação registrada no contrato #${contract.contract_number} (juros ${formatMoney(interestAmount)})`, { contract_id: contract.id, interest_amount: interestAmount });
         showToast('Renovação registrada. Dívida renovada por mais um período.');
       }
-      overlay.remove();
+      closeModal();
       if (typeof onDone === 'function') onDone();
     } catch (e) {
-      const msg = (e.message || '').includes('INSTALLMENT_NOT_PAYABLE')
+      const raw = e.message || String(e);
+      const msg = raw.includes('INSTALLMENT_NOT_PAYABLE') || raw.includes('CYCLE_NOT_PAYABLE')
         ? 'Esta parcela/ciclo já foi recebido ou renovado (provavelmente em outra aba ou por outro administrador). Atualize a tela.'
-        : (e.message || '').includes('INVALID_AMOUNT')
+        : raw.includes('INVALID_AMOUNT')
         ? 'Valor inválido para este recebimento — confira o valor e tente novamente.'
-        : (e.message || '').includes('RENEWAL_NOT_ALLOWED')
+        : raw.includes('RENEWAL_NOT_ALLOWED')
         ? 'Este contrato não permite renovação (só contratos de parcela única com renovação habilitada podem renovar).'
-        : (e.message || String(e));
+        : raw.includes('RECEIVED_AT_IN_FUTURE')
+        ? 'A data do pagamento não pode ser no futuro.'
+        : raw.includes('RECEIVED_AT_TOO_OLD')
+        ? 'A data do pagamento não pode ser anterior a um ano. Para lançamentos mais antigos, fale com o suporte.'
+        : raw.includes('NEW_DUE_DATE_NOT_FUTURE')
+        ? 'O novo vencimento precisa ser depois da data do pagamento.'
+        : raw.includes('NOT_FOUND')
+        ? 'Não encontramos esta parcela/ciclo. Atualize a tela e tente de novo.'
+        : raw;
       feedback.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
       btn.disabled = false;
     }

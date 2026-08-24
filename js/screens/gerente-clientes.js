@@ -112,7 +112,7 @@ function paintClientesScreen() {
       const client = clientesCache.find((c) => c.profile_id === btn.dataset.id);
       const { error } = await supa.rpc('approve_client', { p_client_id: btn.dataset.id });
       if (error) { showToast('Erro: ' + error.message); return; }
-      notifyEvent('solicitacao_aprovada', btn.dataset.id, 'Cadastro aprovado', 'Sua conta foi aprovada. Você já pode usar o SIGES normalmente.');
+      notifyEvent('solicitacao_aprovada', btn.dataset.id, {});
       logAudit('cliente_aprovado', `Cadastro de ${((client || {}).profiles || {}).full_name || btn.dataset.id} aprovado`, { client_id: btn.dataset.id });
       showToast('Cliente aprovado.');
       renderGerenteClientes();
@@ -161,13 +161,17 @@ function openRejectClientModal(clientId) {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   document.getElementById('confirm-reject').onclick = async () => {
     const reason = document.getElementById('reject-reason').value.trim();
     const { error } = await supa.rpc('reject_client', { p_client_id: clientId, p_reason: reason || null });
     if (error) { document.getElementById('reject-feedback').innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
-    notifyEvent('solicitacao_reprovada', clientId, 'Cadastro não aprovado', reason ? `Motivo: ${reason}` : 'Seu cadastro não foi aprovado.');
+    notifyEvent('solicitacao_reprovada', clientId, { reason: reason || null });
     logAudit('cliente_rejeitado', `Cadastro de cliente rejeitado`, { client_id: clientId, reason: reason || null });
     close();
     showToast('Cadastro rejeitado.');
@@ -194,6 +198,10 @@ function openDeleteClienteConfirm(client) {
     </div>`;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   document.getElementById('confirm-delete').onclick = async () => {
@@ -226,7 +234,12 @@ function openResetClientPasswordModal(client, p) {
       <div class="modal-head"><h3>Redefinir senha</h3><button class="icon-btn" id="rp-close">${Icons.x}</button></div>
       <div class="modal-body">
         <p class="text-sm text-soft">Nova senha para ${escapeHtml(p.full_name || 'o cliente')}.</p>
-        <div class="field mt-14"><label>Nova senha</label>${passwordFieldHtml('rp-password', 'minlength="6" placeholder="Nova senha (mín. 6 caracteres)"')}</div>
+        <div class="field mt-14">
+          <label for="rp-password">Nova senha</label>
+          ${passwordFieldHtml('rp-password', 'autocomplete="new-password" placeholder="Nova senha"')}
+          <div id="rp-password-meter" class="pw-meter-wrap"></div>
+          <span class="help">Pelo menos 8 caracteres, misturando letras e números.</span>
+        </div>
         <div id="rp-feedback"></div>
       </div>
       <div class="modal-foot">
@@ -243,17 +256,26 @@ function openResetClientPasswordModal(client, p) {
   // popup pro modal errado — bug real corrigido (2026-07-14): X/Cancelar do
   // popup não fechavam nada porque o clique ia pro botão escondido atrás.
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   overlay.querySelector('#rp-close').onclick = close;
   overlay.querySelector('#rp-cancel').onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
   wirePasswordToggles(overlay);
+  wirePasswordStrength('rp-password', 'rp-password-meter');
 
   overlay.querySelector('#rp-confirm').onclick = async () => {
     const feedback = overlay.querySelector('#rp-feedback');
     const input = overlay.querySelector('#rp-password');
     const newPassword = input.value;
     feedback.innerHTML = '';
-    if (newPassword.length < 6) { feedback.innerHTML = `<div class="auth-error">A senha precisa ter pelo menos 6 caracteres.</div>`; return; }
+    // SEC-14: mesma regra de senha do cadastro e da redefinição pelo
+    // próprio usuário — uma senha definida pelo administrador não pode ser
+    // mais fraca que uma escolhida pelo cliente.
+    const pwdProblem = passwordProblem(newPassword);
+    if (pwdProblem) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(pwdProblem)}</div>`; return; }
     const btn = overlay.querySelector('#rp-confirm');
     btn.disabled = true;
     try {
@@ -289,7 +311,7 @@ function openClienteModal(client) {
         <div id="modal-feedback"></div>
         ${!isEdit ? `
         <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" required></div>
-        <div class="field"><label>Senha inicial</label>${passwordFieldHtml('m-password', 'minlength="6" required')}</div>
+        <div class="field"><label for="m-password">Senha inicial</label>${passwordFieldHtml('m-password', 'autocomplete="new-password" required')}<div id="m-password-meter" class="pw-meter-wrap"></div><span class="help">Pelo menos 8 caracteres, misturando letras e números.</span></div>
         ` : ''}
         <div class="field"><label>Nome completo</label><input type="text" id="m-name" value="${escapeHtml(p.full_name || '')}"></div>
         ${isEdit ? `
@@ -338,10 +360,15 @@ function openClienteModal(client) {
   `;
   document.getElementById('app').appendChild(overlay);
   const close = () => overlay.remove();
+  // UX-02 (auditoria 2026-08-23): prende o foco dentro do modal, fecha com
+  // Escape e devolve o foco a quem abriu. Antes, com o modal aberto, o Tab
+  // passeava pela página ATRÁS dele e o Escape não fazia nada.
+  wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
   document.getElementById('m-cpf').oninput = (e) => { e.target.value = formatCpf(e.target.value); };
   wirePasswordToggles(overlay);
+  wirePasswordStrength('m-password', 'm-password-meter');
   attachPhoneMask(document.getElementById('m-phone'));
   attachMoneyMask(document.getElementById('m-limit'));
   setMoneyValue(document.getElementById('m-limit'), client ? client.credit_limit : 0);
@@ -479,7 +506,9 @@ function openClienteModal(client) {
       } else {
         const email = document.getElementById('m-email').value.trim();
         const password = document.getElementById('m-password').value;
-        if (!email || password.length < 6) throw new Error('Preencha e-mail e senha (mínimo 6 caracteres).');
+        if (!email) throw new Error('Preencha o e-mail.');
+        const pwdProblem = passwordProblem(password);
+        if (pwdProblem) throw new Error(pwdProblem);
         const { data: { session } } = await supa.auth.getSession();
         const resp = await fetch('/api/create-user', {
           method: 'POST',

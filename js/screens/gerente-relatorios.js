@@ -65,39 +65,45 @@ async function renderGerenteRelatorios() {
 
   const { start, end, bucket } = periodoRange();
 
-  const [{ data: payments, error: pe1 }, { data: contracts, error: pe2 }, { data: lostInstallments, error: pe3 }, { data: lostCycles, error: pe4 }] = await Promise.all([
-    supa.from('payments').select('*').gte('received_at', start).lt('received_at', end),
-    supa.from('loan_contracts').select('*').gte('contract_date', start).lt('contract_date', end),
-    // Perda reconhecida no período — sempre por loss_recognized_at (quando a
-    // parcela/ciclo foi de fato baixado como perda), nunca due_date/
-    // created_at, mesmo critério já usado no Dashboard.
-    supa.from('installments').select('principal_lost, loss_recognized_at').eq('status', 'perda').gte('loss_recognized_at', start).lt('loss_recognized_at', end),
-    supa.from('renewal_cycles').select('principal_lost, loss_recognized_at').eq('status', 'perda').gte('loss_recognized_at', start).lt('loss_recognized_at', end),
+  // FIN-01 (auditoria 2026-08-23): antes isto fazia `select('*')` sobre TODOS
+  // os pagamentos e contratos do período e somava no navegador. Com o filtro
+  // "Ano", são doze meses de linhas — e o PostgREST corta a resposta em 1.000
+  // por padrão, então o relatório anual de qualquer empresa com volume real
+  // mostrava MENOS dinheiro do que existia, sem erro nenhum na tela. Agora as
+  // somas e a série por período vêm agregadas do banco, sem teto de linhas.
+  const [totalsRes, seriesRes] = await Promise.all([
+    supa.rpc('financial_totals', { p_start: start, p_end: end }),
+    supa.rpc('financial_series', { p_start: start, p_end: end, p_bucket: bucket }),
   ]);
-  if (pe1 || pe2 || pe3 || pe4) {
-    console.error('Erro ao carregar relatório:', pe1 || pe2 || pe3 || pe4);
+
+  if (totalsRes.error || seriesRes.error) {
+    console.error('Erro ao carregar relatório:', totalsRes.error || seriesRes.error);
     body.innerHTML = `<p class="auth-error">Não foi possível carregar o relatório agora. Recarregue a página ou tente novamente em instantes.</p>`;
     return;
   }
-  const losses = [...(lostInstallments || []), ...(lostCycles || [])];
 
-  if (relatoriosTab === 'lucro') paintLucroAnalitico(payments || [], contracts || [], bucket, losses);
-  else if (relatoriosTab === 'fluxo') paintFluxoCaixa(payments || [], contracts || [], bucket, losses);
-  else paintRelatorioAnalitico(payments || [], contracts || [], losses);
+  const totals = totalsRes.data || {};
+  const series = (seriesRes.data || []).map((r) => ({
+    key: r.bucket,
+    recebido: Number(r.recebido || 0),
+    lucro: Number(r.lucro || 0),
+    retorno: Number(r.retorno || 0),
+    juros: Number(r.juros || 0),
+    taxaEntrada: Number(r.taxa_entrada || 0),
+    taxaSaida: Number(r.taxa_saida || 0),
+    aporte: Number(r.aporte || 0),
+    perda: Number(r.perda || 0),
+  }));
+
+  if (relatoriosTab === 'lucro') paintLucroAnalitico(totals, series, bucket);
+  else if (relatoriosTab === 'fluxo') paintFluxoCaixa(totals, series, bucket);
+  else paintRelatorioAnalitico(totals, series);
 }
+
+const numOf = (obj, key) => Number((obj || {})[key] || 0);
 
 function bucketKey(dateStr, bucket) {
   return bucket === 'mes' ? String(dateStr).slice(0, 7) : String(dateStr).slice(0, 10);
-}
-
-function groupByBucket(rows, dateField, valueFields, bucket) {
-  const map = {};
-  rows.forEach((r) => {
-    const key = bucketKey(r[dateField], bucket);
-    map[key] = map[key] || Object.fromEntries(valueFields.map((f) => [f, 0]));
-    valueFields.forEach((f) => { map[key][f] += Number(r[f] || 0); });
-  });
-  return map;
 }
 
 function bucketLabel(key, bucket) {
@@ -109,28 +115,26 @@ function bucketLabel(key, bucket) {
   return key.slice(8, 10);
 }
 
-function paintLucroAnalitico(payments, contracts, bucket, losses) {
+// `totals` vem de financial_totals() e `series` de financial_series() — as
+// duas somadas no banco. As funções abaixo só formatam; nenhuma soma dinheiro
+// a partir de linhas cruas (ver comentário FIN-01 em renderGerenteRelatorios).
+function paintLucroAnalitico(totals, series, bucket) {
   const body = document.getElementById('relatorios-body');
-  const byBucketProfit = groupByBucket(payments, 'received_at', ['net_profit', 'principal_component', 'amount_received'], bucket);
-  // Defesa em profundidade: só soma taxa de saída de contratos com o flag
-  // has_operational_fee ativo — na prática o valor já vem zerado quando o
-  // flag está desligado (JS sempre zera ao salvar), mas não vale a pena
-  // confiar cegamente nisso num relatório financeiro agregado.
-  const byBucketFees = groupByBucket(contracts.filter((c) => c.has_operational_fee), 'contract_date', ['operational_fee_amount'], bucket);
-  const byBucketLoss = groupByBucket(losses || [], 'loss_recognized_at', ['principal_lost'], bucket);
-  const keys = [...new Set([...Object.keys(byBucketProfit), ...Object.keys(byBucketFees), ...Object.keys(byBucketLoss)])].sort();
 
-  const netFor = (k) => (byBucketProfit[k] ? byBucketProfit[k].net_profit : 0) - (byBucketFees[k] ? byBucketFees[k].operational_fee_amount : 0) - (byBucketLoss[k] ? byBucketLoss[k].principal_lost : 0);
-  const totalLucro = keys.reduce((s, k) => s + netFor(k), 0);
+  // Lucro líquido do período = lucro dos pagamentos (net_profit, que já
+  // desconta a taxa de entrada) − taxa de saída dos contratos − capital perdido.
+  const netFor = (r) => r.lucro - r.taxaSaida - r.perda;
+  const totalLucro = numOf(totals, 'net_profit') - numOf(totals, 'taxa_saida') - numOf(totals, 'perda');
 
   const todayKey = bucketKey(todayISO(), bucket);
-  const lucroHoje = netFor(todayKey);
-  const retornoHoje = byBucketProfit[todayKey] ? byBucketProfit[todayKey].principal_component : 0;
+  const hoje = series.find((r) => r.key === todayKey);
+  const lucroHoje = hoje ? netFor(hoje) : 0;
+  const retornoHoje = hoje ? hoje.retorno : 0;
 
-  let melhorDia = null;
-  keys.forEach((k) => { if (!melhorDia || netFor(k) > netFor(melhorDia)) melhorDia = k; });
+  let melhor = null;
+  series.forEach((r) => { if (!melhor || netFor(r) > netFor(melhor)) melhor = r; });
 
-  const series = keys.map((k) => ({ label: bucketLabel(k, bucket), value: netFor(k) }));
+  const chartSeries = series.map((r) => ({ label: bucketLabel(r.key, bucket), value: netFor(r) }));
 
   body.innerHTML = `
     <div class="grid grid-4 kpi-grid-4">
@@ -139,39 +143,36 @@ function paintLucroAnalitico(payments, contracts, bucket, losses) {
       <div class="card stat-card"><div class="label">Lucro hoje</div><div class="value mono">${formatMoney(lucroHoje)}</div></div>
       <div class="card stat-card">
         <div class="label">${bucket === 'mes' ? 'Mês' : 'Dia'} mais lucrativo</div>
-        <div class="value mono">${melhorDia ? bucketLabel(melhorDia, bucket) : '—'}</div>
-        ${melhorDia ? `<div class="text-sm text-soft mono mt-8">${formatMoney(netFor(melhorDia))}</div>` : ''}
+        <div class="value mono">${melhor ? bucketLabel(melhor.key, bucket) : '—'}</div>
+        ${melhor ? `<div class="text-sm text-soft mono mt-8">${formatMoney(netFor(melhor))}</div>` : ''}
       </div>
     </div>
     <div class="card mt-14">
       <h3 class="flex items-center gap-8">Lucro por período <span class="help-dot" title="Juros recebidos − taxa de saída dos contratos − taxas de entrada dos pagamentos − capital perdido">?</span></h3>
-      <div class="mt-8">${series.length ? barChartSVG(series, { color: CHART_COLORS.accent, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem movimento neste período.</p>'}</div>
+      <div class="mt-8">${barChartSVG(chartSeries, { color: CHART_COLORS.accent, caption: 'Lucro líquido por período', emptyMessage: 'Sem movimento neste período.', ...chartSize(600, 200, 320, 200) })}</div>
     </div>
     <div class="card mt-14" style="padding:0">
       <table class="data-table table-scroll">
         <thead><tr><th>Período</th><th>Coletado</th><th>Retornado (capital)</th><th>Lucro líquido</th></tr></thead>
         <tbody>
-          ${keys.map((k) => `<tr><td data-label="Período">${bucket === 'mes' ? bucketLabel(k, bucket) : formatDate(k)}</td><td data-label="Coletado" class="mono">${formatMoney(byBucketProfit[k] ? byBucketProfit[k].amount_received : 0)}</td><td data-label="Retornado" class="mono">${formatMoney(byBucketProfit[k] ? byBucketProfit[k].principal_component : 0)}</td><td data-label="Lucro" class="mono">${formatMoney(netFor(k))}</td></tr>`).join('') || '<tr><td colspan="4" class="text-soft">Sem movimento.</td></tr>'}
+          ${series.map((r) => `<tr><td data-label="Período">${bucket === 'mes' ? bucketLabel(r.key, bucket) : formatDate(r.key)}</td><td data-label="Coletado" class="mono">${formatMoney(r.recebido)}</td><td data-label="Retornado" class="mono">${formatMoney(r.retorno)}</td><td data-label="Lucro" class="mono">${formatMoney(netFor(r))}</td></tr>`).join('') || '<tr><td colspan="4" class="text-soft">Sem movimento.</td></tr>'}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function paintFluxoCaixa(payments, contracts, bucket, losses) {
+function paintFluxoCaixa(totals, series, bucket) {
   const body = document.getElementById('relatorios-body');
-  const recebido = payments.reduce((s, p) => s + Number(p.amount_received), 0);
-  const aporte = contracts.reduce((s, c) => s + Number(c.total_disbursed_amount), 0);
-  const exitFees = contracts.filter((c) => c.has_operational_fee).reduce((s, c) => s + Number(c.operational_fee_amount), 0);
-  const entryFees = payments.filter((p) => p.has_operational_fee).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
-  const perdas = (losses || []).reduce((s, l) => s + Number(l.principal_lost || 0), 0);
-  const lucroLiquido = payments.reduce((s, p) => s + Number(p.interest_component), 0) - exitFees - entryFees - perdas;
+  const recebido = numOf(totals, 'recebido');
+  const aporte = numOf(totals, 'aporte');
+  const exitFees = numOf(totals, 'taxa_saida');
+  const entryFees = numOf(totals, 'taxa_entrada');
+  const perdas = numOf(totals, 'perda');
+  const lucroLiquido = numOf(totals, 'lucro_bruto') - exitFees - entryFees - perdas;
 
-  const byBucketIn = groupByBucket(payments, 'received_at', ['amount_received'], bucket);
-  const byBucketOut = groupByBucket(contracts, 'contract_date', ['total_disbursed_amount'], bucket);
-  const allKeys = [...new Set([...Object.keys(byBucketIn), ...Object.keys(byBucketOut)])].sort();
-  const seriesIn = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketIn[k] || { amount_received: 0 }).amount_received }));
-  const seriesOut = allKeys.map((k) => ({ label: bucketLabel(k, bucket), value: (byBucketOut[k] || { total_disbursed_amount: 0 }).total_disbursed_amount }));
+  const seriesIn = series.map((r) => ({ label: bucketLabel(r.key, bucket), value: r.recebido }));
+  const seriesOut = series.map((r) => ({ label: bucketLabel(r.key, bucket), value: r.aporte }));
 
   body.innerHTML = `
     <div class="grid grid-3 kpi-grid-3">
@@ -182,24 +183,24 @@ function paintFluxoCaixa(payments, contracts, bucket, losses) {
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Recebido por período</h3>
-        <div class="mt-8">${seriesIn.length ? lineChartSVG(seriesIn, { color: CHART_COLORS.good, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
+        <div class="mt-8">${lineChartSVG(seriesIn, { color: CHART_COLORS.good, caption: 'Recebido por período', emptyMessage: 'Sem dados.', ...chartSize(600, 200, 320, 200) })}</div>
       </div>
       <div class="card">
         <h3>Novo capital emprestado por período</h3>
-        <div class="mt-8">${seriesOut.length ? lineChartSVG(seriesOut, { color: CHART_COLORS.brand, ...chartSize(600, 200, 320, 200) }) : '<p class="text-soft text-sm">Sem dados.</p>'}</div>
+        <div class="mt-8">${lineChartSVG(seriesOut, { color: CHART_COLORS.brand, caption: 'Capital emprestado por período', emptyMessage: 'Sem dados.', ...chartSize(600, 200, 320, 200) })}</div>
       </div>
     </div>
   `;
 }
 
-function paintRelatorioAnalitico(payments, contracts, losses) {
+function paintRelatorioAnalitico(totals, series) {
   const body = document.getElementById('relatorios-body');
-  const entradas = payments.reduce((s, p) => s + Number(p.amount_received), 0);
-  const saidas = contracts.reduce((s, c) => s + Number(c.principal_amount), 0);
-  const juros = payments.reduce((s, p) => s + Number(p.interest_component), 0);
-  const exitFees = contracts.filter((c) => c.has_operational_fee).reduce((s, c) => s + Number(c.operational_fee_amount), 0);
-  const entryFees = payments.filter((p) => p.has_operational_fee).reduce((s, p) => s + Number(p.operational_fee_amount), 0);
-  const perdas = (losses || []).reduce((s, l) => s + Number(l.principal_lost || 0), 0);
+  const entradas = numOf(totals, 'recebido');
+  const saidas = numOf(totals, 'capital_emprestado');
+  const juros = numOf(totals, 'lucro_bruto');
+  const exitFees = numOf(totals, 'taxa_saida');
+  const entryFees = numOf(totals, 'taxa_entrada');
+  const perdas = numOf(totals, 'perda');
 
   const lucroLiquidoTotal = juros - exitFees - entryFees - perdas;
 
@@ -208,7 +209,7 @@ function paintRelatorioAnalitico(payments, contracts, losses) {
       <div class="card">
         <h3>Composição do período</h3>
         <p class="text-sm text-soft mt-8">Entradas e saídas são 2 totais independentes (não somam "100%" de um mesmo todo) — comparadas em barra, não em rosca.</p>
-        <div class="mt-14">${barChartSVG([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }], { ...chartSize(320, 180, 300, 180) })}</div>
+        <div class="mt-14">${barChartSVG([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }], { caption: 'Entradas e saídas do período', ...chartSize(320, 180, 300, 180) })}</div>
       </div>
       <div class="card">
         <h3>Resumo</h3>

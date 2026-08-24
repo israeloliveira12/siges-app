@@ -7,6 +7,7 @@
    ============================================================================ */
 
 import { supabaseAdminFetch, getCallerProfile, getTargetProfile, isValidUUID } from './_lib/supabaseAdmin.js';
+import { passwordProblem } from './_lib/password.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Método não permitido' }); return; }
@@ -21,7 +22,8 @@ export default async function handler(req, res) {
   const { user_id, new_password } = req.body || {};
   if (!user_id || !new_password) { res.status(400).json({ error: 'Parâmetros inválidos.' }); return; }
   if (!isValidUUID(user_id)) { res.status(400).json({ error: 'user_id inválido' }); return; }
-  if (String(new_password).length < 6) { res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' }); return; }
+  const pwdProblem = passwordProblem(new_password);
+  if (pwdProblem) { res.status(400).json({ error: pwdProblem }); return; }
 
   // Redefinir a senha de OUTRO gerente (inclusive o admin primário) é
   // exclusivo do admin primário — senão um gerente secundário conseguiria

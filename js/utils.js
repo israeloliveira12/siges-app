@@ -71,14 +71,24 @@ function formatDateUTC(value) {
 }
 
 function todayISO() {
-  const d = new Date();
+  return toLocalISO(new Date());
+}
+
+// Serializa um Date lendo o calendário LOCAL, nunca via toISOString() (que
+// converte pra UTC). OPS-09: a versão anterior montava a data em horário local
+// e depois chamava toISOString() — no Brasil (UTC-3) isso funciona por acaso,
+// porque a meia-noite local vira 03:00 UTC do MESMO dia; em qualquer fuso a
+// leste de Greenwich a meia-noite local vira 22:00/23:00 UTC do dia ANTERIOR e
+// toda data calculada saía um dia atrás. Um administrador acessando de fora do
+// país via vencimentos errados.
+function toLocalISO(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 function addDaysISO(iso, days) {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return toLocalISO(d);
 }
 
 function daysBetween(isoA, isoB) {
@@ -97,7 +107,7 @@ function addStepISO(iso, dueType, customDays) {
   else if (dueType === 'quinzenal') d.setDate(d.getDate() + 15);
   else if (dueType === 'semanal') d.setDate(d.getDate() + 7);
   else d.setDate(d.getDate() + Math.max(1, Number(customDays) || 30));
-  return d.toISOString().slice(0, 10);
+  return toLocalISO(d);
 }
 
 // Estimativa de encargo de atraso (juros compostos diários sobre o saldo +
@@ -210,14 +220,62 @@ function attachMoneyMask(input) {
   if (!input) return;
   input.setAttribute('inputmode', 'decimal');
   input.addEventListener('input', () => {
+    // UX-08 (auditoria 2026-08-23): a máscara reatribui input.value a cada
+    // tecla, e reatribuir joga o cursor pro FIM. Corrigir um dígito no meio de
+    // "1.234,56" era desconfortável — o cursor fugia a cada caractere. A
+    // âncora estável entre o texto antigo e o novo é a QUANTIDADE DE DÍGITOS
+    // à esquerda do cursor (os pontos e a vírgula mudam de lugar sozinhos):
+    // conta antes, reformata, e recoloca o cursor depois do mesmo dígito.
+    const selStart = input.selectionStart;
+    const digitsBeforeCaret = input.value.slice(0, selStart).replace(/\D/g, '').length;
+
     let digits = input.value.replace(/\D/g, '');
     if (!digits) { input.value = ''; return; }
     digits = digits.replace(/^0+(?=\d)/, '');
     while (digits.length < 3) digits = '0' + digits;
     const cents = digits.slice(-2);
     const intPart = digits.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-    input.value = intPart + ',' + cents;
+    const formatted = intPart + ',' + cents;
+    input.value = formatted;
+
+    // Reposiciona: caminha o texto formatado até ter passado a mesma
+    // quantidade de dígitos que havia antes do cursor.
+    if (selStart == null || document.activeElement !== input) return;
+    let seen = 0, pos = formatted.length;
+    for (let i = 0; i < formatted.length; i++) {
+      if (/\d/.test(formatted[i])) seen++;
+      if (seen === digitsBeforeCaret) { pos = i + 1; break; }
+    }
+    if (digitsBeforeCaret === 0) pos = 0;
+    input.setSelectionRange(pos, pos);
   });
+}
+
+// ---------------------------------------------------------------------------
+// CPF — validação de dígito verificador (SEC-13)
+// ---------------------------------------------------------------------------
+// Antes o sistema só conferia o COMPRIMENTO (11 dígitos) no cadastro público,
+// no cadastro pelo administrador e na conclusão de cadastro via Google. Então
+// "000.000.000-00" era aceito como CPF válido. Para um sistema que usa CPF
+// como identificador de login (email_for_cpf) e âncora de identidade em nota
+// promissória, isso é uma lacuna relevante.
+function isValidCpf(value) {
+  const cpf = String(value || '').replace(/\D/g, '');
+  if (cpf.length !== 11) return false;
+  // Sequências repetidas (111.111.111-11 etc.) passam no cálculo dos dígitos
+  // mas nunca são CPFs reais — a Receita não emite nenhum deles.
+  if (/^(\d)\1{10}$/.test(cpf)) return false;
+
+  const digito = (base, pesoInicial) => {
+    let soma = 0;
+    for (let i = 0; i < base.length; i++) soma += Number(base[i]) * (pesoInicial - i);
+    const resto = (soma * 10) % 11;
+    return resto === 10 || resto === 11 ? 0 : resto;
+  };
+
+  if (digito(cpf.slice(0, 9), 10) !== Number(cpf[9])) return false;
+  if (digito(cpf.slice(0, 10), 11) !== Number(cpf[10])) return false;
+  return true;
 }
 
 function getMoneyValue(input) {
@@ -248,21 +306,197 @@ function dueTypeLabel(t, customDays) {
 }
 
 // Toast com opção de "Desfazer" (padrão de design da skill) -----------------
-let undoTimer = null;
+// UX-07 (auditoria 2026-08-23): a versão anterior fazia root.innerHTML = ...,
+// sobrescrevendo o container inteiro. Uma segunda ação apagava o aviso
+// anterior — inclusive um "Desfazer" que ainda estava disponível e que a
+// pessoa talvez estivesse indo clicar. Agora cada aviso é um nó próprio, com
+// o próprio temporizador, e eles se empilham.
 function showToast(message, opts = {}) {
   const root = document.getElementById('toast-root');
   if (!root) return;
-  clearTimeout(undoTimer);
-  const undoBtn = opts.onUndo ? `<button id="toast-undo-btn">Desfazer</button>` : '';
-  root.innerHTML = `<div class="toast"><span>${escapeHtml(message)}</span>${undoBtn}</div>`;
+
+  const el = document.createElement('div');
+  el.className = 'toast';
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.appendChild(text);
+
+  const dismiss = () => {
+    if (!el.isConnected) return;
+    el.classList.add('leaving');
+    // Espera a transição de saída; se o motion estiver reduzido, o CSS zera a
+    // duração e isso vira praticamente imediato.
+    setTimeout(() => el.remove(), 200);
+  };
+
   if (opts.onUndo) {
-    document.getElementById('toast-undo-btn').onclick = () => {
-      clearTimeout(undoTimer);
-      root.innerHTML = '';
-      opts.onUndo();
-    };
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Desfazer';
+    btn.onclick = () => { clearTimeout(timer); dismiss(); opts.onUndo(); };
+    el.appendChild(btn);
   }
-  undoTimer = setTimeout(() => { root.innerHTML = ''; }, opts.duration || 4500);
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Fechar aviso');
+  close.textContent = '×';
+  close.onclick = () => { clearTimeout(timer); dismiss(); };
+  el.appendChild(close);
+
+  // Mais de 3 avisos ao mesmo tempo viram ruído — o mais antigo sai.
+  while (root.children.length >= 3) root.firstElementChild.remove();
+  root.appendChild(el);
+
+  const timer = setTimeout(dismiss, opts.duration || 4500);
+}
+
+// ---------------------------------------------------------------------------
+// Acessibilidade de modal (UX-01, UX-02)
+// ---------------------------------------------------------------------------
+// Todo modal do sistema é montado como `<div class="modal-overlay">` com
+// innerHTML e anexado ao DOM. Nenhum deles tinha role/aria-modal, prisão de
+// foco ou Escape: com o modal aberto o Tab passeava pela página ATRÁS dele, o
+// Escape não fechava, e ao fechar o foco não voltava pra onde estava. Havia 3
+// referências a `keydown` no projeto inteiro.
+//
+// Chame depois de anexar o overlay:
+//   const release = wireModal(overlay, close);
+// e chame release() dentro do seu close() (ou deixe o próprio wireModal cuidar,
+// já que ele remove os ouvintes quando o overlay sai do DOM).
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function wireModal(overlay, onClose, opts = {}) {
+  if (!overlay) return () => {};
+  const previouslyFocused = document.activeElement;
+
+  const dialog = overlay.querySelector('.modal') || overlay;
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  const heading = dialog.querySelector('h1, h2, h3');
+  if (heading) {
+    if (!heading.id) heading.id = 'modal-title-' + Math.random().toString(36).slice(2, 9);
+    dialog.setAttribute('aria-labelledby', heading.id);
+  } else if (opts.label) {
+    dialog.setAttribute('aria-label', opts.label);
+  }
+
+  const focusables = () => Array.from(dialog.querySelectorAll(FOCUSABLE_SELECTOR))
+    .filter((el) => el.offsetParent !== null || el === document.activeElement);
+
+  // Foco inicial: o primeiro campo de verdade, não o "X" de fechar — quem abre
+  // um modal de recebimento quer digitar o valor, não fechar.
+  const first = dialog.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])')
+    || focusables().find((el) => !el.classList.contains('icon-btn'))
+    || focusables()[0];
+  if (first) setTimeout(() => first.focus(), 0);
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (typeof onClose === 'function') onClose();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const items = focusables();
+    if (!items.length) return;
+    const firstEl = items[0];
+    const lastEl = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === firstEl) {
+      e.preventDefault();
+      lastEl.focus();
+    } else if (!e.shiftKey && document.activeElement === lastEl) {
+      e.preventDefault();
+      firstEl.focus();
+    }
+  };
+
+  overlay.addEventListener('keydown', onKeyDown);
+
+  // Enquanto o modal existe, o resto da página não é lido por leitor de tela.
+  const shell = document.querySelector('.app-shell');
+  if (shell) shell.setAttribute('aria-hidden', 'true');
+
+  const release = () => {
+    overlay.removeEventListener('keydown', onKeyDown);
+    if (shell && !document.querySelector('.modal-overlay')) shell.removeAttribute('aria-hidden');
+    if (previouslyFocused && typeof previouslyFocused.focus === 'function' && document.body.contains(previouslyFocused)) {
+      previouslyFocused.focus();
+    }
+  };
+
+  // Rede de segurança: se o overlay for removido por outro caminho (ex:
+  // overlay.remove() direto), o release acontece do mesmo jeito.
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(overlay)) {
+      observer.disconnect();
+      release();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  return () => { observer.disconnect(); release(); };
+}
+
+// ---------------------------------------------------------------------------
+// Senha (SEC-14)
+// ---------------------------------------------------------------------------
+// O mínimo era 6 caracteres, sem medidor, sem confirmação e sem verificação
+// contra vazamentos — nem no cadastro, nem na redefinição (onde um erro de
+// digitação tranca a conta, já que o campo era único).
+const PASSWORD_MIN_LENGTH = 8;
+
+// Senhas óbvias que aparecem no topo de qualquer lista de vazamento. Não
+// substitui uma checagem real contra base de senhas comprometidas (isso é uma
+// configuração do painel do Supabase — ver observação no fim da auditoria),
+// mas barra o caso mais comum sem depender de rede.
+const COMMON_PASSWORDS = [
+  '12345678', '123456789', '1234567890', 'senha123', 'password', 'password1',
+  'qwerty123', 'abc12345', '11111111', '00000000', 'iloveyou', 'admin123',
+  'siges123', 'brasil123', '123mudar', 'mudar123',
+];
+
+function passwordProblem(pwd) {
+  const p = String(pwd || '');
+  if (p.length < PASSWORD_MIN_LENGTH) return `A senha precisa ter pelo menos ${PASSWORD_MIN_LENGTH} caracteres.`;
+  if (!/[a-zA-Z]/.test(p) || !/\d/.test(p)) return 'A senha precisa misturar letras e números.';
+  if (COMMON_PASSWORDS.includes(p.toLowerCase())) return 'Essa senha é fácil demais de adivinhar. Escolha outra.';
+  if (/^(.)\1+$/.test(p)) return 'Essa senha é fácil demais de adivinhar. Escolha outra.';
+  return null;
+}
+
+// 0 a 3 — alimenta a barrinha de força abaixo do campo.
+function passwordStrength(pwd) {
+  const p = String(pwd || '');
+  if (p.length < PASSWORD_MIN_LENGTH) return 0;
+  let score = 1;
+  if (p.length >= 12) score++;
+  if (/[a-z]/.test(p) && /[A-Z]/.test(p) && /\d/.test(p)) score++;
+  if (/[^a-zA-Z0-9]/.test(p)) score = Math.min(3, score + 1);
+  return Math.min(3, score);
+}
+
+const STRENGTH_LABELS = ['Muito fraca', 'Fraca', 'Boa', 'Forte'];
+
+// Liga o medidor a um campo de senha. `meterId` é o id de um <div> vazio
+// colocado logo abaixo do campo.
+function wirePasswordStrength(inputId, meterId) {
+  const input = document.getElementById(inputId);
+  const meter = document.getElementById(meterId);
+  if (!input || !meter) return;
+  const paint = () => {
+    const v = input.value;
+    if (!v) { meter.innerHTML = ''; return; }
+    const s = passwordStrength(v);
+    meter.innerHTML = `
+      <div class="pw-meter" aria-hidden="true">
+        ${[0, 1, 2].map((i) => `<span class="${i < s ? 'on s' + s : ''}"></span>`).join('')}
+      </div>
+      <span class="pw-meter-label s${s}">${STRENGTH_LABELS[s]}</span>`;
+  };
+  input.addEventListener('input', paint);
+  paint();
 }
 
 function valueByExtenso(value) {
@@ -281,7 +515,17 @@ function valueByExtenso(value) {
     }
     if (n === 100) return 'cem';
     const c = Math.floor(n / 100), r = n % 100;
-    return centenas[c] + (r ? ' e ' + ate999(r) : '');
+    // FIN-02 (auditoria 2026-08-23): em português "cem" só existe sozinho —
+    // com qualquer resto vira "cento". A versão anterior usava centenas[1]
+    // ('cem') nos dois casos, então R$ 150,00 saía como "cem e cinquenta
+    // reais" e R$ 199,00 como "cem e noventa e nove reais". Isso ia impresso
+    // na NOTA PROMISSÓRIA (pdf-gerador.js), e pela Lei Uniforme de Genebra
+    // (art. 6º, Decreto 57.663/66) o valor POR EXTENSO prevalece sobre o
+    // numérico quando os dois divergem — ou seja, era um argumento pronto
+    // para o devedor contestar o título. Atinge toda faixa 100–199,
+    // 1.100–1.199, 2.100–2.199 e assim por diante.
+    const centena = c === 1 ? 'cento' : centenas[c];
+    return centena + (r ? ' e ' + ate999(r) : '');
   }
 
   function inteiroPorExtenso(n) {
@@ -293,7 +537,16 @@ function valueByExtenso(value) {
     if (milhoes) partes.push(ate999(milhoes) + (milhoes > 1 ? ' milhões' : ' milhão'));
     if (milhares) partes.push((milhares === 1 ? 'mil' : ate999(milhares) + ' mil'));
     if (resto) partes.push(ate999(resto));
-    return partes.join(' e ');
+    // Convenção do português: as classes (milhão / mil / resto) são separadas
+    // por vírgula, e só o ÚLTIMO par leva "e" — "um milhão, duzentos e trinta
+    // e quatro mil, quinhentos e sessenta e sete". O join(' e ') anterior
+    // produzia uma corrente de "e" que ninguém escreve num título de crédito.
+    if (partes.length <= 1) return partes[0] || '';
+    // Exceção clássica: quando o resto é < 100 ou múltiplo de 100, liga-se com
+    // "e" em vez de vírgula ("mil e cem", "dois mil e trinta").
+    const last = partes.pop();
+    const ligaComE = resto > 0 && (resto < 100 || resto % 100 === 0);
+    return partes.join(', ') + (ligaComE ? ' e ' : ', ') + last;
   }
 
   const inteiro = Math.floor(Math.abs(value));

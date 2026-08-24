@@ -35,13 +35,37 @@ const router = {
     return null;
   },
 
+  // Rota de fallback de cada papel. Se o perfil não for nem gerente nem
+  // cliente (coluna nula, papel novo ainda não tratado), qualquer redirecionamento
+  // "de volta pro dashboard" apontaria pra uma rota que a própria guarda de
+  // papel rejeita — e como navigate() chama handleHashChange() direto quando o
+  // hash já é o mesmo, isso vira recursão infinita e estouro de pilha (tela
+  // branca, sem erro visível). Achado da auditoria de 2026-08-23.
+  fallbackRoute() {
+    if (isGerente()) return '#/gerente/dashboard';
+    if (isCliente()) return '#/cliente/dashboard';
+    return null;
+  },
+
+  // Redireciona só quando existe destino válido E ele é diferente de onde já
+  // estamos. Nos demais casos mostra a tela de rota inválida em vez de entrar
+  // em laço.
+  redirectTo(hash) {
+    const target = hash || this.fallbackRoute();
+    if (!target || location.hash === target) {
+      renderRouteUnavailable();
+      return;
+    }
+    this.navigate(target);
+  },
+
   handleHashChange() {
     if (!App.profile) return; // ainda não autenticado, auth.js cuida da tela de login
     const segments = this.parseHash();
     const match = this.matchRoute(segments);
 
     if (!match) {
-      this.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
+      this.redirectTo(null);
       return;
     }
 
@@ -52,7 +76,7 @@ const router = {
       (wantsRole === 'cliente' && !isCliente()) ||
       (wantsRole === 'plataforma' && !isPlatformOwner())
     )) {
-      this.navigate(isGerente() ? '#/gerente/dashboard' : '#/cliente/dashboard');
+      this.redirectTo(null);
       return;
     }
     // Rota de plataforma acessada via hash direto (ex: recarregar a página
@@ -73,19 +97,19 @@ const router = {
     // Algumas telas de gerente (Planejamento, Configurações) são exclusivas
     // do admin primário — os demais gerentes nem chegam a ver a tela.
     if (config.primaryOnly && !(App.profile && App.profile.is_primary_admin)) {
-      this.navigate('#/gerente/dashboard');
+      this.redirectTo(null);
       return;
     }
     // 'Indicações' só existe pra cliente que já indicou alguém — acessar via
     // hash direto sem isso redireciona, mesma lógica de primaryOnly acima.
     if (config.referralOnly && !App.hasReferrals) {
-      this.navigate('#/cliente/dashboard');
+      this.redirectTo(null);
       return;
     }
     // Auditoria é exclusiva do Administrador Master — mesma lógica de
     // primaryOnly acima, mas checando platform_owner em vez de is_primary_admin.
     if (config.platformOwnerOnly && !isPlatformOwner()) {
-      this.navigate('#/gerente/dashboard');
+      this.redirectTo(null);
       return;
     }
 
@@ -97,6 +121,7 @@ const router = {
     if (screenEl) screenEl.classList.add('active');
 
     document.getElementById('topbar-title').textContent = config.title || '';
+    document.title = (config.title ? config.title + ' — ' : '') + 'SIGES';
     updateActiveNavLinks(this.currentPath);
 
     if (typeof config.render === 'function') config.render(params);
@@ -113,8 +138,33 @@ const router = {
 
 function updateActiveNavLinks(currentPath) {
   document.querySelectorAll('[data-route]').forEach((el) => {
-    el.classList.toggle('active', el.getAttribute('data-route') === currentPath);
+    const active = el.getAttribute('data-route') === currentPath;
+    el.classList.toggle('active', active);
+    // A classe .active é só visual. aria-current="page" é o que faz um leitor
+    // de tela anunciar "item atual" ao percorrer o menu (UX-01).
+    if (active) el.setAttribute('aria-current', 'page');
+    else el.removeAttribute('aria-current');
   });
+}
+
+// Estado final quando nem a rota pedida nem o fallback do papel são
+// navegáveis — evita a recursão descrita em router.redirectTo() e, sobretudo,
+// evita a tela branca sem explicação que o estouro de pilha produzia.
+function renderRouteUnavailable() {
+  const active = document.querySelector('.screen.active');
+  const target = active || document.getElementById('screen-cliente-dashboard');
+  if (!target) return;
+  document.querySelectorAll('.screen').forEach((el) => el.classList.remove('active'));
+  target.classList.add('active');
+  target.innerHTML = `
+    <div class="card empty-state" style="max-width:460px;margin:40px auto">
+      ${Icons.inbox}
+      <h3 style="margin:10px 0 6px">Esta tela não está disponível para a sua conta</h3>
+      <p class="text-sm text-soft">Se você acredita que deveria ter acesso, fale com o administrador da sua empresa.</p>
+      <button class="btn btn-outline mt-14" id="route-unavailable-signout">Sair da conta</button>
+    </div>`;
+  const btn = document.getElementById('route-unavailable-signout');
+  if (btn) btn.onclick = handleSignOut;
 }
 
 function closeMobileMoreMenu() {

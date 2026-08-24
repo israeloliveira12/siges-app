@@ -7,6 +7,7 @@
    ============================================================================ */
 
 import { supabaseAdminFetch, getCallerProfile } from './_lib/supabaseAdmin.js';
+import { passwordProblem } from './_lib/password.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Método não permitido' }); return; }
@@ -26,7 +27,8 @@ export default async function handler(req, res) {
     res.status(400).json({ error: 'Parâmetros inválidos.' });
     return;
   }
-  if (admin_password.length < 6) { res.status(400).json({ error: 'A senha precisa ter pelo menos 6 caracteres.' }); return; }
+  const pwdProblem = passwordProblem(admin_password);
+  if (pwdProblem) { res.status(400).json({ error: pwdProblem }); return; }
 
   // Cria o tenant primeiro (sem owner_profile_id ainda) pra ter o id pronto
   // pra ir no user_metadata do admin — handle_new_user() (trigger em
@@ -69,7 +71,13 @@ export default async function handler(req, res) {
     body: JSON.stringify({ role: 'gerente', is_primary_admin: true, full_name: admin_full_name || '', created_by: caller.id }),
   });
   if (!promoteRes.ok) {
-    res.status(500).json({ error: 'Empresa e usuário criados, mas falhou ao promover a conta a administrador.' });
+    // Desfaz na ordem inversa (conta primeiro, depois a empresa — profiles
+    // referencia tenants). Sem isso sobrava uma empresa com um "cliente"
+    // solto no lugar do administrador, impossível de usar e sem tela que
+    // permitisse consertar (achado OPS-07).
+    await supabaseAdminFetch(`/auth/v1/admin/users/${newAdminId}`, { method: 'DELETE' });
+    await supabaseAdminFetch(`/rest/v1/tenants?id=eq.${newTenantId}`, { method: 'DELETE' });
+    res.status(500).json({ error: 'Não foi possível concluir a criação da empresa. Nada foi salvo — tente novamente.' });
     return;
   }
 
