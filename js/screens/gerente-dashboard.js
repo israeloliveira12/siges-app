@@ -68,6 +68,10 @@ async function renderGerenteDashboard() {
   ]);
 
   const loadErrors = [totalsRes.error, trendRes.error, e6, e7, e8].filter(Boolean);
+  if (loadErrors.some(isMissingRpcError)) {
+    root.innerHTML = missingMigrationHtml('as funções de totais do banco (dashboard_totals / dashboard_trend)');
+    return;
+  }
   if (loadErrors.length) {
     console.error('Erro ao carregar dados do dashboard:', loadErrors);
     root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar os dados do dashboard agora. Recarregue a página ou tente novamente em instantes.</p></div>`;

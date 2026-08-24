@@ -69,6 +69,10 @@ async function renderPlataformaSaude() {
   root.innerHTML = `<div class="text-soft">Carregando...</div>`;
 
   const { data, error } = await supa.rpc('get_platform_health');
+  if (isMissingRpcError(error)) {
+    root.innerHTML = missingMigrationHtml('a função get_platform_health');
+    return;
+  }
   if (error) {
     console.error('Erro ao carregar a saúde da plataforma:', error);
     root.innerHTML = `<div class="card"><p class="auth-error">Não foi possível carregar a saúde da plataforma agora. Recarregue a página ou tente novamente em instantes.</p></div>`;

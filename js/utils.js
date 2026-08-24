@@ -555,3 +555,28 @@ function valueByExtenso(value) {
   if (centavos > 0) texto += ' e ' + inteiroPorExtenso(centavos) + (centavos === 1 ? ' centavo' : ' centavos');
   return texto;
 }
+
+// Quando o frontend novo chega ao ar ANTES de a migration_048 ser aplicada no
+// Supabase, as RPCs de agregação ainda não existem e o Postgres responde
+// 42883 (undefined_function). Sem este tratamento a tela mostrava só "não foi
+// possível carregar", que não diz a ninguém o que fazer — e o que fazer é uma
+// coisa só e bem específica.
+function isMissingRpcError(err) {
+  if (!err) return false;
+  const code = err.code || '';
+  const msg = (err.message || '') + ' ' + (err.hint || '');
+  return code === '42883' || /does not exist|Could not find the function/i.test(msg);
+}
+
+function missingMigrationHtml(quais) {
+  return `<div class="card">
+    <div class="warn-banner">
+      <span class="warn-banner-mark" aria-hidden="true">!</span>
+      <div>
+        <strong>Falta aplicar a migration_048 no banco.</strong>
+        Esta tela usa ${escapeHtml(quais)}, que ainda não existe no Supabase — o código novo já está no ar, o banco não.
+        Rode <code>supabase/migration_048.sql</code> no SQL Editor do Supabase e recarregue esta página.
+      </div>
+    </div>
+  </div>`;
+}

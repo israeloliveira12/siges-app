@@ -76,8 +76,13 @@ async function renderGerenteRelatorios() {
     supa.rpc('financial_series', { p_start: start, p_end: end, p_bucket: bucket }),
   ]);
 
-  if (totalsRes.error || seriesRes.error) {
-    console.error('Erro ao carregar relatório:', totalsRes.error || seriesRes.error);
+  const relErr = totalsRes.error || seriesRes.error;
+  if (isMissingRpcError(relErr)) {
+    body.innerHTML = missingMigrationHtml('as funções de totais do banco (financial_totals / financial_series)');
+    return;
+  }
+  if (relErr) {
+    console.error('Erro ao carregar relatório:', relErr);
     body.innerHTML = `<p class="auth-error">Não foi possível carregar o relatório agora. Recarregue a página ou tente novamente em instantes.</p>`;
     return;
   }
