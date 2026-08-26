@@ -220,14 +220,31 @@ function attachMoneyMask(input) {
   if (!input) return;
   input.setAttribute('inputmode', 'decimal');
   input.addEventListener('input', () => {
-    // UX-08 (auditoria 2026-08-23): a máscara reatribui input.value a cada
-    // tecla, e reatribuir joga o cursor pro FIM. Corrigir um dígito no meio de
-    // "1.234,56" era desconfortável — o cursor fugia a cada caractere. A
-    // âncora estável entre o texto antigo e o novo é a QUANTIDADE DE DÍGITOS
-    // à esquerda do cursor (os pontos e a vírgula mudam de lugar sozinhos):
-    // conta antes, reformata, e recoloca o cursor depois do mesmo dígito.
+    // UX-08 (auditoria 2026-08-23), corrigido de novo em seguida (regressão
+    // real reportada pelo usuário, 2026-08-24): a primeira versão desta
+    // função ancorava a posição do cursor pela quantidade de DÍGITOS ANTES
+    // DELE. Isso quebrava a digitação normal — a mais comum de todas: com o
+    // campo vazio, digitar "1" a máscara mostra "0,01" (o zero é só
+    // preenchimento decorativo, nunca foi digitado). Ao digitar o segundo
+    // dígito, a lógica antiga contava aquele zero decorativo como se fosse um
+    // dígito real já digitado, calculava a posição errada, e o dígito novo
+    // entrava ANTES da vírgula em vez de depois — reformatando o número
+    // inteiro errado (ex: tentar digitar "12" produzia "2,01" em vez de
+    // "0,12"). Reproduzido e confirmado em js/utils.js:attachMoneyMask por
+    // simulação determinística antes desta correção.
+    //
+    // A correção: ancorar pela quantidade de dígitos DEPOIS do cursor, não
+    // antes. Os zeros de preenchimento SEMPRE nascem no início da string,
+    // nunca no fim — então contar "quantos dígitos restam depois de onde
+    // estou" ignora esse zero decorativo automaticamente, tanto na digitação
+    // normal (0 dígitos depois do cursor = cursor no fim, comportamento de
+    // caixa registradora) quanto ao editar no meio de um valor já digitado
+    // (preserva quantos dígitos ficam à direita do cursor, que é o motivo
+    // original do UX-08).
     const selStart = input.selectionStart;
-    const digitsBeforeCaret = input.value.slice(0, selStart).replace(/\D/g, '').length;
+    const digitsAfterCaret = selStart == null
+      ? 0
+      : input.value.slice(selStart).replace(/\D/g, '').length;
 
     let digits = input.value.replace(/\D/g, '');
     if (!digits) { input.value = ''; return; }
@@ -238,15 +255,18 @@ function attachMoneyMask(input) {
     const formatted = intPart + ',' + cents;
     input.value = formatted;
 
-    // Reposiciona: caminha o texto formatado até ter passado a mesma
-    // quantidade de dígitos que havia antes do cursor.
     if (selStart == null || document.activeElement !== input) return;
-    let seen = 0, pos = formatted.length;
+
+    // Posição = logo antes do dígito a partir do qual restam exatamente
+    // `digitsAfterCaret` dígitos até o fim. Se não sobrar nenhum dígito
+    // depois do cursor (o caso normal de digitação sequencial), o cursor vai
+    // pro fim do campo.
+    const digitIdx = [];
     for (let i = 0; i < formatted.length; i++) {
-      if (/\d/.test(formatted[i])) seen++;
-      if (seen === digitsBeforeCaret) { pos = i + 1; break; }
+      if (/\d/.test(formatted[i])) digitIdx.push(i);
     }
-    if (digitsBeforeCaret === 0) pos = 0;
+    const keepAfter = Math.min(digitsAfterCaret, digitIdx.length);
+    const pos = keepAfter === 0 ? formatted.length : digitIdx[digitIdx.length - keepAfter];
     input.setSelectionRange(pos, pos);
   });
 }
