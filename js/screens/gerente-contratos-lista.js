@@ -5,14 +5,44 @@
 let contratosTab = 'aberto';
 let contratosSearch = '';
 
+// Último carregamento do banco, guardado em memória. A BUSCA filtra isto no
+// navegador e não volta à rede — ver o comentário grande em
+// renderGerenteContratosLista() sobre por que isso importa.
+let contratosCache = null;
+// Contador de requisições: descarta resposta de uma busca/aba antiga que
+// chegue DEPOIS de uma mais nova (respostas de rede não voltam em ordem).
+let contratosReqSeq = 0;
+
 async function renderGerenteContratosLista() {
   const root = document.getElementById('screen-gerente-contratos');
-  // Preserva foco/cursor da busca entre repaints (a busca é debounced e
-  // recarrega a lista do banco, o que recria o <input> do zero).
-  const searchElBefore = document.getElementById('contratos-search');
-  const hadFocus = !!searchElBefore && document.activeElement === searchElBefore;
-  const cursorPos = hadFocus ? searchElBefore.selectionStart : null;
-  if (!hadFocus) root.innerHTML = `<div class="text-soft">Carregando...</div>`;
+  const myReq = ++contratosReqSeq;
+
+  // Bug real corrigido (2026-08-24, reportado pelo usuário: "digito e a barra
+  // buga, apaga o que escrevo ou joga as letras pro começo").
+  //
+  // Causa: o `oninput` da busca chamava ESTA função, que faz três consultas
+  // em sequência ao banco (contratos, pagamentos, parcelas) e só então
+  // reconstrói a tela inteira com root.innerHTML — destruindo e recriando o
+  // <input> da busca. Como a reconstrução usa `value="${contratosSearch}"`,
+  // que é o valor de quando o debounce disparou, tudo o que a pessoa digitou
+  // durante os ~500ms de rede era APAGADO, e o cursor voltava para a posição
+  // capturada antes das consultas.
+  //
+  // O detalhe que resolve: a busca NUNCA precisou ir ao banco. O filtro
+  // sempre foi feito no navegador (`rows.filter` abaixo) sobre dados que já
+  // estavam carregados. A ida à rede era desperdício puro — e era justamente
+  // ela que criava a corrida.
+  //
+  // Agora: esta função carrega do banco (troca de aba, primeira abertura,
+  // volta de um contrato); a busca chama só paintContratosRows(), que filtra
+  // o cache e repinta APENAS a lista. O <input> não é mais destruído, então
+  // cursor, seleção, teclado do celular e a composição de texto preditivo
+  // continuam vivos enquanto a lista atualiza.
+  if (!document.getElementById('contratos-list')) {
+    root.innerHTML = `<div class="text-soft">Carregando...</div>`;
+  } else {
+    document.getElementById('contratos-list').innerHTML = `<div class="text-soft" style="padding:14px">Carregando...</div>`;
+  }
 
   const statuses = contratosTab === 'aberto' ? ['em_aberto', 'atrasado'] : ['quitado', 'perda'];
   const { data, error } = await supa
@@ -48,61 +78,95 @@ async function renderGerenteContratosLista() {
     });
   }
 
-  const rows = (data || []).filter((c) => {
-    const term = contratosSearch.trim().toLowerCase();
+  // Uma resposta mais nova (outra aba, ou uma recarga disparada depois) já
+  // chegou enquanto esta estava no ar — descarta esta, que é obsoleta.
+  if (myReq !== contratosReqSeq) return;
+
+  contratosCache = { data: data || [], paymentsByContract, outstandingByContract };
+
+  // Monta o casco (abas + busca + container da lista) só quando ele ainda não
+  // existe. Trocar de aba ou voltar de um contrato reaproveita o casco atual,
+  // então o <input> da busca sobrevive.
+  if (!document.getElementById('contratos-list')) {
+    root.innerHTML = `
+      <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
+        <div class="flex gap-8">
+          <button class="btn btn-sm" id="tab-aberto">Em aberto</button>
+          <button class="btn btn-sm" id="tab-finalizados">Finalizados</button>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap">
+          <label for="contratos-search" class="sr-only-table">Buscar contrato</label>
+          <input type="text" id="contratos-search" placeholder="Buscar cliente ou nº contrato" value="${escapeHtml(contratosSearch)}" style="max-width:240px">
+          <button class="btn btn-primary" id="novo-contrato-btn">${Icons.plus} Novo Contrato</button>
+        </div>
+      </div>
+
+      <p class="text-sm text-soft mt-8" id="contratos-count"></p>
+      <div class="card mt-14" style="padding:0" id="contratos-list"></div>
+    `;
+
+    document.getElementById('tab-aberto').onclick = () => { contratosTab = 'aberto'; renderGerenteContratosLista(); };
+    document.getElementById('tab-finalizados').onclick = () => { contratosTab = 'finalizados'; renderGerenteContratosLista(); };
+    document.getElementById('novo-contrato-btn').onclick = () => router.navigate('#/gerente/contratos/novo');
+    // A busca repinta SÓ a lista, a partir do cache — sem rede, sem recriar
+    // este <input>. É isso que mantém o cursor e o teclado no lugar.
+    document.getElementById('contratos-search').oninput = debounce(() => {
+      contratosSearch = document.getElementById('contratos-search').value;
+      paintContratosRows();
+    }, 200);
+  }
+
+  // Estado visual das abas, sem recriar os botões.
+  document.getElementById('tab-aberto').className = `btn btn-sm ${contratosTab === 'aberto' ? 'btn-primary' : 'btn-outline'}`;
+  document.getElementById('tab-finalizados').className = `btn btn-sm ${contratosTab === 'finalizados' ? 'btn-primary' : 'btn-outline'}`;
+
+  paintContratosRows();
+}
+
+// Filtra o cache e repinta apenas #contratos-list. Nunca toca no <input>.
+function paintContratosRows() {
+  const listEl = document.getElementById('contratos-list');
+  const countEl = document.getElementById('contratos-count');
+  if (!listEl || !contratosCache) return;
+
+  const { data, paymentsByContract, outstandingByContract } = contratosCache;
+  const term = contratosSearch.trim().toLowerCase();
+  const rows = data.filter((c) => {
     if (!term) return true;
     const p = (c.clients || {}).profiles || {};
     return (p.full_name || '').toLowerCase().includes(term) || String(c.contract_number).includes(term);
   });
 
-  root.innerHTML = `
-    <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
-      <div class="flex gap-8">
-        <button class="btn ${contratosTab === 'aberto' ? 'btn-primary' : 'btn-outline'} btn-sm" id="tab-aberto">Em aberto</button>
-        <button class="btn ${contratosTab === 'finalizados' ? 'btn-primary' : 'btn-outline'} btn-sm" id="tab-finalizados">Finalizados</button>
-      </div>
-      <div class="flex gap-8" style="flex-wrap:wrap">
-        <input type="text" id="contratos-search" placeholder="Buscar cliente ou nº contrato" value="${escapeHtml(contratosSearch)}" style="max-width:240px">
-        <button class="btn btn-primary" onclick="router.navigate('#/gerente/contratos/novo')">${Icons.plus} Novo Contrato</button>
-      </div>
-    </div>
+  if (countEl) {
+    countEl.textContent = `${rows.length} contrato${rows.length === 1 ? '' : 's'}${term ? ' encontrado' + (rows.length === 1 ? '' : 's') : ''}`;
+  }
 
-    <p class="text-sm text-soft mt-8">${rows.length} contrato${rows.length === 1 ? '' : 's'}${contratosSearch.trim() ? ' encontrado' + (rows.length === 1 ? '' : 's') : ''}</p>
+  listEl.innerHTML = rows.length ? `
+    <table class="data-table table-scroll">
+      <thead><tr>
+        <th>Contrato</th><th>Cliente</th><th>Aporte</th><th>Dívida atual</th><th>Juros (%)</th><th>Pago total</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${rows.map((c) => {
+          const cycleInfo = outstandingByContract['cycle_' + c.id];
+          const outstanding = cycleInfo ? cycleInfo.v : (outstandingByContract[c.id] || 0);
+          const paid = (paymentsByContract[c.id] || { total: 0 }).total;
+          return `
+          <tr class="contract-row" data-id="${c.id}" style="cursor:pointer">
+            <td data-label="Contrato">#${c.contract_number}</td>
+            <td data-label="Cliente"><div class="flex items-center gap-8">${avatarHtml((c.clients.profiles || {}).full_name, 26)}<span>${escapeHtml((c.clients.profiles || {}).full_name || '—')}</span></div></td>
+            <td data-label="Aporte" class="mono mobile-hide">${formatMoney(c.principal_amount)}</td>
+            <td data-label="Dívida atual" class="mono">${formatMoney(outstanding)}</td>
+            <td data-label="Juros" class="mobile-hide">${formatNumber(c.interest_rate, 2)}%</td>
+            <td data-label="Pago" class="mono mobile-hide">${formatMoney(paid)}</td>
+            <td data-label="Status" class="mobile-hide">${statusBadge(c.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[c.status])}</td>
+            <td data-label=""><button class="icon-btn view-contract-btn" data-id="${c.id}" aria-label="Abrir contrato ${c.contract_number}">${Icons.chevronRight}</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>` : `<div class="empty-state">${Icons.contract}<p>${term ? 'Nenhum contrato encontrado para essa busca.' : `Nenhum contrato ${contratosTab === 'aberto' ? 'em aberto' : 'finalizado'}.`}</p></div>`;
 
-    <div class="card mt-14" style="padding:0">
-      ${rows.length ? `
-      <table class="data-table table-scroll">
-        <thead><tr>
-          <th>Contrato</th><th>Cliente</th><th>Aporte</th><th>Dívida atual</th><th>Juros (%)</th><th>Pago total</th><th>Status</th><th></th>
-        </tr></thead>
-        <tbody>
-          ${rows.map((c) => {
-            const cycleInfo = outstandingByContract['cycle_' + c.id];
-            const outstanding = cycleInfo ? cycleInfo.v : (outstandingByContract[c.id] || 0);
-            const paid = (paymentsByContract[c.id] || { total: 0 }).total;
-            return `
-            <tr class="contract-row" data-id="${c.id}" style="cursor:pointer">
-              <td data-label="Contrato">#${c.contract_number}</td>
-              <td data-label="Cliente"><div class="flex items-center gap-8">${avatarHtml((c.clients.profiles || {}).full_name, 26)}<span>${escapeHtml((c.clients.profiles || {}).full_name || '—')}</span></div></td>
-              <td data-label="Aporte" class="mono mobile-hide">${formatMoney(c.principal_amount)}</td>
-              <td data-label="Dívida atual" class="mono">${formatMoney(outstanding)}</td>
-              <td data-label="Juros" class="mobile-hide">${formatNumber(c.interest_rate, 2)}%</td>
-              <td data-label="Pago" class="mono mobile-hide">${formatMoney(paid)}</td>
-              <td data-label="Status" class="mobile-hide">${statusBadge(c.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[c.status])}</td>
-              <td data-label=""><button class="icon-btn view-contract-btn" data-id="${c.id}">${Icons.chevronRight}</button></td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>` : `<div class="empty-state">${Icons.contract}<p>Nenhum contrato ${contratosTab === 'aberto' ? 'em aberto' : 'finalizado'}.</p></div>`}
-    </div>
-  `;
-
-  document.getElementById('tab-aberto').onclick = () => { contratosTab = 'aberto'; renderGerenteContratosLista(); };
-  document.getElementById('tab-finalizados').onclick = () => { contratosTab = 'finalizados'; renderGerenteContratosLista(); };
-  const searchEl = document.getElementById('contratos-search');
-  searchEl.oninput = debounce((e) => { contratosSearch = e.target.value; renderGerenteContratosLista(); }, 250);
-  if (hadFocus) { searchEl.focus(); if (cursorPos != null) searchEl.setSelectionRange(cursorPos, cursorPos); }
-  root.querySelectorAll('.contract-row, .view-contract-btn').forEach((el) => {
+  listEl.querySelectorAll('.contract-row, .view-contract-btn').forEach((el) => {
     el.onclick = (e) => { e.stopPropagation(); router.navigate('#/gerente/contratos/' + (el.dataset.id)); };
   });
 }
@@ -205,8 +269,9 @@ async function renderGerenteContratoDetalhe(params) {
                     ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada') ? `
                       <button class="btn btn-accent btn-sm receive-cycle-btn" data-id="${currentCycle.id}">Receber</button>
                     ` : ''}
+                    <button class="icon-btn edit-cycle-btn" data-id="${currentCycle.id}" title="Editar/adiar renovação" aria-label="Editar ou adiar a renovação ${currentCycle.cycle_number}">${Icons.edit}</button>
                     ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada' || currentCycle.status === 'perda') ? `
-                      <button class="icon-btn cycle-loss-btn" data-status="${currentCycle.status}" data-id="${currentCycle.id}" data-amount="${capital}" data-label="Renovação ${currentCycle.cycle_number}" title="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'}">${Icons.edit}</button>
+                      <button class="icon-btn cycle-loss-btn" data-status="${currentCycle.status}" data-id="${currentCycle.id}" data-amount="${capital}" data-label="Renovação ${currentCycle.cycle_number}" title="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'}" aria-label="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'} da renovação ${currentCycle.cycle_number}" style="color:var(--bad)">${Icons.alertTriangle}</button>
                     ` : ''}
                   </div>
                 </td>
@@ -303,13 +368,24 @@ async function renderGerenteContratoDetalhe(params) {
   root.querySelectorAll('.receive-cycle-btn').forEach((btn) => {
     btn.onclick = () => openReceberModal({ sourceType: 'renewal_cycle', id: btn.dataset.id, contract }, () => renderGerenteContratoDetalhe(params));
   });
+  // Editar/adiar ciclo de renovação (migration_049, 2026-08-24). Até aqui só a
+  // PARCELA podia ser reagendada — chegando o dia do vencimento de uma
+  // renovação, o administrador só tinha três saídas: renovar de novo (exige o
+  // cliente pagar juros), quitar (exige o valor cheio) ou deixar vencer. Não
+  // havia como simplesmente adiar, que é a negociação mais comum do dia a dia.
+  root.querySelectorAll('.edit-cycle-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const cyc = (cycles || []).find((c) => c.id === btn.dataset.id);
+      openEditCycleModal(cyc, contract, () => renderGerenteContratoDetalhe(params));
+    };
+  });
   // O botão "Marcar como perda" saiu da linha da tabela (poluía o visual,
-  // 2026-07-30) — pra ciclo de renovação (que nunca teve um botão de editar,
-  // decisão anterior de deixar a edição de ciclo de fora) virou um ícone
-  // dedicado que já abre direto a confirmação de marcar/reverter perda. Pra
-  // parcela normal, a mesma ação foi pra dentro do modal de "Editar/
-  // reagendar parcela" (ver openEditInstallmentModal) — reaproveita o botão
-  // de editar (caneta) que já existia, em vez de mais um botão na linha.
+  // 2026-07-30). Pra parcela normal ele vive dentro do modal de "Editar/
+  // reagendar parcela" (ver openEditInstallmentModal); pro ciclo continua como
+  // ícone próprio na linha, mas desde 2026-08-24 com ícone de ALERTA, não mais
+  // a caneta — antes as duas ações (editar e marcar perda) dividiam o mesmo
+  // Icons.edit, e no celular, onde não há tooltip, clicar no lugar óbvio para
+  // reagendar abria uma confirmação de perda.
   root.querySelectorAll('.cycle-loss-btn').forEach((btn) => {
     btn.onclick = () => openMarkOrRevertLossModal({
       isCycle: true, isLoss: btn.dataset.status === 'perda',
@@ -519,6 +595,156 @@ function openEditInstallmentModal(installment, contract, onDone) {
     logAudit('parcela_editada', `Parcela ${installment.sequence_number} reagendada/editada`, { installment_id: installment.id });
     close();
     showToast('Parcela atualizada.');
+    if (typeof onDone === 'function') onDone();
+  };
+}
+
+// Editar/adiar um ciclo de renovação (migration_049, 2026-08-24).
+//
+// Espelho de openEditInstallmentModal, criado para fechar a assimetria que
+// existia desde sempre: só a PARCELA podia ser reagendada. Quando chegava o
+// vencimento de uma renovação, o administrador tinha três saídas — renovar de
+// novo (exige o cliente pagar juros), quitar (exige o valor cheio) ou deixar
+// vencer e acumular encargo. Adiar, que é a negociação mais comum, não existia.
+//
+// Deixar o valor como veio = adiamento puro (cortesia). Mexer no valor =
+// acréscimo negociado pelos dias extras. O sistema não impõe regra: quem
+// decide é o administrador, caso a caso (decisão do usuário, 2026-08-24).
+function openEditCycleModal(cycle, contract, onDone) {
+  if (!cycle) { showToast('Não foi possível carregar esta renovação.'); return; }
+
+  const capital = Number(contract.principal_amount || 0);
+  const jurosAtual = Number(cycle.full_debt_amount || 0) - capital;
+  const isTerminal = ['paga', 'renovada', 'perda'].includes(cycle.status);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-head">
+        <h3>Editar/adiar renovação ${cycle.cycle_number}</h3>
+        <button class="icon-btn" id="close-modal" aria-label="Fechar">${Icons.x}</button>
+      </div>
+      <div class="modal-body">
+        <div id="ec-feedback"></div>
+        <div class="field">
+          <label for="ec-due-date">Novo vencimento</label>
+          <input type="date" id="ec-due-date" value="${cycle.new_due_date}">
+        </div>
+        <div class="field">
+          <label for="ec-full-debt">Valor total da dívida (R$)</label>
+          <input type="text" id="ec-full-debt">
+          <span class="help">Deixe como está para apenas adiar sem cobrar nada a mais. Altere se negociou um acréscimo pelos dias extras.</span>
+        </div>
+        <div class="text-sm text-soft mt-8">
+          Composição atual: <span class="mono">${formatMoney(capital)}</span> de capital
+          + <span class="mono">${formatMoney(jurosAtual)}</span> de juros acumulados.
+        </div>
+        <div id="ec-diff" class="mt-8"></div>
+        ${isTerminal ? `
+          <p class="text-sm mt-8" style="color:var(--warn)">Esta renovação está como <strong>${{ paga: 'paga', renovada: 'renovada', perda: 'perda' }[cycle.status]}</strong> — a edição aqui é correção de registro histórico e não muda esse status nem o valor já contabilizado.</p>
+        ` : ''}
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
+        <button class="btn btn-primary" id="save-modal">Salvar</button>
+      </div>
+    </div>`;
+  document.getElementById('app').appendChild(overlay);
+  const close = () => overlay.remove();
+  wireModal(overlay, close);
+  document.getElementById('close-modal').onclick = close;
+  document.getElementById('cancel-modal').onclick = close;
+
+  const debtInput = document.getElementById('ec-full-debt');
+  const dateInput = document.getElementById('ec-due-date');
+  setMoneyValue(debtInput, cycle.full_debt_amount);
+  attachMoneyMask(debtInput);
+
+  // Mostra em tempo real o que a edição significa — sem isso o administrador
+  // só descobre que adiou 40 dias (ou que digitou um valor errado) depois de
+  // salvar.
+  const updateDiff = () => {
+    const novoTotal = getMoneyValue(debtInput);
+    const novaData = dateInput.value;
+    const partes = [];
+
+    if (novaData && novaData !== cycle.new_due_date) {
+      const dias = daysBetween(cycle.new_due_date, novaData);
+      partes.push(dias > 0
+        ? `<span style="color:var(--accent)">Adiando ${dias} dia(s)</span>`
+        : `<span style="color:var(--warn)">Antecipando ${Math.abs(dias)} dia(s)</span>`);
+    }
+    if (novaData && novaData < todayISO()) {
+      partes.push('<span style="color:var(--bad)">a data escolhida já passou — a renovação continuará em atraso</span>');
+    }
+
+    const diff = Math.round((novoTotal - Number(cycle.full_debt_amount || 0)) * 100) / 100;
+    if (Math.abs(diff) >= 0.01) {
+      partes.push(diff > 0
+        ? `<span style="color:var(--warn)">acréscimo de ${formatMoney(diff)} na dívida</span>`
+        : `<span style="color:var(--good)">abatimento de ${formatMoney(Math.abs(diff))} na dívida</span>`);
+    }
+    if (novoTotal > 0 && novoTotal < capital) {
+      partes.push(`<span style="color:var(--bad)">o total não pode ficar abaixo do capital de ${formatMoney(capital)}</span>`);
+    }
+
+    document.getElementById('ec-diff').innerHTML = partes.length
+      ? `<p class="text-sm">${partes.join(' · ')}</p>`
+      : '<p class="text-sm text-soft">Nenhuma alteração.</p>';
+  };
+  debtInput.oninput = updateDiff;
+  dateInput.onchange = updateDiff;
+  updateDiff();
+
+  document.getElementById('save-modal').onclick = async () => {
+    const btn = document.getElementById('save-modal');
+    const feedback = document.getElementById('ec-feedback');
+    feedback.innerHTML = '';
+    btn.disabled = true;
+
+    const novaData = dateInput.value;
+    const novoTotal = getMoneyValue(debtInput);
+    if (!novaData) {
+      feedback.innerHTML = '<div class="auth-error">Informe o novo vencimento.</div>';
+      btn.disabled = false;
+      return;
+    }
+
+    const { error } = await supa.rpc('update_cycle_schedule', {
+      p_cycle_id: cycle.id,
+      p_new_due_date: novaData,
+      p_full_debt_amount: novoTotal,
+    });
+    if (error) {
+      const raw = error.message || '';
+      const msg = isMissingRpcError(error)
+        ? 'Falta aplicar a migration_049 no banco. Rode supabase/migration_049.sql no SQL Editor do Supabase.'
+        : raw.includes('AMOUNT_BELOW_PRINCIPAL')
+        ? `O valor total não pode ficar abaixo do capital do contrato (${formatMoney(capital)}) — senão a quitação entraria como prejuízo nos relatórios.`
+        : raw.includes('INVALID_AMOUNT')
+        ? 'Informe um valor total maior que zero.'
+        : raw.includes('INVALID_DATE')
+        ? 'Informe o novo vencimento.'
+        : raw.includes('NOT_FOUND')
+        ? 'Não encontramos esta renovação. Atualize a tela e tente de novo.'
+        : raw;
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
+      btn.disabled = false;
+      return;
+    }
+
+    const dias = novaData !== cycle.new_due_date ? daysBetween(cycle.new_due_date, novaData) : 0;
+    logAudit(
+      'renovacao_reagendada',
+      `Renovação ${cycle.cycle_number} do contrato #${contract.contract_number} reagendada de ${formatDate(cycle.new_due_date)} para ${formatDate(novaData)}` +
+        (Math.abs(novoTotal - Number(cycle.full_debt_amount || 0)) >= 0.01
+          ? ` (valor: ${formatMoney(cycle.full_debt_amount)} → ${formatMoney(novoTotal)})`
+          : ''),
+      { cycle_id: cycle.id, contract_id: contract.id, dias }
+    );
+    close();
+    showToast(dias > 0 ? `Renovação adiada em ${dias} dia(s).` : 'Renovação atualizada.');
     if (typeof onDone === 'function') onDone();
   };
 }

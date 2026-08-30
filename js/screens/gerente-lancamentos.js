@@ -63,34 +63,54 @@ function paintLancamentosFuturos(root, installments, cycles) {
 
   const diasRestantes = (dataStr) => Math.round((new Date(dataStr) - new Date(today)) / 86400000);
 
-  // Preserva foco/cursor da busca entre repaints (debounced, recria o
-  // <input> a cada tecla) — mesmo padrão já usado em Clientes/Contratos.
-  const searchElBefore = document.getElementById('futuros-search');
-  const hadFocus = !!searchElBefore && document.activeElement === searchElBefore;
-  const cursorPos = hadFocus ? searchElBefore.selectionStart : null;
-
-  root.innerHTML = `
-    <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:8px">
-      <p class="text-sm text-soft">Previsto: <strong class="mono" style="color:var(--ink)">${formatMoney(previsaoEntradas)}</strong> em ${items.length} lançamento${items.length === 1 ? '' : 's'}</p>
-    </div>
-
-    <div class="field-row mt-14">
-      <div class="field"><label>Data Limite (Opcional)</label><input type="date" id="futuros-data-limite" value="${futurosDataLimite}"></div>
-      <div class="field">
-        <label>Tipo</label>
-        <select id="futuros-tipo">
-          <option value="todos" ${futurosTipo === 'todos' ? 'selected' : ''}>Todos</option>
-          <option value="parcela" ${futurosTipo === 'parcela' ? 'selected' : ''}>Parcela</option>
-          <option value="renovacao" ${futurosTipo === 'renovacao' ? 'selected' : ''}>Renovação</option>
-        </select>
+  // Bug real corrigido (2026-08-24): esta função reconstruía a tela inteira —
+  // incluindo o <input> da busca — a cada tecla, e depois tentava devolver
+  // foco e cursor no lugar. Ver o comentário completo em gerente-clientes.js.
+  // Agora o casco (filtros + busca) é montado uma vez e a busca repinta só o
+  // corpo da tabela, então o campo nunca é destruído.
+  if (!document.getElementById('futuros-tbody')) {
+    root.innerHTML = `
+      <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:8px">
+        <p class="text-sm text-soft" id="futuros-resumo"></p>
       </div>
-      <div class="field"><label>Buscar</label><input type="text" id="futuros-search" placeholder="Cliente ou nº contrato" value="${escapeHtml(futurosSearch)}"></div>
-    </div>
 
-    <div class="card mt-14" style="padding:0">
-      <table class="data-table table-scroll">
-        <thead><tr><th>Tipo</th><th>Data</th><th>Dias Restantes</th><th>Descrição</th><th>Valor</th><th>Referência</th></tr></thead>
-        <tbody>
+      <div class="field-row mt-14">
+        <div class="field"><label for="futuros-data-limite">Data Limite (Opcional)</label><input type="date" id="futuros-data-limite"></div>
+        <div class="field">
+          <label for="futuros-tipo">Tipo</label>
+          <select id="futuros-tipo">
+            <option value="todos">Todos</option>
+            <option value="parcela">Parcela</option>
+            <option value="renovacao">Renovação</option>
+          </select>
+        </div>
+        <div class="field"><label for="futuros-search">Buscar</label><input type="text" id="futuros-search" placeholder="Cliente ou nº contrato" value="${escapeHtml(futurosSearch)}"></div>
+      </div>
+
+      <div class="card mt-14" style="padding:0">
+        <table class="data-table table-scroll">
+          <thead><tr><th>Tipo</th><th>Data</th><th>Dias Restantes</th><th>Descrição</th><th>Valor</th><th>Referência</th></tr></thead>
+          <tbody id="futuros-tbody"></tbody>
+        </table>
+      </div>
+    `;
+
+    document.getElementById('futuros-data-limite').onchange = (e) => { futurosDataLimite = e.target.value; paintLancamentosFuturos(root, installments, cycles); };
+    document.getElementById('futuros-tipo').onchange = (e) => { futurosTipo = e.target.value; paintLancamentosFuturos(root, installments, cycles); };
+    document.getElementById('futuros-search').oninput = debounce(() => {
+      futurosSearch = document.getElementById('futuros-search').value;
+      paintLancamentosFuturos(root, installments, cycles);
+    }, 200);
+  }
+
+  // Reflete o estado dos filtros sem recriar os campos (e sem mexer na busca,
+  // que pode estar sendo digitada neste exato momento).
+  document.getElementById('futuros-tipo').value = futurosTipo;
+  document.getElementById('futuros-data-limite').value = futurosDataLimite || '';
+  document.getElementById('futuros-resumo').innerHTML =
+    `Previsto: <strong class="mono" style="color:var(--ink)">${formatMoney(previsaoEntradas)}</strong> em ${items.length} lançamento${items.length === 1 ? '' : 's'}`;
+
+  document.getElementById('futuros-tbody').innerHTML = `
           ${items.length ? items.map((i) => {
             const dias = diasRestantes(i.data);
             const diasLabel = dias < 0 ? `${Math.abs(dias)}d atrasado` : dias === 0 ? 'Hoje' : `${dias} dia${dias === 1 ? '' : 's'}`;
@@ -105,16 +125,7 @@ function paintLancamentosFuturos(root, installments, cycles) {
               <td data-label="Referência">${i.contractNumber ? `<a href="#/gerente/contratos/${i.contractId}" class="reference-link">Contrato #${i.contractNumber} ${Icons.chevronRight}</a>` : '—'}</td>
             </tr>`;
           }).join('') : `<tr><td colspan="6" class="text-soft">Nenhum lançamento futuro encontrado.</td></tr>`}
-        </tbody>
-      </table>
-    </div>
   `;
-
-  document.getElementById('futuros-data-limite').onchange = (e) => { futurosDataLimite = e.target.value; paintLancamentosFuturos(root, installments, cycles); };
-  document.getElementById('futuros-tipo').onchange = (e) => { futurosTipo = e.target.value; paintLancamentosFuturos(root, installments, cycles); };
-  const searchEl = document.getElementById('futuros-search');
-  searchEl.oninput = debounce((e) => { futurosSearch = e.target.value; paintLancamentosFuturos(root, installments, cycles); }, 250);
-  if (hadFocus) { searchEl.focus(); if (cursorPos != null) searchEl.setSelectionRange(cursorPos, cursorPos); }
 }
 
 registerRoute('gerente/lancamentos', { role: 'gerente', screenId: 'gerente-lancamentos', title: 'Lançamentos Futuros', render: renderGerenteLancamentos });

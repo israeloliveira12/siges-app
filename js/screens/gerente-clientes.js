@@ -24,16 +24,66 @@ async function loadClientesCache() {
 
 function paintClientesScreen() {
   const root = document.getElementById('screen-gerente-clientes');
-  // Preserva foco/cursor da busca entre repaints — sem isso, cada tecla
-  // digitada recria o <input> do zero e o cursor "some" até o usuário
-  // clicar de novo no campo.
-  const searchElBefore = document.getElementById('clientes-search');
-  const hadFocus = !!searchElBefore && document.activeElement === searchElBefore;
-  const cursorPos = hadFocus ? searchElBefore.selectionStart : null;
+
+  // Bug real corrigido (2026-08-24): antes esta função reconstruía a tela
+  // INTEIRA a cada tecla da busca — incluindo o próprio <input> — e depois
+  // tentava devolver foco e cursor no lugar. Além de frágil, no celular isso
+  // fecha e reabre o teclado e quebra a composição de texto preditivo, que é
+  // o que produzia a sensação de "a barra buga, as letras vão pro começo".
+  //
+  // Agora o casco (abas + busca + contador) é montado UMA vez e a busca
+  // repinta só a lista. O <input> nunca é destruído, então não há foco nem
+  // cursor a restaurar — some a classe inteira do problema.
+  if (!document.getElementById('clientes-list')) {
+    root.innerHTML = `
+      <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
+        <div class="flex gap-8">
+          <button class="btn btn-sm" id="tab-aprovado">Aprovados</button>
+          <button class="btn btn-sm" id="tab-pendente">Pendentes</button>
+          <button class="btn btn-sm" id="tab-rejeitado">Rejeitados</button>
+        </div>
+        <button class="btn btn-primary" id="novo-cliente-btn">${Icons.plus} Novo Cliente</button>
+      </div>
+
+      <div class="flex items-center justify-between gap-10 mt-14" style="flex-wrap:wrap">
+        <div style="max-width:320px;flex:1">
+          <label for="clientes-search" class="sr-only-table">Buscar cliente</label>
+          <input type="text" id="clientes-search" placeholder="Buscar por nome, e-mail ou CPF" value="${escapeHtml(clientesSearch)}">
+        </div>
+        <p class="text-sm text-soft" id="clientes-count"></p>
+      </div>
+
+      <div class="mt-14" id="clientes-list"></div>
+    `;
+
+    document.getElementById('tab-pendente').onclick = () => { clientesTab = 'pendente'; paintClientesScreen(); };
+    document.getElementById('tab-aprovado').onclick = () => { clientesTab = 'aprovado'; paintClientesScreen(); };
+    document.getElementById('tab-rejeitado').onclick = () => { clientesTab = 'rejeitado'; paintClientesScreen(); };
+    document.getElementById('novo-cliente-btn').onclick = () => openClienteModal(null);
+    document.getElementById('clientes-search').oninput = debounce(() => {
+      clientesSearch = document.getElementById('clientes-search').value;
+      paintClientesRows();
+    }, 200);
+  }
+
+  // Estado das abas atualizado sem recriar os botões (o contador de
+  // pendentes muda quando um cadastro é aprovado/rejeitado).
+  const pendingCount = clientesCache.filter((c) => c.approval_status === 'pendente').length;
+  document.getElementById('tab-aprovado').className = `btn btn-sm ${clientesTab === 'aprovado' ? 'btn-primary' : 'btn-outline'}`;
+  document.getElementById('tab-pendente').className = `btn btn-sm ${clientesTab === 'pendente' ? 'btn-primary' : 'btn-outline'}`;
+  document.getElementById('tab-pendente').textContent = `Pendentes${pendingCount ? ` (${pendingCount})` : ''}`;
+  document.getElementById('tab-rejeitado').className = `btn btn-sm ${clientesTab === 'rejeitado' ? 'btn-primary' : 'btn-outline'}`;
+
+  paintClientesRows();
+}
+
+// Filtra o cache e repinta apenas #clientes-list. Nunca toca no <input>.
+function paintClientesRows() {
+  const listEl = document.getElementById('clientes-list');
+  const countEl = document.getElementById('clientes-count');
+  if (!listEl) return;
 
   const term = clientesSearch.trim().toLowerCase();
-  const pendingCount = clientesCache.filter((c) => c.approval_status === 'pendente').length;
-
   const rows = clientesCache.filter((c) => {
     if (c.approval_status !== clientesTab) return false;
     if (!term) return true;
@@ -41,24 +91,9 @@ function paintClientesScreen() {
     return (p.full_name || '').toLowerCase().includes(term) || (p.email || '').toLowerCase().includes(term) || (p.cpf || '').includes(term);
   }).sort((a, b) => (a.profiles || {}).full_name?.localeCompare((b.profiles || {}).full_name || '', 'pt-BR') || 0);
 
-  root.innerHTML = `
-    <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
-      <div class="flex gap-8">
-        <button class="btn btn-sm ${clientesTab === 'aprovado' ? 'btn-primary' : 'btn-outline'}" id="tab-aprovado">Aprovados</button>
-        <button class="btn btn-sm ${clientesTab === 'pendente' ? 'btn-primary' : 'btn-outline'}" id="tab-pendente">Pendentes ${pendingCount ? `(${pendingCount})` : ''}</button>
-        <button class="btn btn-sm ${clientesTab === 'rejeitado' ? 'btn-primary' : 'btn-outline'}" id="tab-rejeitado">Rejeitados</button>
-      </div>
-      <button class="btn btn-primary" id="novo-cliente-btn">${Icons.plus} Novo Cliente</button>
-    </div>
+  if (countEl) countEl.textContent = `${rows.length} cliente${rows.length === 1 ? '' : 's'}${term ? ' encontrado' + (rows.length === 1 ? '' : 's') : ''}`;
 
-    <div class="flex items-center justify-between gap-10 mt-14" style="flex-wrap:wrap">
-      <div style="max-width:320px;flex:1">
-        <input type="text" id="clientes-search" placeholder="Buscar por nome, e-mail ou CPF" value="${escapeHtml(clientesSearch)}">
-      </div>
-      <p class="text-sm text-soft">${rows.length} cliente${rows.length === 1 ? '' : 's'}${term ? ' encontrado' + (rows.length === 1 ? '' : 's') : ''}</p>
-    </div>
-
-    <div class="mt-14">
+  listEl.innerHTML = `
       ${rows.length ? rows.map((c) => {
         const p = c.profiles || {};
         const phoneDigits = String(p.phone || '').replace(/\D/g, '');
@@ -84,18 +119,13 @@ function paintClientesScreen() {
             </div>
           </div>
         </div>`;
-      }).join('') : `<div class="empty-state">${Icons.users}<p>Nenhum cliente ${clientesTab === 'pendente' ? 'pendente' : clientesTab === 'aprovado' ? 'aprovado' : 'rejeitado'}.</p></div>`}
-    </div>
+      }).join('') : `<div class="empty-state">${Icons.users}<p>${term ? 'Nenhum cliente encontrado para essa busca.' : `Nenhum cliente ${clientesTab === 'pendente' ? 'pendente' : clientesTab === 'aprovado' ? 'aprovado' : 'rejeitado'}.`}</p></div>`}
   `;
 
-  document.getElementById('tab-pendente').onclick = () => { clientesTab = 'pendente'; paintClientesScreen(); };
-  document.getElementById('tab-aprovado').onclick = () => { clientesTab = 'aprovado'; paintClientesScreen(); };
-  document.getElementById('tab-rejeitado').onclick = () => { clientesTab = 'rejeitado'; paintClientesScreen(); };
-  const searchEl = document.getElementById('clientes-search');
-  searchEl.oninput = debounce((e) => { clientesSearch = e.target.value; paintClientesScreen(); }, 250);
-  if (hadFocus) { searchEl.focus(); if (cursorPos != null) searchEl.setSelectionRange(cursorPos, cursorPos); }
-  document.getElementById('novo-cliente-btn').onclick = () => openClienteModal(null);
-
+  // A partir daqui só as ações das LINHAS — abas, busca e "Novo Cliente" são
+  // ligados uma única vez, em paintClientesScreen(), e sobrevivem aos
+  // repaints da busca.
+  const root = listEl;
   root.querySelectorAll('.row-more-btn').forEach((btn) => {
     btn.onclick = (e) => { e.stopPropagation(); openRowMoreMenu(btn, btn.dataset.id); };
   });

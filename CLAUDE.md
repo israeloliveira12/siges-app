@@ -1114,6 +1114,76 @@ Varredura linha a linha de todo o sistema (frontend, API serverless, schema, 46 
 - Hashes SRI: as 3 bibliotecas carregaram no navegador (se o hash estivesse errado, não carregariam).
 - Tela Saúde da Plataforma: renderizada em claro, escuro e 375px, sem estouro horizontal.
 
+## Adiar renovação + fim do bug de digitação nas buscas (2026-08-24, `migration_049`)
+
+Duas coisas reportadas pelo usuário na mesma sessão.
+
+### 1. Não dava para adiar o vencimento de uma renovação (`migration_049`)
+
+Só a PARCELA tinha como ser reagendada (`update_installment_schedule`). O ciclo
+de renovação nunca teve equivalente — era uma omissão deliberada antiga,
+registrada em comentário no próprio `gerente-contratos-lista.js`. Na prática,
+chegando o dia do vencimento de uma renovação o administrador tinha três
+saídas: renovar de novo (exige o cliente pagar juros), quitar (exige o valor
+cheio) ou deixar vencer. Adiar, que é a negociação mais comum do dia a dia, não
+existia.
+
+Agora existe `update_cycle_schedule(p_cycle_id, p_new_due_date, p_full_debt_amount)`
+e o modal "Editar/adiar renovação". Decisão do usuário: **data e valor ambos
+editáveis** — deixar o valor como veio é adiamento puro (cortesia), mexer nele
+registra um acréscimo negociado. O sistema não impõe regra de cobrança.
+
+Detalhes que importam na RPC:
+- Adiar um ciclo `atrasada` para data futura devolve o status para `pendente` e
+  chama `recompute_contract_status()`. Sem isso o ciclo continuaria contando
+  como inadimplente em Cobrar, no Dashboard e no score, mesmo remarcado.
+- `AMOUNT_BELOW_PRINCIPAL`: o total não pode cair abaixo do capital do
+  contrato, porque `receive_cycle_payment()` calcula os juros como
+  `full_debt_amount - principal_amount` — abaixo disso a quitação entraria
+  como prejuízo nos relatórios.
+- `principal_lost` não é tocado: `mark_cycle_loss()` grava ali o CAPITAL, não o
+  total do ciclo.
+
+**Armadilha corrigida junto**: a linha do ciclo tinha um ícone de lápis
+(`Icons.edit`) que na verdade abria "marcar como perda". No computador o
+tooltip diferenciava; no celular, onde não há tooltip, clicar no lugar óbvio
+para reagendar abria uma confirmação de perda. Agora perda usa
+`Icons.alertTriangle` em vermelho e o lápis é só edição.
+
+### 2. As barras de pesquisa "bugavam" ao digitar
+
+Sintoma relatado: "digito e a barra buga, volta pro começo, apaga o que
+escrevo". Causa: **o `oninput` da busca reconstruía a tela inteira com
+`root.innerHTML`, destruindo e recriando o próprio `<input>`**, e depois
+tentava devolver foco e cursor na marra.
+
+Em Contratos era pior, porque a função é assíncrona: fazia TRÊS consultas ao
+banco antes de reconstruir. Tudo o que a pessoa digitasse durante os ~500ms de
+rede era apagado, porque a reconstrução usava `value="${contratosSearch}"` — o
+valor de quando o debounce disparou. O detalhe que resolveu: **a busca nunca
+precisou ir ao banco**; o filtro sempre foi feito no navegador sobre dados já
+carregados. A ida à rede era desperdício puro e era ela que criava a corrida.
+
+Padrão adotado em Contratos, Clientes, Lançamentos e Auditoria — **replique
+isto em qualquer tela nova com busca**:
+
+- O "casco" (abas, filtros, campo de busca, contador) é montado UMA vez,
+  guardado por `if (!document.getElementById('<tela>-list'))`.
+- A busca repinta SÓ o container da lista e nunca toca no `<input>`.
+- Os handlers de abas/busca são ligados uma única vez, junto do casco; só os
+  handlers das LINHAS são religados a cada repaint.
+- Estado visual de abas/filtros é atualizado por `.className`/`.value`, não
+  recriando o elemento.
+- Em telas assíncronas, um contador de requisição (`++reqSeq`) descarta
+  resposta obsoleta que chegue depois de uma mais nova.
+
+Com o `<input>` vivo não há foco nem cursor a restaurar — some a classe inteira
+do problema, inclusive o teclado do celular fechando/reabrindo e a quebra da
+composição de texto preditivo, que era parte do que o usuário sentia.
+
+`gerente-contrato-novo.js` (busca de cliente no wizard) já fazia certo desde
+sempre — serviu de referência.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

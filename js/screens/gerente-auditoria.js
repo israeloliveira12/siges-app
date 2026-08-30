@@ -113,11 +113,14 @@ function paintAuditoria(root, { logs, summary }) {
     return true;
   });
 
-  const oldActorInput = document.getElementById('aud-actor');
-  const hadFocus = document.activeElement === oldActorInput;
-  const selStart = hadFocus ? oldActorInput.selectionStart : null;
+  // Bug real corrigido (2026-08-24): o filtro por usuário reconstruía a tela
+  // inteira — incluindo o próprio <input> — a cada tecla, e depois devolvia
+  // foco e cursor na marra. Ver o comentário completo em gerente-clientes.js.
+  // Agora o casco (KPIs + filtros) é montado uma vez e o filtro repinta só a
+  // lista, então o campo nunca é destruído enquanto se digita.
+  const jaMontado = !!document.getElementById('aud-list');
 
-  root.innerHTML = `
+  if (!jaMontado) root.innerHTML = `
     <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap">
       <p class="text-sm text-soft">Trilha das ações importantes do sistema — mostrando os ${logs.length} eventos mais recentes.</p>
     </div>
@@ -164,29 +167,32 @@ function paintAuditoria(root, { logs, summary }) {
       </div>
     </div>
 
-    <div class="mt-14">
-      ${filtered.length ? filtered.map((l) => `
-        <div class="extrato-row" style="align-items:flex-start">
-          <div style="min-width:0;flex:1 1 220px">
-            <div class="name" style="color:${auditActionBadgeColor(l.action)}">${escapeHtml(auditActionLabel(l.action))}</div>
-            <div class="meta">${escapeHtml(l.actor_name || 'Anônimo')}${l.actor_role ? ' · ' + (l.actor_role === 'gerente' ? 'Administrador' : 'Cliente') : ''} · ${formatDateTime(l.created_at)}</div>
-          </div>
-          <div style="min-width:0;flex:2 1 260px">
-            <div class="text-sm text-soft">${escapeHtml(l.description)}</div>
-          </div>
-        </div>
-      `).join('') : `<div class="empty-state">${Icons.audit}<p>Nenhum evento encontrado com esse filtro.</p></div>`}
-    </div>
+    <div class="mt-14" id="aud-list"></div>
   `;
 
-  const newActorInput = document.getElementById('aud-actor');
-  if (hadFocus) { newActorInput.focus(); newActorInput.setSelectionRange(selStart, selStart); }
-  newActorInput.oninput = debounce((e) => { auditActorSearch = e.target.value; paintAuditoria(root, { logs, summary }); }, 200);
-  document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { logs, summary }); };
-  document.getElementById('aud-page-size').onchange = (e) => {
-    auditPageSize = e.target.value === 'todos' ? 'todos' : Number(e.target.value);
-    renderGerenteAuditoria();
-  };
+  if (!jaMontado) {
+    document.getElementById('aud-actor').oninput = debounce(() => {
+      auditActorSearch = document.getElementById('aud-actor').value;
+      paintAuditoria(root, { logs, summary });
+    }, 200);
+    document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { logs, summary }); };
+    document.getElementById('aud-page-size').onchange = (e) => {
+      auditPageSize = e.target.value === 'todos' ? 'todos' : Number(e.target.value);
+      renderGerenteAuditoria();
+    };
+  }
+
+  document.getElementById('aud-list').innerHTML = filtered.length ? filtered.map((l) => `
+      <div class="extrato-row" style="align-items:flex-start">
+        <div style="min-width:0;flex:1 1 220px">
+          <div class="name" style="color:${auditActionBadgeColor(l.action)}">${escapeHtml(auditActionLabel(l.action))}</div>
+          <div class="meta">${escapeHtml(l.actor_name || 'Anônimo')}${l.actor_role ? ' · ' + (l.actor_role === 'gerente' ? 'Administrador' : 'Cliente') : ''} · ${formatDateTime(l.created_at)}</div>
+        </div>
+        <div style="min-width:0;flex:2 1 260px">
+          <div class="text-sm text-soft">${escapeHtml(l.description)}</div>
+        </div>
+      </div>
+    `).join('') : `<div class="empty-state">${Icons.audit}<p>Nenhum evento encontrado com esse filtro.</p></div>`;
 }
 
 registerRoute('gerente/auditoria', { role: 'gerente', screenId: 'gerente-auditoria', title: 'Auditoria', platformOwnerOnly: true, render: renderGerenteAuditoria });
