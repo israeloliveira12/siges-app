@@ -292,6 +292,22 @@ button { cursor: pointer; }
   padding: 16px 18px;
 }
 
+/* Card "hero" (Lucro líquido do Dashboard, Score do cliente/gerente, Início
+   da Plataforma) — fundo fixo --hero-dark, não muda entre os temas. Em modo
+   escuro isso quase some contra --bg (#05141F sobre #0F161F, luminância quase
+   igual) porque os 5 lugares que usam este card zeram a borda inline
+   (border:none) — nenhum tinha a borda sutil de 1px que todo outro card tem.
+   Branco translúcido em vez de var(--line) de propósito: --line muda de cor
+   entre os temas e não foi pensado para um fundo mais escuro que o --panel
+   escuro; rgba(255,255,255,.10) sobre --bg escuro (#0F161F) resulta bem perto
+   do próprio var(--line) escuro (#263340) — mesma sutileza dos demais cards,
+   calibrada certa pro chão mais escuro do hero. Em modo claro o mesmo tom
+   sobre --bg claro (#F4F6F7) fica virtualmente invisível — sem efeito onde a
+   navy já contrasta muito com o fundo claro, então nada muda lá. */
+.card-hero {
+  border: 1px solid rgba(255, 255, 255, .10);
+}
+
 /* min-width:0 nos filhos diretos — sem isso, um item de grid nunca encolhe
    abaixo da largura MÍNIMA do próprio conteúdo (nome de cliente comprido
    etc.), mesmo quando o conteúdo interno já usa overflow:hidden pra cortar

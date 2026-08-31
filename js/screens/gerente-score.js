@@ -68,7 +68,7 @@ function paintGerenteScore(root, { rows, paidInstallments }) {
       <button class="btn btn-outline btn-sm" id="recalc-all">${Icons.renew} Recalcular todos</button>
     </div>
 
-    <div class="card mt-14 score-hero" style="background:var(--hero-dark);color:#fff;border:none;border-radius:20px">
+    <div class="card mt-14 score-hero card-hero" style="background:var(--hero-dark);color:#fff;border-radius:20px">
       <div class="flex" style="flex-wrap:wrap;gap:28px;align-items:center">
         <div style="min-width:170px">
           <div class="text-sm" style="opacity:.6">Score médio da carteira</div>

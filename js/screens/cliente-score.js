@@ -28,7 +28,7 @@ async function renderClienteScore() {
   const pct = (n, d) => d ? Math.round((n / d) * 100) : 0;
 
   root.innerHTML = `
-    <div class="card" style="background:var(--hero-dark);color:#fff;border:none;border-radius:20px">
+    <div class="card card-hero" style="background:var(--hero-dark);color:#fff;border-radius:20px">
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Seu score de crédito</div>
       <div class="mono" style="font-size:38px;font-weight:800;margin-top:6px;letter-spacing:-0.01em">${client ? client.score : 50}</div>
       <div class="mt-8">${scoreTierBadge(client ? client.score_tier : 'Bom')}</div>

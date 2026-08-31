@@ -288,7 +288,7 @@ async function renderGerenteDashboard() {
     </div>` : '';
 
   root.innerHTML = `
-    <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
+    <div class="card card-hero" style="background:var(--hero-dark);color:#fff;padding:22px 24px;border-radius:20px">
       <div class="flex justify-between items-start" style="gap:20px;flex-wrap:wrap">
         <div>
           <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Lucro líquido — mês (até hoje)</div>

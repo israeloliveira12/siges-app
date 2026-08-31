@@ -115,7 +115,7 @@ function paintPlataformaInicio(root, data) {
   const revenueBars = byPlan.filter((p) => p.mrr_contribution > 0).map((p, i) => ({ label: p.plan_name, value: p.mrr_contribution, color: planColors[i % planColors.length] }));
 
   root.innerHTML = `
-    <div class="card" style="background:var(--hero-dark);color:#fff;border:none;padding:22px 24px;border-radius:20px">
+    <div class="card card-hero" style="background:var(--hero-dark);color:#fff;padding:22px 24px;border-radius:20px">
       <div style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.8">Receita mensal recorrente (MRR)</div>
       <div style="font-size:38px;font-weight:800;margin-top:6px;letter-spacing:-0.01em;font-variant-numeric:proportional-nums">${formatMoney(s.mrr)}</div>
       <div class="flex gap-20 mt-14" style="flex-wrap:wrap">
