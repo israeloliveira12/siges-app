@@ -211,7 +211,27 @@ async function renderGerenteContratoDetalhe(params) {
           <div class="text-sm text-soft">CPF ${escapeHtml(p.cpf || '—')} · ${escapeHtml(p.phone || '')} · Contrato firmado em ${formatDate(contract.contract_date)} · ${contract.installments_count}x ${dueTypeLabel(contract.due_type, contract.custom_interval_days)}</div>
         </div>
         <div class="flex items-center gap-8" style="flex-wrap:wrap">
-          ${statusBadge(contract.status, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[contract.status])}
+          ${(() => {
+            // O status do contrato é derivado das parcelas/ciclos e vive
+            // gravado em loan_contracts.status. Aqui ele é reconferido contra
+            // o estado efetivo das parcelas já carregadas nesta tela, pela
+            // mesma razão que effectiveInstallmentStatus() existe: a coluna
+            // pode estar defasada (o cron roda 1x/dia) e, até a migration_050,
+            // reagendar uma parcela nem sequer chamava recompute_contract_
+            // status() — o cabeçalho ficava "Atrasado" com todas as parcelas
+            // pendentes, exatamente a inconsistência que o usuário reportou.
+            // Só reavalia entre em_aberto/atrasado; 'quitado' e 'perda' são
+            // terminais e continuam vindo do banco.
+            let st = contract.status;
+            if (st === 'em_aberto' || st === 'atrasado') {
+              const abertos = [
+                ...(installments || []).map((i) => effectiveInstallmentStatus(i.status, i.due_date)),
+                ...(cycles || []).map((c) => effectiveInstallmentStatus(c.status, c.new_due_date)),
+              ];
+              st = abertos.includes('atrasada') ? 'atrasado' : 'em_aberto';
+            }
+            return statusBadge(st, { em_aberto: 'Em aberto', atrasado: 'Atrasado', quitado: 'Quitado', perda: 'Perda' }[st]);
+          })()}
           <button class="btn btn-outline btn-sm" id="print-extrato-btn" ${planAllows('allow_extrato_pdf') ? '' : 'disabled title="Não disponível no plano atual"'}>${Icons.printer} Extrato</button>
           <button class="btn btn-outline btn-sm" id="edit-contract-btn">${Icons.edit} Editar contrato</button>
           <button class="btn btn-outline btn-sm" id="delete-contract-btn" style="color:var(--bad)">${Icons.trash} Excluir contrato</button>

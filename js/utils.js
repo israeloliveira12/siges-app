@@ -30,9 +30,19 @@ function clientGroupOptionsHtml(selected, includeBlank) {
 // O cron que marca status='atrasada' roda 1x/dia — uma parcela vencida há
 // poucas horas ainda pode estar 'pendente' no banco. Isso calcula o status
 // "de verdade" no momento, sem esperar o próximo ciclo do cron.
+//
+// Bug corrigido em 2026-09-01 (reportado pelo usuário): esta função só sabia
+// PROMOVER pendente -> atrasada. Faltava o caminho de volta, então uma parcela
+// reagendada para o futuro continuava exibindo a pílula "Atrasada" — o estado
+// gravado no banco estava errado (ver migration_050) e a tela não tinha como
+// compensar. Agora o atraso é decidido pela DATA nos dois sentidos, que é o
+// que "atrasada" significa: vencida e não paga.
+//
+// Só mexe em pendente/atrasada. 'paga', 'renovada', 'cancelada' e 'perda' são
+// estados terminais e nunca podem ser inferidos a partir da data.
 function effectiveInstallmentStatus(status, dueDate) {
-  if (status === 'pendente' && dueDate < todayISO()) return 'atrasada';
-  return status;
+  if (status !== 'pendente' && status !== 'atrasada') return status;
+  return dueDate < todayISO() ? 'atrasada' : 'pendente';
 }
 
 function formatMoney(value) {
