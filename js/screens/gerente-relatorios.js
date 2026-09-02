@@ -154,7 +154,12 @@ function paintLucroAnalitico(totals, series, bucket) {
     </div>
     <div class="card mt-14">
       <h3 class="flex items-center gap-8">Lucro por período <span class="help-dot" title="Juros recebidos − taxa de saída dos contratos − taxas de entrada dos pagamentos − capital perdido">?</span></h3>
-      <div class="mt-8">${barChartSVG(chartSeries, { color: CHART_COLORS.accent, caption: 'Lucro líquido por período', emptyMessage: 'Sem movimento neste período.', ...chartSize(600, 200, 320, 200) })}</div>
+      <!-- Ocupa a largura cheia do card (o card interno chega a ~1200px numa
+           .main de 1280): antes o viewBox era 600 com max-width de 600px, o
+           que deixava o gráfico ilhado no meio de um card duas vezes maior.
+           O degrau de 820 cobre notebook/tablet, onde 1180 seria espremido
+           a ~70% e encolheria os rótulos junto. -->
+      <div class="mt-8">${barChartSVG(chartSeries, { color: CHART_COLORS.accent, caption: 'Lucro líquido por período', emptyMessage: 'Sem movimento neste período.', ...chartSize(1180, 260, 320, 200, 820, 230) })}</div>
     </div>
     <div class="card mt-14" style="padding:0">
       <table class="data-table table-scroll">

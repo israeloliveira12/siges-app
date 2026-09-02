@@ -13,15 +13,23 @@ const CHART_COLORS = {
   bad: 'var(--chart-bad)', good: 'var(--chart-good)', purple: 'var(--chart-purple)', line: 'var(--chart-line)',
 };
 
-// SVG usa viewBox fixo + width:100% — isso ESCALA o texto junto quando o
-// container encolhe. Um viewBox pensado pra desktop (ex: 1180) fica com
-// rótulo ilegível quando o CSS aperta ele num card de celular de ~320px.
-// A correção é usar um viewBox MENOR em telas pequenas (perto de 1:1 com o
-// container real), não só deixar o CSS encolher o mesmo desenho. Chame isso
-// antes de montar `opts` de qualquer chart que apareça num card full-width.
-function chartSize(desktopW, desktopH, mobileW, mobileH) {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
-  return isMobile ? { width: mobileW, height: mobileH } : { width: desktopW, height: desktopH };
+// SVG usa viewBox fixo + width:100% — isso ESCALA o desenho inteiro (texto
+// incluído) pela razão entre a largura física e a do viewBox. Um viewBox
+// pensado pra desktop (ex: 1180) fica com rótulo ilegível quando o CSS aperta
+// ele num card de celular de ~320px; a correção é usar um viewBox MENOR em
+// telas pequenas (perto de 1:1 com o container real), não só deixar o CSS
+// encolher o mesmo desenho. Chame isso antes de montar `opts` de qualquer
+// chart que apareça num card full-width.
+//
+// O degrau do meio (tablet) existe pelo mesmo motivo: num notebook de ~900px
+// o viewBox de 1180 renderiza a ~70% e encolhe os rótulos junto. `tabletW/
+// tabletH` são opcionais — sem eles o comportamento é o de antes (só dois
+// degraus), então nenhum chamador existente muda.
+function chartSize(desktopW, desktopH, mobileW, mobileH, tabletW, tabletH) {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+  if (vw <= 640) return { width: mobileW, height: mobileH };
+  if (tabletW && vw <= 1024) return { width: tabletW, height: tabletH || desktopH };
+  return { width: desktopW, height: desktopH };
 }
 
 // Série vazia quebrava sparklineSVG/areaChartSVG com TypeError (leitura de
@@ -325,8 +333,26 @@ function barChartSVG(series, opts = {}) {
   const range = max - min || 1;
   const y = (v) => h - pad - ((v - min) / range) * (h - pad * 2);
   const y0 = y(0); // linha de base (onde valor = 0)
-  const barW = (w - pad * 2) / series.length * 0.6;
   const gap = (w - pad * 2) / series.length;
+  // Teto de largura da barra. Sem ele, poucas barras num gráfico largo viram
+  // lajes: 6 barras num viewBox de 1180 dariam 112px cada, e 2 barras dariam
+  // 337px — o retângulo deixa de ler como "barra" e vira um bloco. Com o teto,
+  // séries densas (30 dias) continuam exatamente como antes (22px, bem abaixo
+  // do limite) e séries curtas ficam proporcionais, centradas no próprio
+  // espaço (o cálculo de `bx` logo abaixo já centraliza a barra no slot).
+  const barW = Math.min(gap * 0.6, opts.maxBarWidth || 72);
+
+  // Tipografia proporcional ao viewBox. O SVG usa viewBox fixo + width:100%,
+  // então TUDO (inclusive o texto) é multiplicado por (largura física / w)
+  // na hora de desenhar. Um gráfico largo dentro do mesmo card renderiza numa
+  // escala menor e encolhe os rótulos junto: ao passar o Lucro Analítico de
+  // viewBox 600 para 1180, a fonte caiu de 9,5px para 7,7px reais na tela.
+  //
+  // A âncora é a ALTURA, não a largura: `h` acompanha o tamanho físico do
+  // gráfico (um gráfico mais largo neste sistema também é mais alto), e o
+  // padrão h=200 mantém fator 1 — ou seja, todo gráfico já existente fica
+  // pixel a pixel idêntico ao que era.
+  const fs = (base) => +(base * (h / 200)).toFixed(1);
   // Com muitas barras (ex: 30 dias), mostrar rótulo em toda barra vira uma
   // faixa ilegível de texto sobreposto — mesmo padrão de espaçamento do
   // lineChartSVG: só mostra 1 a cada N pontos quando a série é longa. Usa o
@@ -345,14 +371,14 @@ function barChartSVG(series, opts = {}) {
       <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(bh, 1).toFixed(1)}" rx="3" fill="${color}">
         <title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title>
       </rect>
-      ${shouldShowLabel(i) ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${labelY.toFixed(1)}" font-size="9.5" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
+      ${shouldShowLabel(i) ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${labelY.toFixed(1)}" font-size="${fs(9.5)}" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
     `;
   }).join('');
 
   const labels = series.map((p, i) => {
     if (!shouldShowLabel(i)) return '';
     const bx = pad + i * gap + gap / 2;
-    return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
+    return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="${fs(10)}" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
   }).join('');
 
   return `<div class="chart-wrap">
