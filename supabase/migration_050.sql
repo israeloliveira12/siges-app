@@ -50,15 +50,41 @@ update renewal_cycles
 
 -- Ressincroniza o status dos contratos afetados (um contrato só é 'atrasado'
 -- se ainda tiver alguma parcela/ciclo de fato vencido).
-do $$
-declare v_contract_id uuid;
-begin
-  for v_contract_id in
-    select distinct id from loan_contracts where status in ('em_aberto', 'atrasado')
-  loop
-    perform recompute_contract_status(v_contract_id);
-  end loop;
-end $$;
+--
+-- A lógica abaixo é a MESMA de recompute_contract_status(), mas escrita
+-- direto como UPDATE em vez de chamar a função. Motivo: aquela função exige
+-- `is_gerente() or auth.role() = 'service_role'`, e no SQL Editor do Supabase
+-- não existe JWT na sessão — auth.uid() e auth.role() voltam nulos, então a
+-- chamada morre com FORBIDDEN e derruba a migration inteira (a primeira
+-- versão desta migration fazia exatamente isso e falhou).
+--
+-- Se mudar a regra de status do contrato em recompute_contract_status(),
+-- lembre que ela está duplicada aqui — mas só para esta correção pontual de
+-- dados; o caminho normal do sistema continua passando pela função.
+with estado as (
+  select
+    lc.id,
+    exists (select 1 from installments i   where i.contract_id  = lc.id and i.status  = 'atrasada')
+      or exists (select 1 from renewal_cycles rc where rc.contract_id = lc.id and rc.status = 'atrasada') as tem_atrasado,
+    exists (select 1 from installments i   where i.contract_id  = lc.id and i.status  in ('pendente', 'atrasada'))
+      or exists (select 1 from renewal_cycles rc where rc.contract_id = lc.id and rc.status in ('pendente', 'atrasada')) as tem_aberto,
+    exists (select 1 from installments i   where i.contract_id  = lc.id and i.status  = 'perda')
+      or exists (select 1 from renewal_cycles rc where rc.contract_id = lc.id and rc.status = 'perda') as tem_perda
+  from loan_contracts lc
+  where lc.status in ('em_aberto', 'atrasado')
+)
+update loan_contracts alvo
+   set status = novo.st, updated_at = now()
+  from (
+    select id,
+           (case
+              when tem_aberto then (case when tem_atrasado then 'atrasado' else 'em_aberto' end)
+              else (case when tem_perda then 'perda' else 'quitado' end)
+            end)::contract_status as st
+      from estado
+  ) novo
+ where alvo.id = novo.id
+   and alvo.status <> novo.st;
 
 
 -- ============================================================================
