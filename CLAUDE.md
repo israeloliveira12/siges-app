@@ -1184,6 +1184,56 @@ composição de texto preditivo, que era parte do que o usuário sentia.
 `gerente-contrato-novo.js` (busca de cliente no wizard) já fazia certo desde
 sempre — serviu de referência.
 
+## Adiar parcela não tirava o "Atrasada" (2026-09-01, `migration_050`)
+
+Reportado pelo usuário: parcela vencida há 2 dias, reagendada para daqui a 5
+dias, continuava com a pílula "Atrasada" — e o contrato inteiro seguia
+"Atrasado". Eram **três defeitos encadeados**:
+
+1. `update_installment_schedule()` gravava `due_date`, valores e
+   `principal_lost` mas **nunca tocava em `status`**. A parcela seguia
+   `atrasada` com vencimento no futuro.
+2. A função também nunca chamava `recompute_contract_status()`, então
+   `loan_contracts.status` ficava travado em `atrasado` sem nada vencido.
+3. `refresh_overdue_status()` (cron diário) só fazia `pendente -> atrasada`.
+   **Não existia a transição inversa** — ou seja, o cron nunca consertaria a
+   linha sozinho; ela ficaria `atrasada` até ser paga, contaminando a régua de
+   cobrança e os relatórios.
+
+O caso equivalente do CICLO já estava correto (`update_cycle_schedule`,
+migration_049). Esta rodada levou a mesma regra para a parcela, corrigiu as
+linhas já gravadas erradas e adicionou a transição inversa no cron.
+
+**Regra geral que saiu disso**: status derivado de data (`atrasada`) precisa
+ser recalculado nos DOIS sentidos sempre que a data muda. Qualquer caminho
+novo que altere `due_date`/`new_due_date` tem que reavaliar o status e chamar
+`recompute_contract_status()`.
+
+No frontend, `effectiveInstallmentStatus()` passou a decidir o atraso pela
+data nos dois sentidos (antes só promovia). Estados terminais (`paga`,
+`renovada`, `cancelada`, `perda`) nunca são inferidos por data. A pílula do
+cabeçalho do contrato também reconfere o status contra as parcelas carregadas
+na tela, pelo mesmo motivo — a coluna do banco pode estar defasada.
+
+### Armadilha: função protegida não roda no SQL Editor do Supabase
+
+A primeira versão desta migration falhou com `P0001: FORBIDDEN` porque um
+bloco `do $$ ... $$` chamava `recompute_contract_status()`, que exige
+`is_gerente() or auth.role() = 'service_role'`.
+
+**No SQL Editor do Supabase não existe JWT na sessão** — `auth.uid()` e
+`auth.role()` voltam nulos, então toda função `security definer` com guarda de
+papel recusa a chamada. Como o SQL Editor roda o script inteiro numa
+transação, o erro reverteu tudo (nada tinha sido aplicado).
+
+**Ao escrever migration nova**: nunca CHAME funções com guarda de papel
+(`recompute_contract_status`, `recalculate_client_score`, `refresh_overdue_status`,
+`log_audit_event`, qualquer uma que use `is_gerente()`/`current_tenant_id()`)
+no corpo executável da migration. Defini-las com `create or replace function`
+é seguro — o corpo só roda depois, já com sessão de usuário. Se precisar do
+efeito durante a migration, **inline a lógica como SQL direto**, como o bloco 1
+de `migration_050.sql` faz para o status do contrato.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.
