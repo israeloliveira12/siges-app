@@ -125,14 +125,26 @@ function paintClienteIndicacoes(root, allContracts, installments, cycles, namesB
             // previous_cycle_id), não o do próprio ciclo. O último elo
             // (pendente/atrasada/paga) vira só "1" — valor cheio como sempre.
             const nextCycle = st === 'renovada' ? cyc.find((other) => other.previous_cycle_id === r.id) : null;
-            const cycleValue = nextCycle ? Number(nextCycle.interest_only_amount) : cycleRemaining(r);
+            // Mesma apresentação da linha de parcela: o número grande é o
+            // valor CHEIO e a sub-linha explica o parcial. `cycleResta` é o
+            // que ainda falta — é ele que alimenta o cálculo de atraso, nunca
+            // o valor cheio, senão o encargo seria cobrado sobre dinheiro que
+            // o cliente já pagou.
+            const cycleValue = nextCycle ? Number(nextCycle.interest_only_amount) : Number(r.full_debt_amount || 0);
+            const cycleResta = nextCycle ? cycleValue : cycleRemaining(r);
             const rowLabel = st === 'renovada' ? 'Renovação ' + (r.cycle_number + 1) : '1';
-            const cycleLate = st === 'atrasada' ? estimateLateCharge(cycleValue, r.new_due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
+            // migration_051: o ciclo agora aceita pagamento parcial, então o
+            // cliente precisa ver POR QUE o valor caiu — sem isto ele veria a
+            // dívida encolher sozinha, sem registro do que ele pagou. Mesmo
+            // texto que a linha de parcela normal já usa logo acima.
+            const cycleJaPago = Number(r.principal_paid_partial || 0) + Number(r.interest_paid_partial || 0);
+            const cycleIsPartial = !nextCycle && st !== 'paga' && cycleJaPago > 0;
+            const cycleLate = st === 'atrasada' ? estimateLateCharge(cycleResta, r.new_due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
             return `
             <tr>
               <td data-label="Parcela">${rowLabel}</td>
               <td data-label="Vencimento">${formatDate(r.new_due_date)}</td>
-              <td data-label="Valor"><div><div class="mono">${formatMoney(cycleValue)}</div>${cycleLate && (cycleLate.jurosAtraso > 0 || cycleLate.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${cycleLate.diasAtraso}d): ${formatMoney(cycleLate.total)}</div>` : ''}</div></td>
+              <td data-label="Valor"><div><div class="mono">${formatMoney(cycleValue)}</div>${cycleIsPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(cycleJaPago)} · resta ${formatMoney(cycleResta)}</div>` : ''}${cycleLate && (cycleLate.jurosAtraso > 0 || cycleLate.multaAtraso > 0) ? `<div class="text-sm" style="color:var(--bad)">Atualizado com atraso (${cycleLate.diasAtraso}d): ${formatMoney(cycleLate.total)}</div>` : ''}</div></td>
               <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', perda: 'Perda' }[st])}</td>
             </tr>
           `; }).join('')}

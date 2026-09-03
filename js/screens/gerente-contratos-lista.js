@@ -273,16 +273,27 @@ async function renderGerenteContratoDetalhe(params) {
             const currentCycle = i.status === 'renovada' ? (cycles || []).find((c) => c.status !== 'renovada') : null;
             if (currentCycle) {
               const st = effectiveInstallmentStatus(currentCycle.status, currentCycle.new_due_date);
-              const capital = Number(contract.principal_amount);
-              const total = cycleRemaining(currentCycle);
+              // migration_051: mesma apresentação da linha de PARCELA logo
+              // abaixo — as colunas mostram os valores CONTRATADOS (cheios) e
+              // a sub-linha do Total explica quanto já entrou e quanto resta.
+              // Misturar as bases (total remanescente com capital cheio) fazia
+              // os juros aparecerem NEGATIVOS assim que houvesse parcial.
+              const total = Number(currentCycle.full_debt_amount || 0);
+              const capital = Math.min(Number(contract.principal_amount || 0), total);
               const juros = total - capital;
+              const cycleJaPago = Number(currentCycle.principal_paid_partial || 0) + Number(currentCycle.interest_paid_partial || 0);
+              const cycleResta = cycleRemaining(currentCycle);
+              const cycleIsPartial = st !== 'paga' && cycleJaPago > 0;
+              // O botão de perda leva o capital AINDA não recuperado — é isso
+              // que mark_cycle_loss() abate do lucro, não o capital cheio.
+              const capitalEmRisco = cycleRemainingParts(currentCycle, contract).capital;
               return `
               <tr>
                 <td data-label="Nº">${i.sequence_number}</td>
                 <td data-label="Vencimento">${formatDate(currentCycle.new_due_date)}</td>
                 <td data-label="Capital" class="mono">${formatMoney(capital)}</td>
                 <td data-label="Juros" class="mono">${formatMoney(juros)}</td>
-                <td data-label="Total"><div><div class="mono">${formatMoney(total)}</div>${st === 'perda' ? `<div class="text-sm" style="color:var(--bad)">Perda reconhecida: ${formatMoney(currentCycle.principal_lost)}</div>` : ''}</div></td>
+                <td data-label="Total"><div><div class="mono">${formatMoney(total)}</div>${cycleIsPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(cycleJaPago)} · resta ${formatMoney(cycleResta)}</div>` : ''}${st === 'perda' ? `<div class="text-sm" style="color:var(--bad)">Perda reconhecida: ${formatMoney(currentCycle.principal_lost)}</div>` : ''}</div></td>
                 <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', perda: 'Perda' }[st])}</td>
                 <td data-label="">
                   <div class="flex gap-8">
@@ -291,7 +302,7 @@ async function renderGerenteContratoDetalhe(params) {
                     ` : ''}
                     <button class="icon-btn edit-cycle-btn" data-id="${currentCycle.id}" title="Editar/adiar renovação" aria-label="Editar ou adiar a renovação ${currentCycle.cycle_number}">${Icons.edit}</button>
                     ${(currentCycle.status === 'pendente' || currentCycle.status === 'atrasada' || currentCycle.status === 'perda') ? `
-                      <button class="icon-btn cycle-loss-btn" data-status="${currentCycle.status}" data-id="${currentCycle.id}" data-amount="${capital}" data-label="Renovação ${currentCycle.cycle_number}" title="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'}" aria-label="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'} da renovação ${currentCycle.cycle_number}" style="color:var(--bad)">${Icons.alertTriangle}</button>
+                      <button class="icon-btn cycle-loss-btn" data-status="${currentCycle.status}" data-id="${currentCycle.id}" data-amount="${capitalEmRisco}" data-label="Renovação ${currentCycle.cycle_number}" title="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'}" aria-label="${currentCycle.status === 'perda' ? 'Reverter perda' : 'Marcar como perda'} da renovação ${currentCycle.cycle_number}" style="color:var(--bad)">${Icons.alertTriangle}</button>
                     ` : ''}
                   </div>
                 </td>
