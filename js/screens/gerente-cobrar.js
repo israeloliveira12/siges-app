@@ -46,7 +46,7 @@ function buildWhatsappUrl(item) {
   const canRenew = contract.allows_renewal && Number(contract.installments_count) === 1;
   const interestPortion = item.type === 'installment'
     ? (Number((item.raw || {}).interest_share || 0) - Number((item.raw || {}).interest_paid_partial || 0))
-    : (Number((item.raw || {}).full_debt_amount || 0) - Number(contract.principal_amount || 0));
+    : cycleRemainingParts(item.raw || {}, contract).juros;
   const valorRenovacao = interestPortion + encargoAtraso;
 
   const atencao = diasAtraso > 0
@@ -123,7 +123,7 @@ function paintCobrar(root, state) {
       status: i.status, contract: i.loan_contracts, seq: i.sequence_number, raw: i,
     })),
     ...(dueCycles || []).map((c) => ({
-      type: 'renewal_cycle', id: c.id, due_date: c.new_due_date, amount: Number(c.full_debt_amount), status: c.status,
+      type: 'renewal_cycle', id: c.id, due_date: c.new_due_date, amount: cycleRemaining(c) || Number(c.full_debt_amount), status: c.status,
       contract: c.loan_contracts, seq: 'Renovação ' + c.cycle_number, raw: c,
     })),
   ];

@@ -123,7 +123,9 @@ function paintClienteEmprestimos(root, allContracts, installments, cycles) {
             // O último elo (pendente/atrasada/paga) vira só "1" — é o que
             // hoje representa "a parcela" de fato — valor cheio como sempre.
             const nextCycle = st === 'renovada' ? cyc.find((other) => other.previous_cycle_id === r.id) : null;
-            const cycleValue = nextCycle ? nextCycle.interest_only_amount : r.full_debt_amount;
+            // migration_051: no elo em aberto mostra o SALDO (desconta parcial
+            // já recebido); elo renovado continua mostrando o valor do evento.
+            const cycleValue = nextCycle ? Number(nextCycle.interest_only_amount) : cycleRemaining(r);
             const rowLabel = st === 'renovada' ? 'Renovação ' + (r.cycle_number + 1) : '1';
             const cycleLate = st === 'atrasada' ? estimateLateCharge(cycleValue, r.new_due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
             return `

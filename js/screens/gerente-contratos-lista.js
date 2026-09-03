@@ -70,10 +70,10 @@ async function renderGerenteContratosLista() {
       const remaining = Number(i.amount_due) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0);
       outstandingByContract[i.contract_id] = (outstandingByContract[i.contract_id] || 0) + remaining;
     });
-    const { data: openCycles } = await supa.from('renewal_cycles').select('contract_id, full_debt_amount, cycle_number').in('contract_id', contractIds).in('status', ['pendente', 'atrasada']);
+    const { data: openCycles } = await supa.from('renewal_cycles').select('contract_id, full_debt_amount, principal_paid_partial, interest_paid_partial, cycle_number').in('contract_id', contractIds).in('status', ['pendente', 'atrasada']);
     (openCycles || []).forEach((c) => {
       if (!outstandingByContract['cycle_' + c.contract_id] || c.cycle_number > outstandingByContract['cycle_' + c.contract_id].n) {
-        outstandingByContract['cycle_' + c.contract_id] = { n: c.cycle_number, v: Number(c.full_debt_amount) };
+        outstandingByContract['cycle_' + c.contract_id] = { n: c.cycle_number, v: cycleRemaining(c) };
       }
     });
   }
@@ -274,7 +274,7 @@ async function renderGerenteContratoDetalhe(params) {
             if (currentCycle) {
               const st = effectiveInstallmentStatus(currentCycle.status, currentCycle.new_due_date);
               const capital = Number(contract.principal_amount);
-              const total = Number(currentCycle.full_debt_amount);
+              const total = cycleRemaining(currentCycle);
               const juros = total - capital;
               return `
               <tr>
@@ -633,8 +633,13 @@ function openEditInstallmentModal(installment, contract, onDone) {
 function openEditCycleModal(cycle, contract, onDone) {
   if (!cycle) { showToast('Não foi possível carregar esta renovação.'); return; }
 
-  const capital = Number(contract.principal_amount || 0);
+  // O modal edita o valor BRUTO da dívida do ciclo, então aqui é
+  // full_debt_amount mesmo, não o remanescente. Mas se já houve pagamento
+  // parcial o admin precisa ver isso: sem o aviso, ele editaria o total sem
+  // saber que parte já entrou (e o banco recusaria com AMOUNT_BELOW_ALREADY_PAID).
+  const capital = Math.min(Number(contract.principal_amount || 0), Number(cycle.full_debt_amount || 0));
   const jurosAtual = Number(cycle.full_debt_amount || 0) - capital;
+  const jaPago = Number(cycle.principal_paid_partial || 0) + Number(cycle.interest_paid_partial || 0);
   const isTerminal = ['paga', 'renovada', 'perda'].includes(cycle.status);
 
   const overlay = document.createElement('div');
@@ -660,6 +665,7 @@ function openEditCycleModal(cycle, contract, onDone) {
           Composição atual: <span class="mono">${formatMoney(capital)}</span> de capital
           + <span class="mono">${formatMoney(jurosAtual)}</span> de juros acumulados.
         </div>
+        ${jaPago > 0 ? `<p class="text-sm mt-8" style="color:var(--warn)">Já foi recebido <strong>${formatMoney(jaPago)}</strong> desta renovação em pagamento(s) parcial(is) — restam ${formatMoney(cycleRemaining(cycle))}. O novo total não pode ficar abaixo do que já entrou.</p>` : ''}
         <div id="ec-diff" class="mt-8"></div>
         ${isTerminal ? `
           <p class="text-sm mt-8" style="color:var(--warn)">Esta renovação está como <strong>${{ paga: 'paga', renovada: 'renovada', perda: 'perda' }[cycle.status]}</strong> — a edição aqui é correção de registro histórico e não muda esse status nem o valor já contabilizado.</p>
@@ -740,6 +746,8 @@ function openEditCycleModal(cycle, contract, onDone) {
       const raw = error.message || '';
       const msg = isMissingRpcError(error)
         ? 'Falta aplicar a migration_049 no banco. Rode supabase/migration_049.sql no SQL Editor do Supabase.'
+        : raw.includes('AMOUNT_BELOW_ALREADY_PAID')
+        ? `O valor total não pode ficar abaixo do que já foi recebido nesta renovação (${formatMoney(jaPago)}).`
         : raw.includes('AMOUNT_BELOW_PRINCIPAL')
         ? `O valor total não pode ficar abaixo do capital do contrato (${formatMoney(capital)}) — senão a quitação entraria como prejuízo nos relatórios.`
         : raw.includes('INVALID_AMOUNT')

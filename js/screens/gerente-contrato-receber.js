@@ -22,12 +22,14 @@ async function openReceberModal(source, onDone) {
   const contract = source.contract;
   const isInstallment = source.sourceType === 'installment';
 
-  // Para parcelas, considera o que já foi pago parcialmente antes.
-  const alreadyPaid = isInstallment ? (Number(item.principal_paid_partial || 0) + Number(item.interest_paid_partial || 0)) : 0;
-  const totalDue = isInstallment ? (Number(item.amount_due) - alreadyPaid) : Number(item.full_debt_amount);
+  // Quanto já foi recebido em parcial. Desde a migration_051 o CICLO também
+  // tem esse controle (antes só a parcela tinha, e por isso o ciclo só aceitava
+  // quitação do valor cheio).
+  const alreadyPaid = Number(item.principal_paid_partial || 0) + Number(item.interest_paid_partial || 0);
+  const totalDue = isInstallment ? (Number(item.amount_due) - alreadyPaid) : cycleRemaining(item);
   const interestPortion = isInstallment
     ? (Number(item.interest_share) - Number(item.interest_paid_partial || 0))
-    : (Number(item.full_debt_amount) - Number(contract.principal_amount));
+    : cycleRemainingParts(item, contract).juros;
 
   // Renovação só é permitida em contratos de parcela única (senão a
   // renovação de UMA parcela deixaria as outras parcelas do contrato
@@ -92,7 +94,7 @@ async function openReceberModal(source, onDone) {
             <div class="stat-card"><div class="label">Vencimento</div><div class="value" style="font-size:15px">${formatDate(dueDateStr)}</div></div>
             <div class="stat-card"><div class="label">${alreadyPaid > 0 ? 'Restante em aberto' : 'Total (sem encargo de atraso)'}</div><div class="value mono">${formatMoney(totalDue)}</div></div>
           </div>
-          ${alreadyPaid > 0 ? `<p class="text-sm text-soft mt-8">Já foi recebido ${formatMoney(alreadyPaid)} desta parcela em pagamento(s) parcial(is) anterior(es).</p>` : ''}
+          ${alreadyPaid > 0 ? `<p class="text-sm text-soft mt-8">Já foi recebido ${formatMoney(alreadyPaid)} ${isInstallment ? 'desta parcela' : 'desta renovação'} em pagamento(s) parcial(is) anterior(es).</p>` : ''}
           ${late.dias > 0 && !isRetroativo ? `<p class="text-sm mt-8" style="color:var(--bad)">Em atraso há ${late.dias} dia(s).</p>` : ''}
           ${exitFeeAmount > 0 ? `<p class="text-sm text-soft mt-8">Taxa de saída deste contrato: ${formatMoney(exitFeeAmount)} (já cobrada na criação do contrato — não entra na conta deste recebimento).</p>` : ''}
 
@@ -217,7 +219,7 @@ async function openReceberModal(source, onDone) {
         document.getElementById('r-net-profit').textContent = formatMoney(grossProfit - fee);
         const hint = document.getElementById('r-partial-hint');
         if (amount > 0 && amount < totalDue - 0.005) {
-          hint.textContent = `Pagamento parcial — R$ ${formatNumber(totalDue - amount, 2)} continuam em aberto para esta parcela.`;
+          hint.textContent = `Pagamento parcial — R$ ${formatNumber(totalDue - amount, 2)} continuam em aberto ${isInstallment ? 'para esta parcela' : 'nesta renovação'}.`;
         } else {
           hint.textContent = '';
         }
@@ -353,13 +355,6 @@ async function openReceberModal(source, onDone) {
           : 0;
         if (!amount || amount <= 0) throw new Error('Informe um valor válido.');
         if (amount > totalDue + lateChargeAmount + 0.01) throw new Error(`O valor não pode ser maior que o restante desta parcela mais o encargo de atraso (${formatMoney(totalDue + lateChargeAmount)}).`);
-        // Ciclo de renovação não tem controle de pagamento parcial (diferente
-        // de parcela normal) — só aceita quitação do valor cheio. Se o
-        // cliente só puder pagar uma parte, o caminho correto é "Renovar".
-        if (!isInstallment && amount < totalDue + lateChargeAmount - 0.01) {
-          throw new Error(`Ciclos de renovação não têm controle de pagamento parcial — informe o valor cheio (${formatMoney(totalDue + lateChargeAmount)}) para quitar, ou use "Renovar" se o cliente só puder pagar uma parte agora.`);
-        }
-
         if (isInstallment) {
           const { error } = await supa.rpc('receive_payment', {
             p_installment_id: item.id, p_amount_received: amount,

@@ -168,7 +168,10 @@ function buildExtratoRows(installments, cycles) {
     } else {
       rows.push({
         label: '1', vencimento: c.new_due_date,
-        dataPgto: c.paid_at, valor: Number(c.full_debt_amount),
+        // Elo em aberto: saldo remanescente (migration_051). Já pago/perda:
+        // valor histórico do ciclo, que é o que o extrato deve registrar.
+        dataPgto: c.paid_at,
+        valor: ['pendente', 'atrasada'].includes(c.status) ? cycleRemaining(c) : Number(c.full_debt_amount),
         status: { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', perda: 'Perda' }[c.status] || c.status,
       });
     }

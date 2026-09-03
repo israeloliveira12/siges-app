@@ -125,7 +125,7 @@ function paintClienteIndicacoes(root, allContracts, installments, cycles, namesB
             // previous_cycle_id), não o do próprio ciclo. O último elo
             // (pendente/atrasada/paga) vira só "1" — valor cheio como sempre.
             const nextCycle = st === 'renovada' ? cyc.find((other) => other.previous_cycle_id === r.id) : null;
-            const cycleValue = nextCycle ? nextCycle.interest_only_amount : r.full_debt_amount;
+            const cycleValue = nextCycle ? Number(nextCycle.interest_only_amount) : cycleRemaining(r);
             const rowLabel = st === 'renovada' ? 'Renovação ' + (r.cycle_number + 1) : '1';
             const cycleLate = st === 'atrasada' ? estimateLateCharge(cycleValue, r.new_due_date, Number(c.late_interest_percent || 0), Number(c.late_fee_percent || 0)) : null;
             return `

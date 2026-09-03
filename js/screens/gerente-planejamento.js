@@ -39,7 +39,7 @@ async function renderGerentePlanejamento() {
     supa.from('system_settings').select('*').maybeSingle(),
     supa.from('planning_debts').select('*').order('month').order('created_at'),
     supa.from('installments').select('amount_due, principal_paid_partial, interest_paid_partial').in('status', ['pendente', 'atrasada']),
-    supa.from('renewal_cycles').select('full_debt_amount').in('status', ['pendente', 'atrasada']),
+    supa.from('renewal_cycles').select('full_debt_amount, principal_paid_partial, interest_paid_partial').in('status', ['pendente', 'atrasada']),
   ]);
   if (e1 || e2 || e3 || e4) {
     console.error('Erro ao carregar dados de planejamento:', e1 || e2 || e3 || e4);
@@ -68,7 +68,7 @@ function calcPlanejamento({ settings, debtsList, pendingInst, pendingCycles }) {
   // parcial já recebido) — sem isso, "Recebíveis em aberto" ficava inflado
   // pelo tanto que o cliente já pagou de cada parcela parcialmente quitada.
   const recebiveisInst = (pendingInst || []).reduce((s, i) => s + Number(i.amount_due || 0) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0), 0);
-  const recebiveis = recebiveisInst + sum(pendingCycles, 'full_debt_amount');
+  const recebiveis = recebiveisInst + (pendingCycles || []).reduce((s, c) => s + cycleRemaining(c), 0);
   const faturamentoBase = caixaAtual + recebiveis;
   const entryPct = Number((settings && settings.default_entry_fee_percent) || 0);
   const entryFixed = Number((settings && settings.default_entry_fee_fixed) || 0);

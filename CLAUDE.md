@@ -1234,6 +1234,51 @@ no corpo executável da migration. Defini-las com `create or replace function`
 efeito durante a migration, **inline a lógica como SQL direto**, como o bloco 1
 de `migration_050.sql` faz para o status do contrato.
 
+## Pagamento parcial em ciclo de renovação (2026-09-02, `migration_051`)
+
+Pedido do usuário: receber valor menor que o total num ciclo. A tela recusava
+com "Ciclos de renovação não têm controle de pagamento parcial".
+
+**A trava não era arbitrária.** `renewal_cycles` nunca teve as colunas
+`principal_paid_partial`/`interest_paid_partial` que `installments` tem, então
+um valor menor era aceito e o ciclo/contrato eram marcados como QUITADOS do
+mesmo jeito, inflando o lucro nos relatórios. A trava foi o remendo correto
+para aquele bug; esta migration resolve a causa.
+
+**Por que foi seguro fazer**: as colunas nascem com default 0, então todo ciclo
+existente calcula exatamente como antes (`full_debt_amount - 0 - 0`). Nada muda
+até alguém registrar um parcial de verdade.
+
+**Decomposição da dívida do ciclo** (usada no banco e no frontend):
+`capital = least(contrato.principal_amount, full_debt_amount)` e
+`juros = full_debt_amount - capital`. O `least` existe porque um ciclo pode
+nascer com dívida MENOR que o capital do contrato (ao renovar um ciclo já
+parcialmente pago) — sem ele os juros ficariam negativos e o pagamento entraria
+como prejuízo, silenciosamente.
+
+**Regra ao renovar um ciclo parcialmente pago**: rola só o SALDO. Não foi
+decisão nova — `renew_installment()` já fazia exatamente isso quando a origem
+era uma PARCELA (`greatest(0, share - paid_partial)`).
+
+### O que precisa acompanhar (a parte cara desta mudança)
+
+`full_debt_amount` deixou de ser o saldo real. **Toda tela que mostra "quanto o
+cliente ainda deve" tem que passar por `cycleRemaining()`** (js/utils.js) — e
+toda consulta a `renewal_cycles` que lista colunas explicitamente precisa
+incluir `principal_paid_partial, interest_paid_partial`, senão o helper recebe
+`undefined` e cai silenciosamente no valor cheio.
+
+Atualizados nesta rodada: modal de recebimento, Cobrar, lista e detalhe de
+contratos, Dashboard (projeção, a receber, lucro projetado, top clientes),
+Lançamentos, Planejamento, extrato PDF, telas do cliente e de indicações;
+no banco, `client_outstanding_balance`, `client_outstanding_principal`,
+`renew_installment`, `mark_cycle_loss`, `update_cycle_schedule`,
+`dashboard_totals` e `pending_due_notifications`.
+
+Onde `full_debt_amount` bruto CONTINUA correto de propósito: o modal de
+editar/adiar ciclo (edita o valor bruto) e as linhas já pagas/renovadas do
+extrato (valor histórico do evento).
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

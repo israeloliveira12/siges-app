@@ -41,7 +41,7 @@ function paintLancamentosFuturos(root, installments, cycles) {
       contractNumber: (i.loan_contracts || {}).contract_number, contractId: i.contract_id,
     })),
     ...cycles.map((c) => ({
-      tipo: 'renovacao', data: c.new_due_date, valor: Number(c.full_debt_amount),
+      tipo: 'renovacao', data: c.new_due_date, valor: cycleRemaining(c),
       descricao: ((c.loan_contracts || {}).clients || {}).profiles ? ((c.loan_contracts.clients.profiles.full_name) + ' · Renovação #' + c.cycle_number) : 'Renovação #' + c.cycle_number,
       contractNumber: (c.loan_contracts || {}).contract_number, contractId: c.contract_id,
     })),

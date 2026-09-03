@@ -61,7 +61,7 @@ async function renderGerenteDashboard() {
       .order('due_date', { ascending: true })
       .limit(ROW_LIMIT),
     supa.from('renewal_cycles')
-      .select('full_debt_amount, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))', { count: 'exact' })
+      .select('full_debt_amount, principal_paid_partial, interest_paid_partial, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))', { count: 'exact' })
       .in('status', ['pendente', 'atrasada'])
       .order('new_due_date', { ascending: true })
       .limit(ROW_LIMIT),
@@ -180,17 +180,18 @@ async function renderGerenteDashboard() {
   });
   (cyclesSoon || []).forEach((c) => {
     const key = String(c.new_due_date).slice(0, 7);
-    projectionByMonth[key] = (projectionByMonth[key] || 0) + Number(c.full_debt_amount || 0);
+    projectionByMonth[key] = (projectionByMonth[key] || 0) + cycleRemaining(c);
   });
   const projectionSeries = monthKeys.map((key) => {
     const [y, m] = key.split('-');
     return { label: mesesPt[Number(m) - 1] + '/' + y, value: projectionByMonth[key] || 0 };
   });
   // Total geral a receber — TODAS as parcelas/ciclos pendentes/atrasados do
-  // sistema, sem limite de data (não só os próximos 6 meses). Parcelas usam
-  // o saldo remanescente (não o valor cheio) — ciclos não têm controle de
-  // pagamento parcial, então full_debt_amount já é o saldo real ali.
-  const receberTotal = (dueSoon || []).reduce((s, i) => s + netAmountDue(i), 0) + sum(cyclesSoon, 'full_debt_amount');
+  // sistema, sem limite de data (não só os próximos 6 meses). Os dois usam o
+  // saldo remanescente, nunca o valor cheio: desde a migration_051 o CICLO
+  // também tem controle de pagamento parcial (antes só a parcela tinha, e
+  // full_debt_amount era o saldo real por construção).
+  const receberTotal = (dueSoon || []).reduce((s, i) => s + netAmountDue(i), 0) + (cyclesSoon || []).reduce((s, c) => s + cycleRemaining(c), 0);
 
   // Projeção de lucro — juros esperados (não o valor bruto da parcela/ciclo)
   // menos a taxa operacional de entrada estimada (% + fixo, config atual),
@@ -211,7 +212,7 @@ async function renderGerenteDashboard() {
   });
   (cyclesSoon || []).forEach((c) => {
     const key = String(c.new_due_date).slice(0, 7);
-    const lucro = Number(c.interest_only_amount || 0) - estEntryFee(Number(c.full_debt_amount || 0));
+    const lucro = Number(c.interest_only_amount || 0) - estEntryFee(cycleRemaining(c));
     profitByMonth[key] = (profitByMonth[key] || 0) + lucro;
   });
   // No mês corrente, a projeção soma o que já foi efetivamente recebido
@@ -258,7 +259,7 @@ async function renderGerenteDashboard() {
   (cyclesSoon || []).forEach((c) => {
     const lc = c.loan_contracts || {};
     const name = ((lc.clients || {}).profiles || {}).full_name;
-    addOutstanding(lc.client_id, name, Number(c.full_debt_amount || 0), Number(lc.principal_amount || 0));
+    addOutstanding(lc.client_id, name, cycleRemaining(c), Math.max(0, Number(lc.principal_amount || 0) - Number(c.principal_paid_partial || 0)));
   });
   const topClientes = Object.values(outstandingByClient).sort((a, b) => b.total - a.total).slice(0, 5);
   const topClientesPctSum = carteiraAtiva > 0 ? (topClientes.reduce((s, c) => s + c.principal, 0) / carteiraAtiva) * 100 : 0;
@@ -333,7 +334,7 @@ async function renderGerenteDashboard() {
       </div>
       <div class="card stat-card stat-card-compact">
         <div class="label">A receber este mês</div>
-        <div class="value mono">${formatMoney(aReceberMes.reduce((s, i) => s + netAmountDue(i), 0) + sum(aReceberMesCiclos, 'full_debt_amount'))}</div>
+        <div class="value mono">${formatMoney(aReceberMes.reduce((s, i) => s + netAmountDue(i), 0) + (aReceberMesCiclos || []).reduce((s, c) => s + cycleRemaining(c), 0))}</div>
       </div>
       <div class="card stat-card stat-card-compact">
         <div class="label">A receber (todo o prazo)</div>

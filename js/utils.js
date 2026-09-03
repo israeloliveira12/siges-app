@@ -45,6 +45,33 @@ function effectiveInstallmentStatus(status, dueDate) {
   return dueDate < todayISO() ? 'atrasada' : 'pendente';
 }
 
+// Saldo remanescente de um CICLO de renovação (migration_051). Espelha o que
+// `netAmountDue` faz para parcelas. Antes da migration_051 o ciclo não tinha
+// controle de pagamento parcial e `full_debt_amount` era sempre o saldo real —
+// hoje não é mais, e qualquer tela que mostre "quanto o cliente ainda deve"
+// precisa passar por aqui. Os `|| 0` mantêm o cálculo correto para linhas
+// carregadas por consultas que não trouxeram as colunas novas.
+function cycleRemaining(cycle) {
+  if (!cycle) return 0;
+  return Math.max(0, Number(cycle.full_debt_amount || 0)
+    - Number(cycle.principal_paid_partial || 0)
+    - Number(cycle.interest_paid_partial || 0));
+}
+
+// Decomposição da dívida do ciclo, igual à do banco: o capital é o principal
+// do contrato, limitado ao total do ciclo (um ciclo pode nascer com dívida
+// menor que o capital ao renovar um ciclo já parcialmente pago), e o resto é
+// juros. Devolve o que ainda FALTA de cada parte.
+function cycleRemainingParts(cycle, contract) {
+  const total = Number((cycle || {}).full_debt_amount || 0);
+  const capital = Math.min(Number((contract || {}).principal_amount || 0), total);
+  const juros = total - capital;
+  return {
+    capital: Math.max(0, capital - Number((cycle || {}).principal_paid_partial || 0)),
+    juros: Math.max(0, juros - Number((cycle || {}).interest_paid_partial || 0)),
+  };
+}
+
 function formatMoney(value) {
   const n = Number(value || 0);
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
