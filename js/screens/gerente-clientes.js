@@ -267,8 +267,6 @@ function openResetClientPasswordModal(client, p) {
         <div class="field mt-14">
           <label for="rp-password">Nova senha</label>
           ${passwordFieldHtml('rp-password', 'autocomplete="new-password" placeholder="Nova senha"')}
-          <div id="rp-password-meter" class="pw-meter-wrap"></div>
-          <span class="help">Pelo menos 8 caracteres, misturando letras e números.</span>
         </div>
         <div id="rp-feedback"></div>
       </div>
@@ -294,18 +292,15 @@ function openResetClientPasswordModal(client, p) {
   overlay.querySelector('#rp-cancel').onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
   wirePasswordToggles(overlay);
-  wirePasswordStrength('rp-password', 'rp-password-meter');
 
   overlay.querySelector('#rp-confirm').onclick = async () => {
     const feedback = overlay.querySelector('#rp-feedback');
     const input = overlay.querySelector('#rp-password');
     const newPassword = input.value;
     feedback.innerHTML = '';
-    // SEC-14: mesma regra de senha do cadastro e da redefinição pelo
-    // próprio usuário — uma senha definida pelo administrador não pode ser
-    // mais fraca que uma escolhida pelo cliente.
-    const pwdProblem = passwordProblem(newPassword);
-    if (pwdProblem) { feedback.innerHTML = `<div class="auth-error">${escapeHtml(pwdProblem)}</div>`; return; }
+    // Senha de cliente definida pelo administrador é livre (2026-10-12) —
+    // só não pode ser vazia. A regra de força continua no cadastro próprio.
+    if (!newPassword) { feedback.innerHTML = `<div class="auth-error">Informe a nova senha.</div>`; return; }
     const btn = overlay.querySelector('#rp-confirm');
     btn.disabled = true;
     try {
@@ -341,7 +336,7 @@ function openClienteModal(client) {
         <div id="modal-feedback"></div>
         ${!isEdit ? `
         <div class="field"><label>E-mail (login do cliente)</label><input type="email" id="m-email" required></div>
-        <div class="field"><label for="m-password">Senha inicial</label>${passwordFieldHtml('m-password', 'autocomplete="new-password" required')}<div id="m-password-meter" class="pw-meter-wrap"></div><span class="help">Pelo menos 8 caracteres, misturando letras e números.</span></div>
+        <div class="field"><label for="m-password">Senha inicial</label>${passwordFieldHtml('m-password', 'autocomplete="new-password" required')}</div>
         ` : ''}
         <div class="field"><label>Nome completo</label><input type="text" id="m-name" value="${escapeHtml(p.full_name || '')}"></div>
         ${isEdit ? `
@@ -398,7 +393,6 @@ function openClienteModal(client) {
   document.getElementById('cancel-modal').onclick = close;
   document.getElementById('m-cpf').oninput = (e) => { e.target.value = formatCpf(e.target.value); };
   wirePasswordToggles(overlay);
-  wirePasswordStrength('m-password', 'm-password-meter');
   attachPhoneMask(document.getElementById('m-phone'));
   attachMoneyMask(document.getElementById('m-limit'));
   setMoneyValue(document.getElementById('m-limit'), client ? client.credit_limit : 0);
@@ -537,8 +531,8 @@ function openClienteModal(client) {
         const email = document.getElementById('m-email').value.trim();
         const password = document.getElementById('m-password').value;
         if (!email) throw new Error('Preencha o e-mail.');
-        const pwdProblem = passwordProblem(password);
-        if (pwdProblem) throw new Error(pwdProblem);
+        // Senha de cliente é livre — só não pode ser vazia (2026-10-12).
+        if (!password) throw new Error('Preencha a senha.');
         const { data: { session } } = await supa.auth.getSession();
         const resp = await fetch('/api/create-user', {
           method: 'POST',

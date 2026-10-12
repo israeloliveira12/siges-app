@@ -27,8 +27,16 @@ export default async function handler(req, res) {
     return;
   }
   // SEC-14: a checagem do navegador é conveniência; esta aqui é a trava.
-  const pwdProblem = passwordProblem(password);
-  if (pwdProblem) { res.status(400).json({ error: pwdProblem }); return; }
+  // Só vale para conta de GERENTE. Senha de CLIENTE definida pelo
+  // administrador é livre (pedido do usuário, 2026-10-12): é o admin quem a
+  // escolhe e a repassa ao cliente, que muitas vezes quer algo simples de
+  // digitar. A conta de cliente não movimenta dinheiro de terceiros, então o
+  // risco de uma senha fraca é só dela. (O mínimo de caracteres configurado no
+  // painel do Supabase continua valendo — isso não passa por este código.)
+  if (role === 'gerente') {
+    const pwdProblem = passwordProblem(password);
+    if (pwdProblem) { res.status(400).json({ error: pwdProblem }); return; }
+  }
 
   // Só o admin primário pode criar novas contas de gerente — qualquer
   // gerente comum ainda pode criar clientes normalmente.

@@ -22,8 +22,6 @@ export default async function handler(req, res) {
   const { user_id, new_password } = req.body || {};
   if (!user_id || !new_password) { res.status(400).json({ error: 'Parâmetros inválidos.' }); return; }
   if (!isValidUUID(user_id)) { res.status(400).json({ error: 'user_id inválido' }); return; }
-  const pwdProblem = passwordProblem(new_password);
-  if (pwdProblem) { res.status(400).json({ error: pwdProblem }); return; }
 
   // Redefinir a senha de OUTRO gerente (inclusive o admin primário) é
   // exclusivo do admin primário — senão um gerente secundário conseguiria
@@ -44,6 +42,13 @@ export default async function handler(req, res) {
   if (target.role === 'gerente' && !caller.is_primary_admin) {
     res.status(403).json({ error: 'Apenas o Administrador pode redefinir a senha de uma conta de gerente.' });
     return;
+  }
+  // A regra de força só vale para conta de GERENTE; senha de cliente é livre
+  // (pedido do usuário, 2026-10-12). Fica DEPOIS da busca do alvo porque só
+  // aqui sabemos o papel real da conta — o corpo da requisição não é confiável.
+  if (target.role === 'gerente') {
+    const pwdProblem = passwordProblem(new_password);
+    if (pwdProblem) { res.status(400).json({ error: pwdProblem }); return; }
   }
 
   const updateRes = await supabaseAdminFetch(`/auth/v1/admin/users/${user_id}`, {

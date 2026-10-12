@@ -1087,6 +1087,7 @@ Varredura linha a linha de todo o sistema (frontend, API serverless, schema, 46 
 - **Numeração de contrato é por empresa (OPS-08).** Era sorteio de 5 dígitos com unicidade GLOBAL: o laço degradava conforme o espaço enchia e **nunca terminava** ao esgotar (90.000 contratos travariam a transação). Agora é sequencial por tenant a partir de 10000, com `pg_advisory_xact_lock` na chave do tenant. Índice único passou a ser `(tenant_id, contract_number)`.
 
 - **Regra de senha única, replicada no servidor (SEC-14).** `passwordProblem()` existe em `js/utils.js` (retorno imediato) **e** em `api/_lib/password.js` (a trava real). Mínimo 8, letras+números, lista de senhas óbvias. **Se mudar a regra, mude nos dois.**
+  **Exceção (2026-10-12, pedido do usuário):** a regra NÃO vale para senha de **cliente definida pelo administrador** (criar cliente e redefinir senha de cliente) — essa é livre, só não pode ser vazia. Continua valendo para contas de **gerente** (criar/redefinir) e para o cadastro próprio do cliente (`login.js`/`auth.js`). No servidor a decisão usa o papel REAL da conta (`role` do corpo em `create-user`; `target.role` buscado no banco em `reset-client-password`), nunca um campo do navegador. O mínimo do painel do Supabase (Auth → Password) e a proteção contra senha vazada continuam valendo por cima — não passam por este código.
 
 ### Achados que mudam como a interface se comporta
 
