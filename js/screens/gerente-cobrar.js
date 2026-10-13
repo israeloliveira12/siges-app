@@ -38,12 +38,16 @@ function buildWhatsappUrl(item) {
   const valorAtualizado = item.amount + encargoAtraso;
 
   // Valor de renovação: mesma regra de disponibilidade do modal de
-  // recebimento (openReceberModal) — só contratos de parcela única com
-  // renovação permitida. É só o juros da parcela/ciclo (interestPortion),
+  // recebimento (openReceberModal). Desde a migration_052 vale também para
+  // contrato de 2x+, onde a operação é PRORROGAÇÃO (a parcela e as seguintes
+  // andam um período) em vez de ciclo — mas o valor que o cliente paga é o
+  // mesmo nos dois casos: só o juros. É o juros da parcela/ciclo (interestPortion),
   // + o mesmo encargo de atraso já sugerido acima quando em atraso — o
   // cliente informado paga isso pra "rolar" o vencimento em vez de quitar.
   const contract = item.contract || {};
-  const canRenew = contract.allows_renewal && Number(contract.installments_count) === 1;
+  // Em 2x+ só parcela prorroga (ciclo não existe nesses contratos).
+  const isMulti = Number(contract.installments_count) > 1;
+  const canRenew = contract.allows_renewal && (!isMulti || item.type === 'installment');
   const interestPortion = item.type === 'installment'
     ? (Number((item.raw || {}).interest_share || 0) - Number((item.raw || {}).interest_paid_partial || 0))
     : cycleRemainingParts(item.raw || {}, contract).juros;
@@ -67,7 +71,7 @@ function buildWhatsappUrl(item) {
     `*Valor da Parcela:* ${formatMoney(item.amount)}`,
     diasAtraso > 0 && encargoAtraso > 0 ? `*Juros + multa por atraso:* ${formatMoney(encargoAtraso)}` : null,
     diasAtraso > 0 && encargoAtraso > 0 ? `*Valor atualizado a pagar:* ${formatMoney(valorAtualizado)}` : null,
-    canRenew ? `*Valor para renovar (só juros):* ${formatMoney(valorRenovacao)}` : null,
+    canRenew ? `*Valor para ${isMulti ? 'prorrogar' : 'renovar'} (só juros):* ${formatMoney(valorRenovacao)}` : null,
     `*Data Vencimento:* ${formatDateShortYear(item.due_date)}`,
     `*Chave Pix:* ${(App.settings && App.settings.company_pix_key) || '—'}`,
     '',

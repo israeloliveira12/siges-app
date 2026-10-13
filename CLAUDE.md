@@ -1280,6 +1280,52 @@ Onde `full_debt_amount` bruto CONTINUA correto de propósito: o modal de
 editar/adiar ciclo (edita o valor bruto) e as linhas já pagas/renovadas do
 extrato (valor histórico do evento).
 
+## Prorrogação de parcelas com juros (2026-10-13, `migration_052`)
+
+Pedido: contrato de 3x de R$ 300 (R$ 200 capital + R$ 100 juros); o cliente
+pede para "renovar" uma parcela, paga os R$ 100 e o sistema empurra essa
+parcela **e todas as seguintes em aberto** por um período.
+
+**Isto NÃO é o modelo de ciclo, e a distinção é o ponto central.** O ciclo
+(`renewal_cycles`) colapsa a dívida num saldo rolante: a parcela vira
+`renovada` e deixa de existir como obrigação. É por isso que
+`renew_installment()` exige `installments_count = 1` — com 3 parcelas, um ciclo
+conviveria com as parcelas 2 e 3, e a tela de detalhe (que faz
+`cycles.find(status <> 'renovada')`, sem amarrar o ciclo à parcela de origem)
+renderizaria a linha errada. **A trava é correta; não a remova.**
+
+Na prorrogação a dívida continua inteira — o cliente comprou prazo. Nenhum
+valor muda, só datas, e nenhuma entidade é criada. Por isso `renewal_cycles`
+não é tocado e contrato de 1x segue no ciclo.
+
+**Decisões do usuário:** juros sugeridos = `interest_share` da parcela
+(editável); contrato 1x permanece no ciclo (`USE_RENEWAL_CYCLE` se tentarem);
+e é **bloqueado** prorrogar quando existe parcela ANTERIOR vencida
+(`EARLIER_INSTALLMENT_OVERDUE`) — senão o cliente compraria prazo deixando um
+atraso real para trás e o contrato voltaria a `atrasado` logo depois.
+
+**A cascata é obrigatória, não opcional:** mover só a parcela escolhida num
+contrato mensal a jogaria exatamente em cima da parcela seguinte.
+
+**Cada parcela anda UM PERÍODO a partir da data dela**, nunca um número fixo de
+dias contado da primeira — somar dias corridos desalinha o calendário mensal
+(15/jan→15/fev são 31 dias; aplicados à parcela de 15/fev dariam 18/mar).
+
+**Bug latente corrigido junto:** `addStepISO()` (js/utils.js) usava
+`setMonth(+1)`, que **transborda** no fim do mês (31/jan → 03/mar, porque
+31/fev não existe). O Postgres **trunca** (`+ interval '1 month'` → 28/fev), e
+é a conta dele que vale, porque é assim que o contrato gera as parcelas. Sem a
+correção, a tela sugeriria 03/mar enquanto o banco jogaria as seguintes para
+28/mar. Só havia 2 chamadas, ambas nessa tela.
+
+`payment_kind` reaproveita `'renovacao_juros'` de propósito: o rótulo da tela
+já é "Renovação (juros)", e um valor novo de enum não pode ser usado na mesma
+transação em que é criado — e o SQL Editor roda tudo numa transação só.
+
+Na interface tudo vive atrás da **mesma aba "Renovar"** do modal de
+recebimento: 1x chama `renew_installment`, 2x+ chama
+`postpone_installments_with_interest`.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

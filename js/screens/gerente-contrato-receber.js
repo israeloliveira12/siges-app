@@ -31,10 +31,22 @@ async function openReceberModal(source, onDone) {
     ? (Number(item.interest_share) - Number(item.interest_paid_partial || 0))
     : cycleRemainingParts(item, contract).juros;
 
-  // Renovação só é permitida em contratos de parcela única (senão a
-  // renovação de UMA parcela deixaria as outras parcelas do contrato
-  // com uma relação ambígua com o ciclo renovado).
-  const canRenew = contract.allows_renewal && Number(contract.installments_count) === 1;
+  // Duas operações diferentes atrás da MESMA aba "Renovar":
+  //
+  // 1x  -> renew_installment(): modelo de CICLO. A dívida colapsa num saldo
+  //        rolante, a parcela vira 'renovada' e deixa de existir.
+  // 2x+ -> postpone_installments_with_interest() (migration_052): PRORROGAÇÃO.
+  //        O cliente paga os juros da parcela e ela, junto com todas as
+  //        seguintes em aberto, anda um período. Nada é amortizado, nenhum
+  //        ciclo é criado — a dívida continua inteira, só vence depois.
+  //
+  // O ciclo exige 1x porque, com 3 parcelas, um ciclo conviveria com as
+  // parcelas 2 e 3 e a tela de detalhe renderizaria a linha errada. A
+  // prorrogação não tem esse problema justamente por não criar entidade nova.
+  const isMulti = Number(contract.installments_count) > 1;
+  const canRenewCycle = contract.allows_renewal && !isMulti;
+  const canPostpone = contract.allows_renewal && isMulti && isInstallment;
+  const canRenew = canRenewCycle || canPostpone;
 
   // Encargo de atraso: juros COMPOSTOS diários sobre o saldo desta
   // parcela/ciclo (taxa % é ao dia, capitalizada a cada dia de atraso) +
@@ -258,7 +270,9 @@ async function openReceberModal(source, onDone) {
       recompute();
     } else {
       fields.innerHTML = `
-        <p class="text-sm text-soft mt-8">O cliente paga só os juros deste ciclo, e a dívida cheia (${formatMoney(totalDue)}) renova para o próximo período.</p>
+        <p class="text-sm text-soft mt-8">${canPostpone
+          ? `O cliente paga só os juros desta parcela. Ela e as parcelas seguintes em aberto andam um período — a dívida (${formatMoney(totalDue)}) continua inteira, só vence depois.`
+          : `O cliente paga só os juros deste ciclo, e a dívida cheia (${formatMoney(totalDue)}) renova para o próximo período.`}</p>
         <div class="field mt-8">
           <label>Nova data de vencimento</label>
           <input type="date" id="r-new-due-date">
@@ -283,7 +297,13 @@ async function openReceberModal(source, onDone) {
         </div>
       `;
       const receivedAtNow = (document.getElementById('r-received-at') || {}).value || todayISO();
-      document.getElementById('r-new-due-date').value = addStepISO(receivedAtNow, contract.due_type, contract.custom_interval_days);
+      // Na prorrogação a nova data sai do VENCIMENTO da parcela, não da data
+      // do pagamento: o cronograma inteiro desliza um período, mantendo o
+      // espaçamento entre as parcelas. No ciclo, a dívida rola a partir do dia
+      // em que o dinheiro entrou, que é o comportamento de sempre.
+      document.getElementById('r-new-due-date').value = canPostpone
+        ? addStepISO(dueDateStr, contract.due_type, contract.custom_interval_days)
+        : addStepISO(receivedAtNow, contract.due_type, contract.custom_interval_days);
       const interestInput = document.getElementById('r-interest-amount');
       const feeInput = document.getElementById('r-fee-amount');
       const lateInterestInput = document.getElementById('r-late-interest');
@@ -394,24 +414,36 @@ async function openReceberModal(source, onDone) {
         const newDueDate = document.getElementById('r-new-due-date').value;
         if (!newDueDate) throw new Error('Informe a nova data de vencimento.');
 
-        const { error } = await supa.rpc('renew_installment', {
-          p_source_type: isInstallment ? 'installment' : 'renewal_cycle',
-          p_source_id: item.id,
-          p_interest_only_amount: interestAmount - lateChargeAmount,
-          p_has_operational_fee: hasFee,
-          p_operational_fee_amount: feeAmount,
-          p_late_charge_amount: lateChargeAmount,
-          p_received_at: receivedAt,
-          p_new_due_date: newDueDate,
-        });
+        const { error } = canPostpone
+          ? (await supa.rpc('postpone_installments_with_interest', {
+              p_installment_id: item.id,
+              p_interest_amount: interestAmount - lateChargeAmount,
+              p_new_due_date: newDueDate,
+              p_has_operational_fee: hasFee,
+              p_operational_fee_amount: feeAmount,
+              p_late_charge_amount: lateChargeAmount,
+              p_received_at: receivedAt,
+            }))
+          : (await supa.rpc('renew_installment', {
+              p_source_type: isInstallment ? 'installment' : 'renewal_cycle',
+              p_source_id: item.id,
+              p_interest_only_amount: interestAmount - lateChargeAmount,
+              p_has_operational_fee: hasFee,
+              p_operational_fee_amount: feeAmount,
+              p_late_charge_amount: lateChargeAmount,
+              p_received_at: receivedAt,
+              p_new_due_date: newDueDate,
+            }));
         if (error) throw error;
         notifyEvent('renovacao_registrada', contract.client_id, {
           amount: interestAmount,
           due_date: newDueDate,
           contract_number: contract.contract_number,
         });
-        logAudit('renovacao_registrada', `Renovação registrada no contrato #${contract.contract_number} (juros ${formatMoney(interestAmount)})`, { contract_id: contract.id, interest_amount: interestAmount });
-        showToast('Renovação registrada. Dívida renovada por mais um período.');
+        logAudit('renovacao_registrada', `${canPostpone ? 'Prorrogação' : 'Renovação'} registrada no contrato #${contract.contract_number} (juros ${formatMoney(interestAmount)})`, { contract_id: contract.id, interest_amount: interestAmount });
+        showToast(canPostpone
+          ? 'Prorrogação registrada. Esta parcela e as seguintes andaram um período.'
+          : 'Renovação registrada. Dívida renovada por mais um período.');
       }
       closeModal();
       if (typeof onDone === 'function') onDone();
@@ -421,8 +453,14 @@ async function openReceberModal(source, onDone) {
         ? 'Esta parcela/ciclo já foi recebido ou renovado (provavelmente em outra aba ou por outro administrador). Atualize a tela.'
         : raw.includes('INVALID_AMOUNT')
         ? 'Valor inválido para este recebimento — confira o valor e tente novamente.'
+        : raw.includes('EARLIER_INSTALLMENT_OVERDUE')
+        ? 'Existe uma parcela anterior a esta em atraso. Receba ou regularize a parcela atrasada antes de prorrogar esta.'
+        : raw.includes('USE_RENEWAL_CYCLE')
+        ? 'Este contrato tem parcela única — use a renovação normal, não a prorrogação.'
+        : raw.includes('DUE_DATE_ORDER_CONFLICT')
+        ? 'A nova data alcançaria o vencimento da parcela seguinte. Escolha uma data anterior a ela.'
         : raw.includes('RENEWAL_NOT_ALLOWED')
-        ? 'Este contrato não permite renovação (só contratos de parcela única com renovação habilitada podem renovar).'
+        ? 'Este contrato não permite renovação — ative a opção "Permite renovação" na edição do contrato.'
         : raw.includes('RECEIVED_AT_IN_FUTURE')
         ? 'A data do pagamento não pode ser no futuro.'
         : raw.includes('RECEIVED_AT_TOO_OLD')

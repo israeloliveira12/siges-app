@@ -140,7 +140,21 @@ function daysBetween(isoA, isoB) {
 // precisa ser byte-a-byte idêntico ao cálculo de data do Postgres.
 function addStepISO(iso, dueType, customDays) {
   const d = new Date(iso + 'T00:00:00');
-  if (dueType === 'mensal') d.setMonth(d.getMonth() + 1);
+  if (dueType === 'mensal') {
+    // setMonth() sozinho TRANSBORDA no fim do mês: 31/jan + 1 mês vira 03/mar,
+    // porque 31/fev não existe e o JS rola para o mês seguinte. O Postgres
+    // TRUNCA (`'2026-01-31'::date + interval '1 month'` = 28/02), e é a conta
+    // dele que vale — é assim que o contrato gera as parcelas
+    // (`p_first_installment_date + step * (i-1)`) e é assim que a cascata da
+    // prorrogação desloca as parcelas seguintes. Com o transbordo, a tela
+    // sugeriria 03/mar enquanto o banco jogaria as seguintes para 28/mar,
+    // desalinhando o cronograma logo na primeira prorrogação de fim de mês.
+    const diaOriginal = d.getDate();
+    d.setDate(1); // evita o transbordo antes de trocar o mês
+    d.setMonth(d.getMonth() + 1);
+    const ultimoDiaDoMes = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(diaOriginal, ultimoDiaDoMes));
+  }
   else if (dueType === 'quinzenal') d.setDate(d.getDate() + 15);
   else if (dueType === 'semanal') d.setDate(d.getDate() + 7);
   else d.setDate(d.getDate() + Math.max(1, Number(customDays) || 30));
