@@ -1326,6 +1326,68 @@ Na interface tudo vive atrás da **mesma aba "Renovar"** do modal de
 recebimento: 1x chama `renew_installment`, 2x+ chama
 `postpone_installments_with_interest`.
 
+## Gráficos migrados para Chart.js (2026-10-18)
+
+Pedido: todos os gráficos em Chart.js, mais interativos, curvas suaves. O que
+existia em SVG inline (`barChartSVG`, `lineChartSVG`, `areaChartSVG`,
+`donutChartSVG`, `sparklineSVG`) virou `barChart`, `lineChart`, `areaChart`,
+`donutChart`, `sparkline` em `js/charts.js`. **Nenhum chamador mudou de forma**
+além do nome: continuam recebendo `(series, opts)` e devolvendo HTML dentro de
+um template string, e `...chartSize()` continua sendo espalhado em `opts`.
+
+**Biblioteca:** Chart.js 4.4.7 via jsdelivr, com SRI, no `index.html`. Usa
+`chart.umd.js` e **não** `chart.umd.min.js`: o `.min.js` é gerado na hora pelo
+jsdelivr (não existe no pacote npm) e o hash dele pode mudar se o CDN trocar de
+minificador, quebrando o SRI sem aviso. O sha256 do `chart.umd.js` foi conferido
+contra o que o próprio jsdelivr publica. Ao atualizar a versão: baixar o arquivo,
+recalcular `openssl dgst -sha384 -binary | openssl base64 -A` e conferir.
+
+**Montagem automática — nenhuma tela chama nada.** Um canvas só ganha vida
+depois de entrar no DOM, e o `innerHTML` descarta o nó mas NÃO o objeto Chart
+(que ficaria vivo com seu ResizeObserver). Então `charts.js` mantém um
+`MutationObserver` que monta todo `<canvas data-chart-id>` novo e destrói os
+gráficos cujo canvas saiu da página. Testado: 25 re-renders seguidos da mesma
+tela deixam exatamente 1 instância por canvas visível (sem a limpeza seriam ~78).
+`initCharts(root)` existe para forçar a montagem; é idempotente.
+**Usa `setTimeout(0)`, nunca `requestAnimationFrame`:** o rAF é pausado em aba em
+segundo plano e em alguns webviews, e os gráficos simplesmente nunca nasciam
+(canvas vazios em 300x150) — pego no teste.
+
+**Cores — o canvas não entende `var(--x)`.** As cores são resolvidas em
+`resolveChartColor()` **a partir do próprio canvas**, nunca do `<html>`, porque o
+modo escuro é escopado em `#app` (ver style.css): lendo do `<html>`, um gráfico
+no tema escuro pegaria as cores do claro. Trocar o tema (`data-theme`) recria os
+gráficos vivos (`restyleCharts`).
+
+**Curva suave = `cubicInterpolationMode: 'monotone'`, não `tension`.** Há um
+bug antigo documentado neste arquivo (2026-07-31): a curva Bézier por
+ponto-médio "cortava o canto" de picos isolados e o rótulo parecia flutuar
+acima da linha. `tension` ainda pode ultrapassar o zero e desenhar valor
+negativo onde não existe. A monotônica é suave E toca todos os pontos.
+
+**Largura vs. altura.** Só a ALTURA vem de `chartSize()` (o contêiner tem altura
+fixa inline); a largura é sempre a do card. Isso eliminou o antigo "gráfico
+estreito concentrado no centro" de cards largos (bug do Lucro Analítico).
+
+**Armadilhas reais que apareceram nos testes (não repetir):**
+- Barras ficaram **pretas**: `backgroundColor: [fn, fn]` (array de funções) NÃO
+  é resolvido como scriptable — só a opção inteira sendo função é. Cada função
+  era lida como cor inválida. Use UMA função que escolhe por `ctx.dataIndex`.
+  O gráfico com prejuízo escapou porque usava cores simples.
+- Rótulos de valor se **sobrepunham** no celular (6 barras em 300px). O plugin
+  `sigesValueLabels` agora desenha primeiro o de maior valor e pula quem colidir;
+  o valor pulado continua no tooltip e na tabela de leitura.
+- O rótulo estático do ponto sob o cursor é omitido (ficava espiando atrás do
+  tooltip).
+
+**Acessibilidade mantida:** canvas é imagem opaca para leitor de tela, então
+continua existindo a `chartDataTable()` (`.sr-only-table`) ao lado de todo
+gráfico, e a rosca segue com legenda em HTML real. Se a biblioteca não carregar
+(CDN fora do ar / SRI recusado), o canvas é trocado por um aviso e a tabela
+passa a ser VISÍVEL (`.chart-failed`) — o número nunca some junto com o gráfico.
+O service worker ignora scripts de outra origem (ver sw.js), então o Chart.js
+vem do cache HTTP do navegador, não do cache offline do app.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.
@@ -1337,5 +1399,5 @@ recebimento: 1x chama `renew_installment`, 2x+ chama
 
 - `supabase/schema.sql` — schema completo "fresh install", toda regra de negócio sensível vive aqui como função SQL (`security definer`), nunca só em JS.
 - `js/screens/*.js` — uma tela por arquivo, registradas via `registerRoute(...)` no fim de cada arquivo. `js/main.js` é sempre o último `<script>` carregado.
-- `js/charts.js` — gráficos SVG inline reutilizáveis (`barChartSVG`, `lineChartSVG`, `donutChartSVG` + `donutLegendHtml`).
+- `js/charts.js` — gráficos em **Chart.js 4** (`barChart`, `lineChart`, `areaChart`, `donutChart`, `sparkline` + `donutLegendHtml`). Ver seção "Gráficos migrados para Chart.js" abaixo.
 - `api/*.js` — únicas rotas que usam a `service_role` key ou outras chaves secretas (Resend, VAPID, CRON_SECRET).

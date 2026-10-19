@@ -298,7 +298,7 @@ async function renderGerenteDashboard() {
         </div>
         <div style="flex:none">
           <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.65;text-align:right;margin-bottom:4px">Últimos 12 dias</div>
-          ${sparklineSVG(trendSeries.slice(-12))}
+          ${sparkline(trendSeries.slice(-12))}
         </div>
       </div>
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)${perdaMes > 0 ? ` + ${formatMoney(perdaMes)} em capital perdido` : ''}</div>
@@ -381,17 +381,17 @@ async function renderGerenteDashboard() {
 
     <div class="card mt-14">
       <h3>Recebido — últimos 30 dias</h3>
-      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? areaChartSVG(trendSeries, { color: CHART_COLORS.good, gradId: 'recebido30', ...chartSize(1180, 260, 320, 200) }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
+      <div class="mt-8">${trendSeries.some((p) => p.value > 0) ? areaChart(trendSeries, { color: CHART_COLORS.good, gradId: 'recebido30', ...chartSize(1180, 260, 320, 200) }) : '<p class="text-soft text-sm">Sem recebimentos no período.</p>'}</div>
     </div>
 
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Projeção de Recebimentos (6 meses)</h3>
-        <div class="mt-8">${areaChartSVG(projectionSeries, { color: CHART_COLORS.purple, gradId: 'receb', ...chartSize(600, 220, 320, 200) })}</div>
+        <div class="mt-8">${areaChart(projectionSeries, { color: CHART_COLORS.purple, gradId: 'receb', ...chartSize(600, 220, 320, 200) })}</div>
       </div>
       <div class="card">
         <h3>Projeção de Lucro (6 meses)</h3>
-        <div class="mt-8">${areaChartSVG(profitSeries, { color: CHART_COLORS.purple, gradId: 'lucro', ...chartSize(600, 220, 320, 200) })}</div>
+        <div class="mt-8">${areaChart(profitSeries, { color: CHART_COLORS.purple, gradId: 'lucro', ...chartSize(600, 220, 320, 200) })}</div>
       </div>
     </div>
 
@@ -425,7 +425,7 @@ async function renderGerenteDashboard() {
     </div>
   `;
 
-  initAreaCharts(root);
+  initCharts(root);
 }
 
 registerRoute('gerente/dashboard', { role: 'gerente', screenId: 'gerente-dashboard', title: 'Dashboard', render: renderGerenteDashboard });

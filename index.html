@@ -57,6 +57,14 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
         integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk"
         crossorigin="anonymous"></script>
+<!-- Chart.js 4.4.7 (gráficos). Usa chart.umd.js — o arquivo REAL do pacote npm,
+     já minificado — e não chart.umd.min.js: esse é gerado na hora pelo jsdelivr
+     (não existe no npm) e o hash dele pode mudar se o CDN trocar de minificador,
+     quebrando o SRI sem aviso. O sha384 abaixo foi calculado sobre o arquivo e o
+     sha256 conferido contra o que o próprio jsdelivr publica para ele. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.js"
+        integrity="sha384-zYPBGXwO4633CABX/5Spf6emCKUJCfoOkhOMYyxMsatqQZPnDblmmOewfjsIVWCM"
+        crossorigin="anonymous"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
         integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"
         crossorigin="anonymous"></script>

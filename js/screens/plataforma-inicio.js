@@ -158,14 +158,14 @@ function paintPlataformaInicio(root, data) {
       <div class="card">
         <h3>Distribuição por plano</h3>
         <div class="flex gap-20 mt-14 items-center" style="flex-wrap:wrap">
-          ${donutChartSVG(planSegments, { valueFormatter: (v) => `${v} empresa${v === 1 ? '' : 's'}` })}
+          ${donutChart(planSegments, { valueFormatter: (v) => `${v} empresa${v === 1 ? '' : 's'}` })}
           <div style="flex:1 1 180px;min-width:180px">${donutLegendHtml(planSegments, { valueFormatter: (v) => `${v}` })}</div>
         </div>
       </div>
       <div class="card">
         <h3>Receita por plano (MRR)</h3>
         ${revenueBars.length
-          ? barChartSVG(revenueBars, chartSize(520, 220, 300, 200))
+          ? barChart(revenueBars, chartSize(520, 220, 300, 200))
           : '<p class="text-sm text-soft mt-14">Nenhum plano com preço definido em uso ainda.</p>'}
       </div>
     </div>

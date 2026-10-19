@@ -35,16 +35,16 @@ function paintPlataformaMetricas(root, snapshots) {
     ` : `
       <div class="card mt-14">
         <h3>MRR ao longo do tempo</h3>
-        ${lineChartSVG(mrrSeries, chartSize(1180, 240, 320, 200))}
+        ${lineChart(mrrSeries, chartSize(1180, 240, 320, 200))}
       </div>
       <div class="grid grid-2 mt-14">
         <div class="card">
           <h3>Empresas ativas</h3>
-          ${lineChartSVG(tenantsSeries, { ...chartSize(560, 220, 300, 200), valueFormatter: (v) => `${v} empresa${v === 1 ? '' : 's'}`, color: CHART_COLORS.brand })}
+          ${lineChart(tenantsSeries, { ...chartSize(560, 220, 300, 200), valueFormatter: (v) => `${v} empresa${v === 1 ? '' : 's'}`, color: CHART_COLORS.brand })}
         </div>
         <div class="card">
           <h3>Capital emprestado (todas as empresas)</h3>
-          ${lineChartSVG(capitalSeries, { ...chartSize(560, 220, 300, 200), color: CHART_COLORS.purple })}
+          ${lineChart(capitalSeries, { ...chartSize(560, 220, 300, 200), color: CHART_COLORS.purple })}
         </div>
       </div>
     `}

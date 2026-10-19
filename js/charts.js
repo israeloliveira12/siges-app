@@ -1,30 +1,39 @@
 /* ============================================================================
-   Gráficos SVG inline, sem biblioteca externa
-   Todos os pontos têm <title> (tooltip nativo do navegador ao passar o mouse)
-   e, quando cabe no espaço, um rótulo estático com o valor.
+   Gráficos — Chart.js 4 (carregado por <script> no index.html, com SRI)
+
+   Cada função pública devolve HTML (um <canvas> dentro de um contêiner + a
+   tabela equivalente para leitor de tela), exatamente como os antigos
+   desenhos em SVG faziam — por isso as telas continuam montando o gráfico
+   dentro de um template string, sem mudar o fluxo de render.
+
+   Diferente do SVG, o canvas precisa de JavaScript DEPOIS de entrar no DOM.
+   Isso é feito sozinho: um MutationObserver enxerga qualquer
+   <canvas data-chart-id> novo e instancia o gráfico, e destrói os gráficos
+   cujo canvas saiu da página (um innerHTML novo descarta os nós antigos mas
+   NÃO o objeto Chart, que ficaria vivo com seu ResizeObserver). Nenhuma tela
+   precisa lembrar de "ligar" nada nem de limpar nada.
+
+   Por que as cores são resolvidas aqui e não deixadas em var(--x): o canvas
+   não entende var(). E o modo escuro é escopado em #app (ver style.css), então
+   a leitura é feita A PARTIR DO CANVAS, nunca do <html> — senão um gráfico
+   no tema escuro pegaria as cores do claro.
    ============================================================================ */
 
 // Referenciam --chart-* (style.css), não --brand/--accent direto: um azul-marinho
 // quase preto (--brand) funciona bem como fundo de botão mas some como LINHA de
 // gráfico sobre um painel escuro — os tokens de gráfico são otimizados à parte
 // e ganham uma variante mais clara em modo escuro sem mexer nos botões/links.
+// Continuam como string 'var(--x)': são resolvidos em resolveChartColor().
 const CHART_COLORS = {
   brand: 'var(--chart-brand)', accent: 'var(--chart-accent)', warn: 'var(--chart-warn)',
   bad: 'var(--chart-bad)', good: 'var(--chart-good)', purple: 'var(--chart-purple)', line: 'var(--chart-line)',
 };
 
-// SVG usa viewBox fixo + width:100% — isso ESCALA o desenho inteiro (texto
-// incluído) pela razão entre a largura física e a do viewBox. Um viewBox
-// pensado pra desktop (ex: 1180) fica com rótulo ilegível quando o CSS aperta
-// ele num card de celular de ~320px; a correção é usar um viewBox MENOR em
-// telas pequenas (perto de 1:1 com o container real), não só deixar o CSS
-// encolher o mesmo desenho. Chame isso antes de montar `opts` de qualquer
-// chart que apareça num card full-width.
-//
-// O degrau do meio (tablet) existe pelo mesmo motivo: num notebook de ~900px
-// o viewBox de 1180 renderiza a ~70% e encolhe os rótulos junto. `tabletW/
-// tabletH` são opcionais — sem eles o comportamento é o de antes (só dois
-// degraus), então nenhum chamador existente muda.
+// Altura (e, por compatibilidade, largura) conforme o tamanho da tela. No
+// Chart.js só a ALTURA importa: a largura é sempre a do contêiner, o que
+// resolve de vez o problema antigo de gráfico estreito "concentrado no meio"
+// de um card largo. Os chamadores continuam espalhando `...chartSize(...)`
+// em `opts`, então nenhum deles precisou mudar.
 function chartSize(desktopW, desktopH, mobileW, mobileH, tabletW, tabletH) {
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
   if (vw <= 640) return { width: mobileW, height: mobileH };
@@ -32,19 +41,16 @@ function chartSize(desktopW, desktopH, mobileW, mobileH, tabletW, tabletH) {
   return { width: desktopW, height: desktopH };
 }
 
-// Série vazia quebrava sparklineSVG/areaChartSVG com TypeError (leitura de
-// `points[points.length-1].x` e `series[peakIdx].value` em array vazio). Hoje
-// nenhuma tela chega a passar array vazio — as séries são construídas com
-// generate-series de datas — mas isso é uma armadilha para o próximo gráfico
-// que alguém adicionar. Guarda única, reusada por todos.
+// Série vazia: sem isto o Chart.js criaria um quadro em branco. Hoje nenhuma
+// tela chega a passar array vazio (as séries nascem de generate-series de
+// datas), mas é uma armadilha para o próximo gráfico que alguém adicionar.
 function emptyChartHtml(msg) {
   return `<p class="text-soft text-sm" style="text-align:center;padding:18px 0;margin:0">${escapeHtml(msg || 'Sem dados no período.')}</p>`;
 }
 
 // Tabela equivalente ao gráfico, escondida visualmente mas lida por leitor de
-// tela e alcançável por teclado (UX-05). Os valores dos gráficos viviam só em
-// <title> de SVG e no hover do mouse — quem navega por teclado ou usa leitor
-// de tela não alcançava número nenhum.
+// tela e alcançável por teclado (UX-05). Um <canvas> é uma imagem opaca para
+// tecnologia assistiva — esta tabela é o que carrega os números de verdade.
 function chartDataTable(series, opts = {}) {
   const fmt = opts.valueFormatter || formatMoney;
   const caption = opts.caption || 'Dados do gráfico';
@@ -56,370 +62,580 @@ function chartDataTable(series, opts = {}) {
     </table>`;
 }
 
-// `width:100%` combinado com `max-width:${w}px` deixa o SVG estreito sempre
-// que o card é mais largo que o viewBox pensado pro desktop (ex: 600px de
-// gráfico dentro de um card de 900px+ em Relatórios) — sem `margin:0 auto`,
-// um elemento mais estreito que o pai gruda na borda ESQUERDA por padrão
-// (bug real reportado pelo usuário com print, 2026-08-03: barras de "Lucro
-// por período" visualmente coladas no canto esquerdo do card). Todo SVG de
-// gráfico abaixo (bar/line/area) precisa de `display:block;margin:0 auto`
-// junto do `max-width` pra centralizar quando sobra espaço — replique isso
-// em qualquer chart novo que use esse mesmo padrão de viewBox+max-width.
+/* ---------------------------------------------------------------------------
+   Infraestrutura: registro, tema, montagem e limpeza
+--------------------------------------------------------------------------- */
 
-// Sparkline compacto (sem eixo, sem hover) — pensado pra ficar ao lado de um
-// número "hero" grande, dando contexto de tendência sem competir por espaço
-// com um gráfico completo. Cor fixa (default branco), porque hoje só é usado
-// sobre fundo --hero-dark, que não muda entre os temas claro/escuro.
-function sparklineSVG(series, opts = {}) {
-  if (!series || !series.length) return '';
-  const w = opts.width || 110, h = opts.height || 34, pad = 3;
-  const color = opts.color || '#fff';
-  const values = series.map((p) => p.value);
-  const max = Math.max(1, ...values);
-  const min = Math.min(0, ...values);
-  const x = (i) => pad + (i / Math.max(1, series.length - 1)) * (w - pad * 2);
-  const y = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
-  const points = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
-  const linePath = points.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
-  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - pad} L ${points[0].x.toFixed(1)} ${h - pad} Z`;
-  const last = points[points.length - 1];
-  // Decorativo por definição (o número "herói" ao lado já diz o valor) —
-  // aria-hidden evita que o leitor de tela leia um SVG sem significado.
-  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block" aria-hidden="true" focusable="false">
-    <path d="${areaPath}" fill="${color}" opacity="0.15"/>
-    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.4" fill="${color}"/>
-  </svg>`;
+// id -> { build(animate) -> config do Chart.js, chart, canvas, createdAt }
+const CHART_REGISTRY = new Map();
+let chartSeq = 0;
+
+// Lê um token de cor a partir de um elemento (o canvas), respeitando o tema
+// escopado em #app.
+function resolveChartColor(color, el) {
+  if (typeof color !== 'string' || !color.startsWith('var(')) return color;
+  const name = color.slice(4, -1).split(',')[0].trim();
+  const v = getComputedStyle(el || document.documentElement).getPropertyValue(name).trim();
+  return v || '#8A9AA3';
 }
 
-function lineChartSVG(series, opts = {}) {
-  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
-  const w = opts.width || 600, h = opts.height || 200, pad = 28;
-  const fmt = opts.valueFormatter || formatMoney;
-  const values = series.map((p) => p.value);
-  const max = Math.max(1, ...values) * 1.1;
-  const min = Math.min(0, ...values);
-  const x = (i) => pad + (i / Math.max(1, series.length - 1)) * (w - pad * 2);
-  const y = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
+// Converte '#rgb', '#rrggbb' ou 'rgb(...)' em rgba() com a transparência dada
+// — usado nos degradês de preenchimento, que precisam da MESMA cor da linha.
+function chartAlpha(color, alpha) {
+  const c = String(color).trim();
+  let m;
+  if ((m = /^#([0-9a-f]{3})$/i.exec(c))) {
+    const [r, g, b] = m[1].split('').map((h) => parseInt(h + h, 16));
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  if ((m = /^#([0-9a-f]{6})$/i.exec(c))) {
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+  }
+  if ((m = /^rgba?\(([^)]+)\)$/i.exec(c))) {
+    const [r, g, b] = m[1].split(',').map((x) => parseFloat(x));
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  return c;
+}
 
-  const path = series.map((p, i) => (i === 0 ? 'M' : 'L') + x(i).toFixed(1) + ' ' + y(p.value).toFixed(1)).join(' ');
-  const area = path + ` L${x(series.length - 1).toFixed(1)} ${h - pad} L${x(0).toFixed(1)} ${h - pad} Z`;
+function chartTheme(el) {
+  const get = (name, fallback) => getComputedStyle(el).getPropertyValue(name).trim() || fallback;
+  return {
+    ink: get('--ink', '#14212B'),
+    inkSoft: get('--ink-soft', '#5B6B74'),
+    panel: get('--panel', '#FFFFFF'),
+    grid: get('--chart-line', '#DCE2DF'),
+    // Fixo nos dois temas (como o tooltip antigo e o toast): um tooltip escuro
+    // precisa continuar escuro, senão o texto claro some em cima dele.
+    tooltipBg: get('--hero-dark', '#05141F'),
+    font: getComputedStyle(document.body).fontFamily || 'sans-serif',
+    mono: get('--mono', 'ui-monospace, monospace'),
+  };
+}
 
-  const gridLines = [0, 0.5, 1].map((f) => {
-    const yy = pad + f * (h - pad * 2);
-    return `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${w - pad}" y2="${yy.toFixed(1)}" stroke="${CHART_COLORS.line}" stroke-width="1"/>`;
-  }).join('');
+const chartReducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // UX-09 (auditoria 2026-08-23): antes o valor era escrito em TODO ponto
-  // sempre que a série tinha até 14 itens — quatorze valores em reais
-  // ("R$ 1.234,56") em 600px se atropelam e viram uma faixa ilegível. O
-  // gráfico de área já resolvia isso mostrando só o pico e o último ponto;
-  // aqui a régua é a mesma, mas por largura disponível: só rotula se cada
-  // rótulo tiver pelo menos 68px de espaço só pra ele.
-  const spacingPerPoint = (w - pad * 2) / Math.max(1, series.length - 1);
-  const showStaticLabels = spacingPerPoint >= 68;
+// Rótulo compacto de eixo: "R$ 1,5 mil", "R$ 2,3 mi". O valor exato continua
+// no tooltip e nos rótulos de pico — o eixo só dá a escala.
+const chartCompactFmt = typeof Intl !== 'undefined'
+  ? new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 })
+  : null;
+function compactMoney(v) {
+  const n = Number(v) || 0;
+  if (!chartCompactFmt) return 'R$ ' + formatNumber(n, 0);
+  return (n < 0 ? '-' : '') + 'R$ ' + chartCompactFmt.format(Math.abs(n));
+}
 
-  const labels = series.map((p, i) => {
-    if (series.length > 10 && i % Math.ceil(series.length / 8) !== 0) return '';
-    return `<text x="${x(i).toFixed(1)}" y="${h - 6}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
-  }).join('');
+// Formatador do EIXO Y. Se a tela passou um formatador de valor próprio (ex:
+// "3 empresas"), o eixo mostra só inteiros — fração de empresa não existe.
+function chartTickFormatter(opts) {
+  if (opts.tickFormatter) return opts.tickFormatter;
+  if (opts.valueFormatter) return (v) => (Number.isInteger(v) ? formatNumber(v, 0) : '');
+  return compactMoney;
+}
 
-  const points = series.map((p, i) => `
-    <circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.2" fill="${opts.color || CHART_COLORS.accent}">
-      <title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title>
-    </circle>
-    ${showStaticLabels ? `<text x="${x(i).toFixed(1)}" y="${(y(p.value) - 8).toFixed(1)}" font-size="9.5" fill="${opts.color || CHART_COLORS.accent}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
-  `).join('');
+// Opções comuns de tooltip: pílula escura, cantos suaves, valor em fonte mono.
+function chartTooltip(theme, extra = {}) {
+  return {
+    enabled: true,
+    backgroundColor: theme.tooltipBg,
+    titleColor: 'rgba(255,255,255,.65)',
+    bodyColor: '#fff',
+    borderColor: 'rgba(255,255,255,.12)',
+    borderWidth: 1,
+    cornerRadius: 10,
+    padding: { top: 8, bottom: 8, left: 11, right: 11 },
+    titleFont: { family: theme.font, size: 11, weight: '500' },
+    bodyFont: { family: theme.mono, size: 13, weight: '700' },
+    titleMarginBottom: 4,
+    displayColors: true,
+    usePointStyle: true,
+    boxWidth: 8,
+    boxHeight: 8,
+    boxPadding: 4,
+    caretSize: 5,
+    caretPadding: 8,
+    ...extra,
+  };
+}
 
+/* ---------------------------------------------------------------------------
+   Plugins inline (só valem para os gráficos deste arquivo)
+--------------------------------------------------------------------------- */
+
+// Linha vertical pontilhada no ponto sob o cursor — o "crosshair" que o
+// gráfico de área antigo já tinha, agora para todo gráfico de linha.
+const sigesCrosshair = {
+  id: 'sigesCrosshair',
+  beforeDatasetsDraw(chart, args, o) {
+    if (!o || !o.color || !chart.tooltip) return;
+    const active = chart.tooltip.getActiveElements();
+    if (!active.length) return;
+    const { ctx, chartArea } = chart;
+    const x = active[0].element.x;
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = o.color;
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+// Rótulos de valor ESTÁTICOS (visíveis sem hover — importante no celular, onde
+// não existe hover). Só nos índices que a tela escolheu, para não poluir:
+// pico e último ponto nas linhas, todas as barras quando são poucas.
+// Halo na cor do painel por trás do texto para nunca ficar ilegível sobre a
+// linha ou a grade. O X é limitado às bordas do canvas, senão o rótulo do
+// último ponto era cortado.
+const sigesValueLabels = {
+  id: 'sigesValueLabels',
+  afterDatasetsDraw(chart, args, o) {
+    if (!o || !o.indexes || !o.indexes.length) return;
+    const meta = chart.getDatasetMeta(0);
+    const data = chart.data.datasets[0].data;
+    const { ctx, chartArea, width } = chart;
+    // O ponto sob o cursor já mostra o valor no tooltip — o rótulo estático
+    // dele ficaria espiando atrás da caixa, repetido e sujo.
+    const hovered = chart.tooltip ? chart.tooltip.getActiveElements().map((a) => a.index) : [];
+    const size = o.size || 11;
+    ctx.save();
+    ctx.font = `700 ${size}px ${o.family}`;
+    ctx.textAlign = 'left';
+    ctx.lineJoin = 'round';
+
+    // Anticolisão: com poucos pixels por ponto (celular), rótulos vizinhos se
+    // sobrepõem e viram uma mancha ilegível. Desenha primeiro o de MAIOR valor
+    // (o pico nunca é sacrificado) e pula qualquer um que bata num já
+    // desenhado. O valor de quem foi pulado continua no tooltip (toque/hover)
+    // e na tabela de leitura.
+    const drawn = [];
+    const ordered = [...o.indexes].sort((a, b) => Math.abs(data[b]) - Math.abs(data[a]));
+    ordered.forEach((i) => {
+      const el = meta.data[i];
+      if (!el || hovered.includes(i)) return;
+      const v = data[i];
+      const text = o.fmt(v);
+      const tw = ctx.measureText(text).width;
+      const x = Math.min(Math.max(el.x - tw / 2, 2), width - tw - 2);
+      const y = v >= 0
+        ? Math.max(el.y - 8, chartArea.top - 4)
+        : Math.min(el.y + 16, chart.height - 4);
+      const box = { x1: x - 4, x2: x + tw + 4, y1: y - size - 2, y2: y + 3 };
+      if (drawn.some((d) => box.x1 < d.x2 && box.x2 > d.x1 && box.y1 < d.y2 && box.y2 > d.y1)) return;
+      drawn.push(box);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = o.halo;
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = o.colorAt ? o.colorAt(i) : o.color;
+      ctx.fillText(text, x, y);
+    });
+    ctx.restore();
+  },
+};
+
+/* ---------------------------------------------------------------------------
+   Montagem
+--------------------------------------------------------------------------- */
+
+function registerChart(build) {
+  const id = 'ch' + (++chartSeq);
+  CHART_REGISTRY.set(id, { build, chart: null, canvas: null, createdAt: Date.now() });
+  return id;
+}
+
+// HTML padrão de um gráfico: contêiner com ALTURA FIXA (o Chart.js responsivo
+// precisa de um pai com dimensão própria, senão entra num ciclo de
+// crescimento) + canvas + tabela para leitor de tela.
+function chartShell(id, height, ariaLabel, series, opts) {
   return `<div class="chart-wrap">
-    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" role="img" aria-label="${escapeHtml(opts.caption || 'Gráfico de linha')}">
-      ${gridLines}
-      <path d="${area}" fill="${opts.color || CHART_COLORS.accent}" opacity="0.08"/>
-      <path d="${path}" fill="none" stroke="${opts.color || CHART_COLORS.accent}" stroke-width="2.2" stroke-linejoin="round"/>
-      ${points}
-      ${labels}
-    </svg>
+    <div class="chart-canvas" style="height:${height}px">
+      <canvas data-chart-id="${id}" role="img" aria-label="${escapeHtml(ariaLabel)}"></canvas>
+    </div>
     ${chartDataTable(series, opts)}
   </div>`;
 }
 
-// Área preenchida com crosshair + tooltip no hover — usada em projeções e
-// tendências (Dashboard). Chame initAreaCharts(root) depois de inserir o
-// HTML no DOM pra ligar a interação (mesmo padrão de attachMoneyMask/
-// wirePasswordToggles: função de wiring chamada explicitamente pela tela).
-let areaChartSeq = 0;
-function areaChartSVG(series, opts = {}) {
-  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
-  const w = opts.width || 600, h = opts.height || 220, pad = 32;
-  const fmt = opts.valueFormatter || formatMoney;
-  const color = opts.color || CHART_COLORS.purple;
-  const values = series.map((p) => p.value);
-  const max = Math.max(1, ...values) * 1.25;
-  const min = 0;
-  const x = (i) => pad + (i / Math.max(1, series.length - 1)) * (w - pad * 2);
-  const y = (v) => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
-  const points = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
+function mountChartCanvas(canvas) {
+  if (canvas.dataset.chartMounted) return;
+  const entry = CHART_REGISTRY.get(canvas.dataset.chartId);
+  if (!entry) return;
+  canvas.dataset.chartMounted = '1';
 
-  // Segmentos retos ligando os pontos reais — a curva Bézier-por-ponto-médio
-  // usada antes "cortava o canto" de qualquer pico isolado (a linha desenhada
-  // nunca passava pelo ponto em si, só perto dele), fazendo o ponto/rótulo
-  // parecerem flutuar acima da linha em picos altos — bug real reportado
-  // pelo usuário com print (2026-07-31). Reta é a garantia mais simples de
-  // que a linha SEMPRE toca cada dado.
-  const linePath = points.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
-  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - pad} L ${points[0].x.toFixed(1)} ${h - pad} Z`;
+  // CDN bloqueada / sem rede / SRI recusado: o gráfico não existe, mas o dado
+  // não pode sumir junto. Mostra a tabela (que já estava na página) no lugar.
+  if (typeof Chart === 'undefined') {
+    const wrap = canvas.closest('.chart-wrap');
+    if (wrap) {
+      wrap.classList.add('chart-failed');
+      const box = wrap.querySelector('.chart-canvas');
+      if (box) {
+        box.style.height = 'auto';
+        box.innerHTML = '<p class="text-soft text-sm" style="margin:0">Não foi possível carregar o gráfico agora. Os valores estão na tabela abaixo.</p>';
+      }
+    }
+    return;
+  }
 
-  const gridLines = [0, 0.5, 1].map((f) => {
-    const yy = pad + f * (h - pad * 2);
-    return `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${w - pad}" y2="${yy.toFixed(1)}" stroke="${CHART_COLORS.line}" stroke-width="1"/>`;
-  }).join('');
-
-  // Mesmo critério de esparsamento do barChartSVG/lineChartSVG pro eixo X —
-  // com séries longas (ex: 30 dias), rótulo em todo ponto vira ilegível.
-  const shouldShowLabel = (i) => series.length <= 10 || i % Math.ceil(series.length / 8) === 0;
-  const labels = series.map((p, i) => shouldShowLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="10" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>` : '').join('');
-
-  // Rótulo de VALOR estático: só no pico do período e no último ponto — o
-  // resto vive no hover (crosshair + tooltip, initAreaCharts abaixo). Antes
-  // disso, quase todo ponto não-zero ganhava um número (só evitava sobrepor
-  // por distância em X), lotando a tela de valores competindo entre si numa
-  // série de 30 dias — a reclamação real era exatamente essa poluição
-  // visual. Halo (stroke branco) atrás do texto continua, pros 2 rótulos
-  // que sobram nunca ficarem ilegíveis em cima da linha/grade.
-  let peakIdx = 0;
-  series.forEach((p, i) => { if (p.value > series[peakIdx].value) peakIdx = i; });
-  const lastIdx = series.length - 1;
-  const staticLabelIdxs = new Set([peakIdx, lastIdx]);
-  const valueLabels = series.map((p, i) => {
-    if (!staticLabelIdxs.has(i) || p.value <= 0) return '';
-    const xi = x(i);
-    const ly = Math.max(12, y(p.value) - 12).toFixed(1);
-    const anchor = i === lastIdx && i !== peakIdx ? 'end' : 'middle';
-    const txt = escapeHtml(fmt(p.value));
-    return `
-      <text x="${xi.toFixed(1)}" y="${ly}" font-size="11" fill="none" stroke="var(--panel)" stroke-width="3" text-anchor="${anchor}" font-weight="700" paint-order="stroke">${txt}</text>
-      <text x="${xi.toFixed(1)}" y="${ly}" font-size="11" fill="var(--ink)" text-anchor="${anchor}" font-weight="700">${txt}</text>
-    `;
-  }).join('');
-
-  // Ponto = "superfície" (preenchido com a cor do painel) + anel na cor da
-  // série — some no hover como um marcador maior, nunca some/aparece do zero.
-  const dotR = series.length > 15 ? 2.6 : 3.6;
-  const dots = series.map((p, i) => `<circle class="area-chart-dot" data-x="${points[i].x.toFixed(1)}" data-y="${points[i].y.toFixed(1)}" data-value="${p.value}" data-label="${escapeHtml(p.label || '')}" cx="${points[i].x.toFixed(1)}" cy="${points[i].y.toFixed(1)}" r="${dotR}" fill="var(--panel)" stroke="${color}" stroke-width="2"><title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title></circle>`).join('');
-
-  const chartId = 'ac' + (++areaChartSeq);
-  // O id do gradiente usa o chartId (único por render) e não só opts.gradId:
-  // dois gráficos de área sem gradId na mesma tela produziriam ids duplicados
-  // e o segundo herdaria a COR do primeiro, porque url(#id) resolve sempre
-  // para o primeiro elemento com aquele id no documento.
-  const gradId = 'areaGrad-' + (opts.gradId || '') + chartId;
-  return `<div class="area-chart" data-chart-id="${chartId}" data-dot-r="${dotR}" data-dot-r-active="${dotR + 1.8}" data-fmt="${opts.valueFormatterName === 'number' ? 'number' : 'money'}">
-    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" class="area-chart-svg" role="img" aria-label="${escapeHtml(opts.caption || 'Gráfico de área')}">
-      <defs>
-        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
-          <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
-        </linearGradient>
-      </defs>
-      ${gridLines}
-      <path d="${areaPath}" fill="url(#${gradId})"/>
-      <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      <line class="area-chart-crosshair" x1="0" y1="${pad}" x2="0" y2="${h - pad}" stroke="var(--ink-soft)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
-      <g>${dots}</g>
-      ${valueLabels}
-      ${labels}
-    </svg>
-    <div class="area-chart-tooltip"><span class="area-chart-tooltip-key" style="background:${color}"></span><span class="area-chart-tooltip-val"></span><div class="area-chart-tooltip-lbl"></div></div>
-    ${chartDataTable(series, { ...opts, valueFormatter: fmt })}
-  </div>`;
+  entry.canvas = canvas;
+  entry.chart = new Chart(canvas, entry.build(true));
 }
 
-// Liga o crosshair + tooltip de hover em todo .area-chart dentro de `root`
-// (chame depois de inserir o HTML no DOM — o innerHTML não preserva
-// listeners, então isso precisa rodar a cada render, igual attachMoneyMask/
-// wirePasswordToggles). Sem gate de "já ligado": cada render recria os
-// elementos do zero (novo innerHTML), então os listeners antigos já foram
-// descartados junto com os nós antigos — não há o que vazar.
-function initAreaCharts(root) {
-  (root || document).querySelectorAll('.area-chart').forEach((wrap) => {
-    const svg = wrap.querySelector('.area-chart-svg');
-    const crosshair = wrap.querySelector('.area-chart-crosshair');
-    const dots = Array.from(wrap.querySelectorAll('.area-chart-dot'));
-    const tooltip = wrap.querySelector('.area-chart-tooltip');
-    if (!svg || !dots.length || !tooltip) return;
-    const valEl = tooltip.querySelector('.area-chart-tooltip-val');
-    const lblEl = tooltip.querySelector('.area-chart-tooltip-lbl');
-    const baseR = Number(wrap.dataset.dotR);
-    const activeR = Number(wrap.dataset.dotRActive);
-    const fmtFn = wrap.dataset.fmt === 'number' ? formatNumber : formatMoney;
-    const vb = svg.viewBox.baseVal;
+// Instancia todo canvas ainda não montado dentro de `root` e destrói os
+// gráficos cujo canvas saiu do DOM. Idempotente.
+function initCharts(root) {
+  (root || document).querySelectorAll('canvas[data-chart-id]:not([data-chart-mounted])').forEach(mountChartCanvas);
+  sweepCharts();
+}
 
-    const move = (clientX) => {
-      const rect = svg.getBoundingClientRect();
-      const px = ((clientX - rect.left) / rect.width) * vb.width;
-      let nearest = dots[0], bestDist = Infinity;
-      dots.forEach((d) => {
-        const dist = Math.abs(Number(d.dataset.x) - px);
-        if (dist < bestDist) { bestDist = dist; nearest = d; }
-      });
-      const px2 = Number(nearest.dataset.x), py = Number(nearest.dataset.y);
-      crosshair.setAttribute('x1', px2); crosshair.setAttribute('x2', px2); crosshair.setAttribute('opacity', 1);
-      dots.forEach((d) => d.setAttribute('r', d === nearest ? activeR : baseR));
-      valEl.textContent = fmtFn(Number(nearest.dataset.value));
-      lblEl.textContent = nearest.dataset.label;
-      tooltip.style.left = ((px2 / vb.width) * 100) + '%';
-      tooltip.style.top = ((py / vb.height) * 100) + '%';
-      tooltip.style.opacity = '1';
-    };
-    const leave = () => {
-      crosshair.setAttribute('opacity', 0);
-      tooltip.style.opacity = '0';
-      dots.forEach((d) => d.setAttribute('r', baseR));
-    };
-    wrap.addEventListener('mousemove', (e) => move(e.clientX));
-    wrap.addEventListener('mouseleave', leave);
-
-    // UX-06 (auditoria 2026-08-23): o touchmove chamava preventDefault()
-    // INCONDICIONALMENTE. Se o dedo começasse em cima do gráfico, a página
-    // simplesmente não rolava — e num celular o gráfico ocupa a largura toda
-    // do card, então isso acontecia o tempo todo. Agora a direção do gesto
-    // decide: arrasto horizontal é leitura do gráfico (bloqueia a rolagem),
-    // arrasto vertical é rolagem da página (deixa passar). O eixo é decidido
-    // uma vez por gesto, senão a intenção muda no meio do movimento.
-    let touchStartX = 0, touchStartY = 0, axis = null;
-    wrap.addEventListener('touchstart', (e) => {
-      if (!e.touches[0]) return;
-      touchStartX = e.touches[0].clientX;
-      touchStartY = e.touches[0].clientY;
-      axis = null;
-    }, { passive: true });
-
-    wrap.addEventListener('touchmove', (e) => {
-      const t = e.touches[0];
-      if (!t) return;
-      if (axis === null) {
-        const dx = Math.abs(t.clientX - touchStartX);
-        const dy = Math.abs(t.clientY - touchStartY);
-        // Zona morta de 8px: abaixo disso o gesto ainda não tem direção.
-        if (dx < 8 && dy < 8) return;
-        axis = dx > dy ? 'x' : 'y';
+function sweepCharts() {
+  const now = Date.now();
+  CHART_REGISTRY.forEach((entry, id) => {
+    if (entry.canvas) {
+      if (!entry.canvas.isConnected) {
+        if (entry.chart) entry.chart.destroy();
+        CHART_REGISTRY.delete(id);
       }
-      if (axis !== 'x') return; // rolagem vertical — não interfere
-      move(t.clientX);
-      e.preventDefault();
-    }, { passive: false });
-
-    wrap.addEventListener('touchend', () => { axis = null; leave(); });
-    wrap.addEventListener('touchcancel', () => { axis = null; leave(); });
+    } else if (now - entry.createdAt > 15000 && !document.querySelector(`canvas[data-chart-id="${id}"]`)) {
+      // HTML gerado mas nunca inserido na página (tela que descartou o render).
+      CHART_REGISTRY.delete(id);
+    }
   });
 }
 
-function barChartSVG(series, opts = {}) {
-  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
-  const w = opts.width || 600, h = opts.height || 200, pad = 28;
-  const fmt = opts.valueFormatter || formatMoney;
-  const values = series.map((p) => p.value);
-  // Diverging: quando a série tem valor negativo (ex: um período com
-  // prejuízo, agora possível com o recurso de perda), a barra precisa
-  // crescer PRA BAIXO a partir de uma linha de base real (y do valor 0),
-  // não só travar numa altura mínima de 1px acima do zero — senão um mês
-  // negativo aparecia como "quase zero" positivo em vez de prejuízo de
-  // verdade (bug real reportado pelo usuário, 2026-08-03). Quando todos os
-  // valores são >= 0 (caso mais comum), min fica 0 e o resultado é idêntico
-  // ao comportamento antigo (baseline no rodapé, barra sempre pra cima).
-  const hasNegative = values.some((v) => v < 0);
-  const max = Math.max(1, ...values) * (hasNegative ? 1.25 : 1.15);
-  const min = hasNegative ? Math.min(0, ...values) * 1.25 : 0;
-  const range = max - min || 1;
-  const y = (v) => h - pad - ((v - min) / range) * (h - pad * 2);
-  const y0 = y(0); // linha de base (onde valor = 0)
-  const gap = (w - pad * 2) / series.length;
-  // Teto de largura da barra. Sem ele, poucas barras num gráfico largo viram
-  // lajes: 6 barras num viewBox de 1180 dariam 112px cada, e 2 barras dariam
-  // 337px — o retângulo deixa de ler como "barra" e vira um bloco. Com o teto,
-  // séries densas (30 dias) continuam exatamente como antes (22px, bem abaixo
-  // do limite) e séries curtas ficam proporcionais, centradas no próprio
-  // espaço (o cálculo de `bx` logo abaixo já centraliza a barra no slot).
-  const barW = Math.min(gap * 0.6, opts.maxBarWidth || 72);
-
-  // Tipografia proporcional ao viewBox. O SVG usa viewBox fixo + width:100%,
-  // então TUDO (inclusive o texto) é multiplicado por (largura física / w)
-  // na hora de desenhar. Um gráfico largo dentro do mesmo card renderiza numa
-  // escala menor e encolhe os rótulos junto: ao passar o Lucro Analítico de
-  // viewBox 600 para 1180, a fonte caiu de 9,5px para 7,7px reais na tela.
-  //
-  // A âncora é a ALTURA, não a largura: `h` acompanha o tamanho físico do
-  // gráfico (um gráfico mais largo neste sistema também é mais alto), e o
-  // padrão h=200 mantém fator 1 — ou seja, todo gráfico já existente fica
-  // pixel a pixel idêntico ao que era.
-  const fs = (base) => +(base * (h / 200)).toFixed(1);
-  // Com muitas barras (ex: 30 dias), mostrar rótulo em toda barra vira uma
-  // faixa ilegível de texto sobreposto — mesmo padrão de espaçamento do
-  // lineChartSVG: só mostra 1 a cada N pontos quando a série é longa. Usa o
-  // MESMO critério pro rótulo de valor (em cima da barra) e pro rótulo do
-  // eixo X, senão um mostraria mais pontos que o outro sem razão.
-  const shouldShowLabel = (i) => series.length <= 10 || i % Math.ceil(series.length / 8) === 0;
-
-  const bars = series.map((p, i) => {
-    const yVal = y(p.value);
-    const bh = Math.abs(y0 - yVal);
-    const by = Math.min(y0, yVal);
-    const bx = pad + i * gap + (gap - barW) / 2;
-    const color = p.color || (p.value < 0 ? CHART_COLORS.bad : (opts.color || CHART_COLORS.brand));
-    const labelY = p.value >= 0 ? Math.max(by - 5, 10) : Math.min(by + bh + 14, h - 4);
-    return `
-      <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(bh, 1).toFixed(1)}" rx="3" fill="${color}">
-        <title>${escapeHtml(p.label || '')}: ${escapeHtml(fmt(p.value))}</title>
-      </rect>
-      ${shouldShowLabel(i) ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${labelY.toFixed(1)}" font-size="${fs(9.5)}" fill="${color}" text-anchor="middle" font-weight="700">${escapeHtml(fmt(p.value))}</text>` : ''}
-    `;
-  }).join('');
-
-  const labels = series.map((p, i) => {
-    if (!shouldShowLabel(i)) return '';
-    const bx = pad + i * gap + gap / 2;
-    return `<text x="${bx.toFixed(1)}" y="${h - 6}" font-size="${fs(10)}" fill="var(--ink-soft)" text-anchor="middle">${escapeHtml(p.label || '')}</text>`;
-  }).join('');
-
-  return `<div class="chart-wrap">
-    <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:${w}px;display:block;margin:0 auto" role="img" aria-label="${escapeHtml(opts.caption || 'Gráfico de barras')}">
-      <line x1="${pad}" y1="${y0.toFixed(1)}" x2="${w - pad}" y2="${y0.toFixed(1)}" stroke="${CHART_COLORS.line}"/>
-      ${bars}${labels}
-    </svg>
-    ${chartDataTable(series, opts)}
-  </div>`;
+// Trocar o tema recria os gráficos vivos: as cores dos eixos, grade e tooltip
+// foram lidas no momento da criação.
+function restyleCharts() {
+  CHART_REGISTRY.forEach((entry) => {
+    if (!entry.canvas || !entry.chart || !entry.canvas.isConnected) return;
+    entry.chart.destroy();
+    entry.chart = new Chart(entry.canvas, entry.build(false));
+  });
 }
 
-function donutChartSVG(segments, opts = {}) {
-  // Diferente dos outros charts (linha/barra/área), esse nunca recebia
-  // chartSize() dos chamadores — o SVG saía sempre 180x180 fixo, mesmo width/
-  // height (não percentual), então nunca encolhia de verdade no celular. Um
-  // card estreito (~300px) com viewBox 180 ainda "cabe" tecnicamente, mas
-  // fica desproporcional/grande perto dos outros elementos compactos da
-  // tela — default menor no celular replica o mesmo cuidado que chartSize()
-  // já dá aos outros tipos de gráfico.
+// Agrupa várias mutações seguidas numa única varredura. Usa setTimeout e NÃO
+// requestAnimationFrame de propósito: o rAF é pausado pelo navegador em aba em
+// segundo plano e em alguns webviews, e o gráfico simplesmente nunca nascia
+// (os canvas ficavam vazios, em 300x150, até alguém forçar a montagem).
+// Alinhar a criação a um quadro de pintura não traz nada aqui.
+let chartSyncQueued = false;
+function scheduleChartSync() {
+  if (chartSyncQueued) return;
+  chartSyncQueued = true;
+  setTimeout(() => {
+    chartSyncQueued = false;
+    initCharts(document);
+  }, 0);
+}
+
+if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+  new MutationObserver(scheduleChartSync).observe(document.body || document.documentElement, { childList: true, subtree: true });
+  new MutationObserver(() => { if (typeof Chart !== 'undefined') restyleCharts(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}
+
+/* ---------------------------------------------------------------------------
+   Opções base compartilhadas pelos gráficos cartesianos
+--------------------------------------------------------------------------- */
+
+function cartesianOptions(theme, series, opts, { hasNegative, animate }) {
+  const fmtTick = chartTickFormatter(opts);
+  const many = series.length > 10;
+  const narrow = typeof window !== 'undefined' && window.innerWidth <= 640;
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: animate && !chartReducedMotion() ? { duration: 750, easing: 'easeOutQuart' } : false,
+    // Folga em cima para o rótulo do pico não ser cortado.
+    layout: { padding: { top: 16, right: 6, left: 0, bottom: 0 } },
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: {
+        grid: { display: false },
+        border: { display: false },
+        ticks: {
+          color: theme.inkSoft,
+          font: { family: theme.font, size: 11 },
+          maxRotation: 0,
+          autoSkip: true,
+          // Tela estreita comporta menos datas lado a lado; sem isto os
+          // rótulos "01/10 05/10 09/10..." ficam colados no celular.
+          maxTicksLimit: narrow ? (many ? 5 : 6) : (many ? 8 : 12),
+          padding: 6,
+        },
+      },
+      y: {
+        beginAtZero: true,
+        grace: '10%',
+        border: { display: false },
+        grid: {
+          color: (c) => (hasNegative && c.tick && c.tick.value === 0 ? chartAlpha(theme.inkSoft, 0.55) : theme.grid),
+          lineWidth: 1,
+          drawTicks: false,
+        },
+        ticks: {
+          color: theme.inkSoft,
+          font: { family: theme.font, size: 11 },
+          maxTicksLimit: 5,
+          padding: 10,
+          callback: (v) => fmtTick(v),
+        },
+      },
+    },
+  };
+}
+
+// Índices do pico e do último ponto (valores > 0), sem repetir.
+function peakAndLast(series) {
+  let peak = 0;
+  series.forEach((p, i) => { if (p.value > series[peak].value) peak = i; });
+  const last = series.length - 1;
+  return [...new Set([peak, last])].filter((i) => series[i].value > 0);
+}
+
+/* ---------------------------------------------------------------------------
+   Linha e área
+   Curva SUAVE por interpolação monotônica (cubicInterpolationMode:'monotone'),
+   não por `tension`. A razão é histórica: a curva Bézier por ponto-médio que
+   este sistema já usou "cortava o canto" de picos isolados — a linha passava
+   perto do ponto, não por ele, e o rótulo parecia flutuar (bug real, relatado
+   com print em 2026-07-31) — e `tension` pode ainda ultrapassar o zero e
+   desenhar valor negativo onde não existe. A monotônica é suave E garante que
+   a linha toca todos os pontos, sem nunca passar de um valor ao seguinte.
+--------------------------------------------------------------------------- */
+
+function lineLikeChart(series, opts, { filled }) {
+  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
+  const fmt = opts.valueFormatter || formatMoney;
+  const h = opts.height || (filled ? 220 : 200);
+  const caption = opts.caption || (filled ? 'Gráfico de área' : 'Gráfico de linha');
+  const hasNegative = series.some((p) => p.value < 0);
+
+  const id = registerChart((animate) => {
+    const canvas = CHART_REGISTRY.get(id).canvas;
+    const theme = chartTheme(canvas);
+    const color = resolveChartColor(opts.color || CHART_COLORS.accent, canvas);
+    const n = series.length;
+    const [a0, a1] = filled ? [0.34, 0.02] : [0.14, 0];
+    const options = cartesianOptions(theme, series, opts, { hasNegative, animate });
+    options.plugins = {
+      legend: { display: false },
+      tooltip: chartTooltip(theme, {
+        callbacks: {
+          title: (items) => (items[0] ? items[0].label : ''),
+          label: (ctx) => ' ' + fmt(ctx.parsed.y),
+          labelColor: () => ({ borderColor: color, backgroundColor: color, borderRadius: 4 }),
+        },
+      }),
+      sigesCrosshair: { color: chartAlpha(theme.inkSoft, 0.7) },
+      sigesValueLabels: {
+        indexes: peakAndLast(series),
+        fmt, color: theme.ink, halo: theme.panel, family: theme.font, size: 11,
+      },
+    };
+    return {
+      type: 'line',
+      data: {
+        labels: series.map((p) => p.label || ''),
+        datasets: [{
+          data: series.map((p) => p.value),
+          borderColor: color,
+          borderWidth: 2.5,
+          borderCapStyle: 'round',
+          borderJoinStyle: 'round',
+          cubicInterpolationMode: 'monotone',
+          fill: 'origin',
+          backgroundColor: (ctx) => {
+            const { chart } = ctx;
+            if (!chart.chartArea) return chartAlpha(color, 0.12);
+            const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
+            g.addColorStop(0, chartAlpha(color, a0));
+            g.addColorStop(1, chartAlpha(color, a1));
+            return g;
+          },
+          // Ponto = "superfície" (cor do painel) com anel na cor da série;
+          // cresce e se preenche no hover. Em séries longas some, para a linha
+          // não virar um colar de bolinhas.
+          pointRadius: n > 20 ? 0 : (n > 12 ? 2.5 : 3.8),
+          pointHoverRadius: 6.5,
+          pointBackgroundColor: theme.panel,
+          pointBorderColor: color,
+          pointBorderWidth: 2,
+          pointHoverBackgroundColor: color,
+          pointHoverBorderColor: theme.panel,
+          pointHoverBorderWidth: 2.5,
+          pointHitRadius: 24,
+        }],
+      },
+      options,
+      plugins: [sigesCrosshair, sigesValueLabels],
+    };
+  });
+
+  return chartShell(id, h, caption, series, { ...opts, valueFormatter: fmt });
+}
+
+function lineChart(series, opts = {}) { return lineLikeChart(series, opts, { filled: false }); }
+function areaChart(series, opts = {}) { return lineLikeChart(series, opts, { filled: true }); }
+
+/* ---------------------------------------------------------------------------
+   Barras
+--------------------------------------------------------------------------- */
+
+function barChart(series, opts = {}) {
+  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
+  const fmt = opts.valueFormatter || formatMoney;
+  const h = opts.height || 200;
+  const hasNegative = series.some((p) => p.value < 0);
+
+  const id = registerChart((animate) => {
+    const canvas = CHART_REGISTRY.get(id).canvas;
+    const theme = chartTheme(canvas);
+    const base = resolveChartColor(opts.color || CHART_COLORS.brand, canvas);
+    const bad = resolveChartColor(CHART_COLORS.bad, canvas);
+    // Valor negativo (período com prejuízo, possível com o recurso de perda)
+    // SEMPRE em vermelho, salvo cor explícita da barra.
+    const colors = series.map((p) => (p.color ? resolveChartColor(p.color, canvas) : (p.value < 0 ? bad : base)));
+
+    // Poucas barras: rotula todas as não-nulas. Muitas: só pico e último —
+    // com 30 barras um rótulo em cada uma vira faixa ilegível.
+    const labelIdx = series.length <= 10
+      ? series.map((p, i) => i).filter((i) => series[i].value !== 0)
+      : peakAndLast(series);
+
+    const options = cartesianOptions(theme, series, opts, { hasNegative, animate });
+    options.plugins = {
+      legend: { display: false },
+      tooltip: chartTooltip(theme, {
+        callbacks: {
+          title: (items) => (items[0] ? items[0].label : ''),
+          label: (ctx) => ' ' + fmt(ctx.parsed.y),
+          labelColor: (ctx) => ({ borderColor: colors[ctx.dataIndex], backgroundColor: colors[ctx.dataIndex], borderRadius: 4 }),
+        },
+      }),
+      sigesValueLabels: {
+        indexes: labelIdx,
+        fmt, colorAt: (i) => colors[i], halo: theme.panel, family: theme.font, size: 11,
+      },
+    };
+
+    // UMA função que escolhe a cor pelo índice da barra. Não pode ser um array
+    // de funções ([fn, fn]): o Chart.js só resolve como "scriptable" quando a
+    // opção INTEIRA é uma função; num array, cada função seria lida como se
+    // fosse uma cor — e a barra saía preta.
+    const gradient = (ctx) => {
+      const c = colors[ctx.dataIndex];
+      const { chart } = ctx;
+      if (!chart.chartArea) return c;
+      const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
+      g.addColorStop(0, c);
+      g.addColorStop(1, chartAlpha(c, 0.62));
+      return g;
+    };
+
+    return {
+      type: 'bar',
+      data: {
+        labels: series.map((p) => p.label || ''),
+        datasets: [{
+          data: series.map((p) => p.value),
+          backgroundColor: hasNegative ? colors : gradient,
+          hoverBackgroundColor: colors,
+          borderRadius: 7,
+          // Só a ponta livre arredonda (topo da barra positiva, base da
+          // negativa); o lado que encosta no zero fica reto.
+          borderSkipped: 'start',
+          // Teto de largura: sem ele, 2 barras num gráfico largo viram lajes.
+          maxBarThickness: opts.maxBarWidth || 64,
+          categoryPercentage: 0.78,
+          barPercentage: 0.78,
+        }],
+      },
+      options,
+      plugins: [sigesValueLabels],
+    };
+  });
+
+  return chartShell(id, h, opts.caption || 'Gráfico de barras', series, { ...opts, valueFormatter: fmt });
+}
+
+/* ---------------------------------------------------------------------------
+   Rosca (a legenda continua sendo HTML — donutLegendHtml — porque ali o texto
+   é real, selecionável e lido por leitor de tela)
+--------------------------------------------------------------------------- */
+
+function donutChart(segments, opts = {}) {
+  // Mesmo cuidado do SVG antigo: um card estreito de celular não comporta a
+  // rosca de 180px, que ficava desproporcional ao lado dos elementos compactos.
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
   const size = opts.size || (isMobile ? 128 : 180);
-  const thickness = opts.thickness || Math.round(size / 6.9);
   const fmt = opts.valueFormatter || formatMoney;
-  const r = (size - thickness) / 2, cx = size / 2, cy = size / 2;
-  const circumference = 2 * Math.PI * r;
+  const shown = segments.filter((s) => s.value > 0);
   const total = segments.reduce((s, x) => s + x.value, 0) || 1;
-  let acc = 0;
-  const arcs = segments.filter((s) => s.value > 0).map((s) => {
-    const len = (s.value / total) * circumference;
-    const dasharray = `${len.toFixed(2)} ${(circumference - len).toFixed(2)}`;
-    const dashoffset = (-acc).toFixed(2);
-    acc += len;
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${thickness}" stroke-dasharray="${dasharray}" stroke-dashoffset="${dashoffset}" transform="rotate(-90 ${cx} ${cy})"><title>${escapeHtml(s.label)}: ${escapeHtml(fmt(s.value))} (${formatNumber((s.value / total) * 100, 0)}%)</title></circle>`;
-  }).join('');
+  const box = (id) => `<div style="width:${size}px;height:${size}px;max-width:100%;flex:none" aria-hidden="true"><canvas data-chart-id="${id}"></canvas></div>`;
+
+  if (!shown.length) {
+    // Sem nenhum valor positivo, anel neutro — mesmo comportamento do SVG.
+    const id0 = registerChart(() => {
+      const theme = chartTheme(CHART_REGISTRY.get(id0).canvas);
+      return {
+        type: 'doughnut',
+        data: { labels: [''], datasets: [{ data: [1], backgroundColor: [theme.grid], borderWidth: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false, cutout: '70%', animation: false, events: [], plugins: { legend: { display: false }, tooltip: { enabled: false } } },
+      };
+    });
+    return box(id0);
+  }
+
+  const id = registerChart((animate) => {
+    const canvas = CHART_REGISTRY.get(id).canvas;
+    const theme = chartTheme(canvas);
+    const colors = shown.map((s) => resolveChartColor(s.color, canvas));
+    return {
+      type: 'doughnut',
+      data: {
+        labels: shown.map((s) => s.label),
+        datasets: [{
+          data: shown.map((s) => s.value),
+          backgroundColor: colors,
+          // Borda na cor do painel + `spacing` = fatias separadas por uma
+          // fresta limpa, com as pontas arredondadas.
+          borderColor: theme.panel,
+          borderWidth: 2,
+          spacing: 2,
+          borderRadius: 6,
+          hoverOffset: 6,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '70%',
+        animation: animate && !chartReducedMotion() ? { duration: 800, easing: 'easeOutQuart', animateRotate: true, animateScale: false } : false,
+        layout: { padding: 6 },
+        plugins: {
+          legend: { display: false },
+          tooltip: chartTooltip(theme, {
+            callbacks: {
+              title: () => '',
+              label: (ctx) => ` ${ctx.label}: ${fmt(ctx.parsed)} (${formatNumber((ctx.parsed / total) * 100, 0)}%)`,
+              labelColor: (ctx) => ({ borderColor: colors[ctx.dataIndex], backgroundColor: colors[ctx.dataIndex], borderRadius: 4 }),
+            },
+          }),
+        },
+      },
+    };
+  });
+
   // A legenda ao lado (donutLegendHtml) já expõe rótulo, valor e percentual em
-  // texto real, então aqui o SVG é decorativo — marcar aria-hidden evita que o
-  // leitor de tela leia a mesma informação duas vezes.
-  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="max-width:100%;height:auto;flex:none" aria-hidden="true" focusable="false">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${CHART_COLORS.line}" stroke-width="${thickness}"/>
-    ${arcs}
-  </svg>`;
+  // texto real, então o canvas é decorativo — aria-hidden evita que o leitor
+  // de tela leia a mesma informação duas vezes.
+  return box(id);
 }
 
 function donutLegendHtml(segments, opts = {}) {
@@ -433,4 +649,55 @@ function donutLegendHtml(segments, opts = {}) {
       <span class="text-soft mono" style="margin-left:auto">${formatNumber((s.value / total) * 100, 0)}%</span>
     </div>
   `).join('');
+}
+
+/* ---------------------------------------------------------------------------
+   Sparkline — compacto, sem eixo e sem hover, ao lado de um número "hero".
+   Cor fixa (default branco): hoje só é usado sobre --hero-dark, que não muda
+   entre os temas claro/escuro.
+--------------------------------------------------------------------------- */
+
+function sparkline(series, opts = {}) {
+  if (!series || !series.length) return '';
+  const w = opts.width || 110, h = opts.height || 34;
+  const color = opts.color || '#fff';
+  const lastIdx = series.length - 1;
+
+  const id = registerChart((animate) => ({
+    type: 'line',
+    data: {
+      labels: series.map((p) => p.label || ''),
+      datasets: [{
+        data: series.map((p) => p.value),
+        borderColor: color,
+        borderWidth: 1.8,
+        borderCapStyle: 'round',
+        borderJoinStyle: 'round',
+        cubicInterpolationMode: 'monotone',
+        fill: 'origin',
+        backgroundColor: chartAlpha(color, 0.15),
+        // Só o último ponto aparece, como o círculo do SVG antigo.
+        pointRadius: series.map((p, i) => (i === lastIdx ? 2.6 : 0)),
+        pointBackgroundColor: color,
+        pointBorderWidth: 0,
+        pointHoverRadius: 0,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: animate && !chartReducedMotion() ? { duration: 600, easing: 'easeOutQuart' } : false,
+      events: [],
+      layout: { padding: { top: 4, bottom: 3, left: 3, right: 5 } },
+      scales: {
+        x: { display: false },
+        y: { display: false, beginAtZero: true, grace: '6%' },
+      },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    },
+  }));
+
+  // Decorativo por definição (o número "herói" ao lado já diz o valor) —
+  // aria-hidden evita que o leitor de tela leia um desenho sem significado.
+  return `<div style="width:${w}px;height:${h}px;flex:none" aria-hidden="true"><canvas data-chart-id="${id}"></canvas></div>`;
 }

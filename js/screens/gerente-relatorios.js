@@ -159,7 +159,7 @@ function paintLucroAnalitico(totals, series, bucket) {
            que deixava o gráfico ilhado no meio de um card duas vezes maior.
            O degrau de 820 cobre notebook/tablet, onde 1180 seria espremido
            a ~70% e encolheria os rótulos junto. -->
-      <div class="mt-8">${barChartSVG(chartSeries, { color: CHART_COLORS.accent, caption: 'Lucro líquido por período', emptyMessage: 'Sem movimento neste período.', ...chartSize(1180, 260, 320, 200, 820, 230) })}</div>
+      <div class="mt-8">${barChart(chartSeries, { color: CHART_COLORS.accent, caption: 'Lucro líquido por período', emptyMessage: 'Sem movimento neste período.', ...chartSize(1180, 260, 320, 200, 820, 230) })}</div>
     </div>
     <div class="card mt-14" style="padding:0">
       <table class="data-table table-scroll">
@@ -193,11 +193,11 @@ function paintFluxoCaixa(totals, series, bucket) {
     <div class="grid grid-2 mt-14">
       <div class="card">
         <h3>Recebido por período</h3>
-        <div class="mt-8">${lineChartSVG(seriesIn, { color: CHART_COLORS.good, caption: 'Recebido por período', emptyMessage: 'Sem dados.', ...chartSize(600, 200, 320, 200) })}</div>
+        <div class="mt-8">${lineChart(seriesIn, { color: CHART_COLORS.good, caption: 'Recebido por período', emptyMessage: 'Sem dados.', ...chartSize(600, 200, 320, 200) })}</div>
       </div>
       <div class="card">
         <h3>Novo capital emprestado por período</h3>
-        <div class="mt-8">${lineChartSVG(seriesOut, { color: CHART_COLORS.brand, caption: 'Capital emprestado por período', emptyMessage: 'Sem dados.', ...chartSize(600, 200, 320, 200) })}</div>
+        <div class="mt-8">${lineChart(seriesOut, { color: CHART_COLORS.brand, caption: 'Capital emprestado por período', emptyMessage: 'Sem dados.', ...chartSize(600, 200, 320, 200) })}</div>
       </div>
     </div>
   `;
@@ -219,7 +219,7 @@ function paintRelatorioAnalitico(totals, series) {
       <div class="card">
         <h3>Composição do período</h3>
         <p class="text-sm text-soft mt-8">Entradas e saídas são 2 totais independentes (não somam "100%" de um mesmo todo) — comparadas em barra, não em rosca.</p>
-        <div class="mt-14">${barChartSVG([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }], { caption: 'Entradas e saídas do período', ...chartSize(320, 180, 300, 180) })}</div>
+        <div class="mt-14">${barChart([{ label: 'Entradas', value: entradas, color: CHART_COLORS.good }, { label: 'Saídas (novo crédito)', value: saidas, color: CHART_COLORS.brand }], { caption: 'Entradas e saídas do período', ...chartSize(320, 180, 300, 180) })}</div>
       </div>
       <div class="card">
         <h3>Resumo</h3>

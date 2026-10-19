@@ -599,23 +599,27 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .bar-fill.over { background: var(--bad); }
 
 /* ---------------------------------------------------------------------------
-   Gráfico de área com crosshair + tooltip (charts.js, areaChartSVG)
+   Gráficos (Chart.js — js/charts.js)
+   O tooltip, o crosshair e os rótulos são desenhados dentro do próprio canvas;
+   aqui só ficam o contêiner e o estado de falha.
 --------------------------------------------------------------------------- */
 
-.area-chart { position: relative; }
-.area-chart-tooltip {
-  /* Fundo fixo (--hero-dark, não var(--ink)) — um tooltip escuro precisa
-     continuar escuro nos dois temas; --ink vira claro no modo escuro, o que
-     deixaria o texto branco ilegível em cima dele (mesmo cuidado já usado
-     no hero do Dashboard/Score e no toast). */
-  position: absolute; pointer-events: none; background: var(--hero-dark); color: #fff;
-  border-radius: 9px; padding: 7px 10px; font-size: 12px; opacity: 0;
-  transform: translate(-50%, -100%); transition: opacity .1s; white-space: nowrap;
-  z-index: 5; box-shadow: 0 8px 20px rgba(0,0,0,.25);
+/* O Chart.js responsivo mede o PAI do canvas: ele precisa ter altura própria
+   (definida inline por chartShell) e position:relative, senão o gráfico entra
+   num ciclo de crescimento. min-width:0 deixa o contêiner encolher dentro de
+   um flex/grid em vez de forçar o card a alargar. */
+.chart-canvas { position: relative; width: 100%; min-width: 0; }
+.chart-canvas canvas { display: block; }
+
+/* Biblioteca não carregou (CDN fora do ar / sem rede): a tabela que já existia
+   só para leitor de tela passa a ser visível, para o número não sumir. */
+.chart-failed .sr-only-table {
+  position: static; width: auto; height: auto; margin: 10px 0 0; overflow: visible;
+  clip: auto; white-space: normal; border-collapse: collapse; font-size: 12px;
 }
-.area-chart-tooltip-val { font-family: var(--mono); font-weight: 700; font-size: 13px; }
-.area-chart-tooltip-lbl { font-size: 10.5px; color: rgba(255,255,255,.65); margin-top: 1px; }
-.area-chart-tooltip-key { display: inline-block; width: 9px; height: 2px; margin-right: 6px; vertical-align: middle; border-radius: 1px; }
+.chart-failed .sr-only-table th, .chart-failed .sr-only-table td {
+  border: 1px solid var(--line, #ddd); padding: 4px 8px; text-align: left;
+}
 
 /* ---------------------------------------------------------------------------
    Toast

@@ -87,7 +87,7 @@ function paintGerenteScore(root, { rows, paidInstallments }) {
         </div>
         ${rows.length ? `
         <div class="flex items-center" style="gap:20px;flex-wrap:wrap;flex:1;min-width:260px">
-          ${donutChartSVG(tierSegments, { valueFormatter: countFmt })}
+          ${donutChart(tierSegments, { valueFormatter: countFmt })}
           <div style="flex:1;min-width:200px">${donutLegendHtml(tierSegments, { valueFormatter: countFmt })}</div>
         </div>` : ''}
       </div>
