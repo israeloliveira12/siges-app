@@ -1388,6 +1388,29 @@ passa a ser VISÍVEL (`.chart-failed`) — o número nunca some junto com o grá
 O service worker ignora scripts de outra origem (ver sw.js), então o Chart.js
 vem do cache HTTP do navegador, não do cache offline do app.
 
+## Planejamento: sem limite de meses + reajuste de dívida recorrente (2026-10-25, `migration_053`)
+
+**Limite de 12 meses removido.** Era só da TELA (`planningMonthKeys()`); o banco
+nunca teve (`month` é um `date`). O mês virou seletor + campo numérico de ano
+(2000–2200, só para barrar erro de digitação como "202"). A lista mostra todo mês
+com lançamento. **Efeito colateral que a janela escondia:** o resumo soma TODAS as
+linhas de `planning_debts`, mas a lista só exibia as dos próximos 12 meses — uma
+dívida de mês já passado somava na "Dívida base" sem aparecer em lugar nenhum.
+Agora aparece com a marca "mês passado". A soma não mudou (decisão de produto
+pendente: dívida de mês passado deve contar?).
+
+**Reajuste de dívida recorrente** (`openAdjustModal`): "mesma dívida" = mesmo nome
+(sem diferenciar caixa/espaços; acento diferencia) em 2+ meses. Soma/subtrai valor
+fixo ou % em cada lançamento, mantendo o valor próprio de cada mês, a partir de um
+mês escolhido, com prévia mês a mês. RPC `adjust_planning_debts(p_ids, p_mode,
+p_value)`: **recebe os IDs e não o nome**, para o banco alterar exatamente o que a
+pessoa viu (normalização JS vs Postgres poderia divergir); tudo-ou-nada (um valor
+<= 0 ou um ID inexistente cancela tudo); exige `is_platform_owner()` + filtro de
+tenant (SECURITY DEFINER ignora RLS). A máscara de dinheiro trata o digitado como
+centavos ("12" = 0,12) — em teste use `setMoneyValue`.
+
+**Mini gráfico do card herói do Dashboard removido** (e `sparkline()` do charts.js).
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.
