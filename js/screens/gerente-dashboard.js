@@ -296,10 +296,6 @@ async function renderGerenteDashboard() {
           <div style="font-size:38px;font-weight:800;margin-top:6px;letter-spacing:-0.01em;font-variant-numeric:proportional-nums">${formatMoney(lucroMes)}</div>
           <div style="font-size:13px;margin-top:8px;opacity:.95">${trendBadgeHtml(lucroMes, lucroPrevPeriod, true)} <span style="opacity:.8">vs. mesmo período do mês passado</span></div>
         </div>
-        <div style="flex:none">
-          <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;opacity:.65;text-align:right;margin-bottom:4px">Últimos 12 dias</div>
-          ${sparkline(trendSeries.slice(-12))}
-        </div>
       </div>
       <div style="font-size:12px;margin-top:10px;opacity:.8;border-top:1px solid rgba(255,255,255,.2);padding-top:8px">Já descontado: ${formatMoney(taxaEntradaMes + taxaSaidaMes)} em taxas operacionais (${formatMoney(taxaEntradaMes)} entrada + ${formatMoney(taxaSaidaMes)} saída)${perdaMes > 0 ? ` + ${formatMoney(perdaMes)} em capital perdido` : ''}</div>
     </div>

@@ -17,6 +17,7 @@ const AUDIT_ACTION_LABELS = {
   cliente_aprovado: 'Cadastro aprovado',
   cliente_rejeitado: 'Cadastro rejeitado',
   senha_redefinida: 'Senha redefinida',
+  planejamento_reajuste: 'Dívida planejada reajustada',
   gerente_criado: 'Gerente criado',
   gerente_editado: 'Gerente editado',
   login_sucesso: 'Login realizado',

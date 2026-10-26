@@ -1,6 +1,6 @@
 /* ============================================================================
    Gerente — Planejamento estratégico
-   Caixa atual + dívidas mensais nomeadas (12 meses) → dívida total x
+   Caixa atual + dívidas mensais nomeadas (qualquer mês, sem limite) → dívida total x
    faturamento projetado (caixa + recebíveis em aberto) → lucro bruto/líquido.
    Cálculo é um retrato único ("se eu parar de emprestar hoje, quanto sobra"),
    não uma projeção mês a mês — daí taxas de entrada/saída serem aplicadas UMA
@@ -13,14 +13,52 @@ const mesesPtPlanejamento = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'A
 // paint pra sobreviver a repaints (senão fechava tudo de novo a cada clique).
 let plExpandedMonths = new Set();
 
-function planningMonthKeys() {
-  const today = todayISO();
-  const keys = [];
-  for (let m = 0; m < 12; m++) {
-    const d = new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + m, 1);
-    keys.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01');
-  }
-  return keys;
+// Primeiro dia do mês corrente ('2026-10-01').
+//
+// Antes existia planningMonthKeys(), que devolvia só os 12 meses seguintes e
+// alimentava tanto o seletor de mês quanto a lista. Esse limite foi removido
+// (pedido do usuário, 2026-10-25: lançamentos com prazo maior). O banco nunca
+// teve limite — `month` é um date comum —, a janela era só da tela.
+//
+// EFEITO COLATERAL QUE A JANELA ESCONDIA: o resumo soma TODAS as linhas de
+// planning_debts, mas a lista só mostrava as que caíam dentro dos 12 meses.
+// Uma dívida de um mês que já passou continuava somando na "Dívida base" sem
+// aparecer em lugar nenhum. Agora a lista mostra todo mês que tenha lançamento.
+function planningCurrentMonthKey() {
+  return todayISO().slice(0, 7) + '-01';
+}
+
+const PL_YEAR_MIN = 2000;
+const PL_YEAR_MAX = 2200;
+const mesesCompletosPlanejamento = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+// Seletor de mês + campo de ano, no lugar da lista fixa de 12 meses. O ano é
+// um campo numérico (e não um <select>) para não reintroduzir um teto por outro
+// caminho; os limites 2000–2200 existem só para barrar erro de digitação
+// (2026 escrito como 202 ou 20260 — o tipo date do banco aceitaria os dois).
+function monthYearFieldsHtml(prefix, iso, labels = {}) {
+  const [y, m] = String(iso).slice(0, 10).split('-');
+  return `
+    <div class="field-row">
+      <div class="field">
+        <label for="${prefix}-m">${labels.month || 'Mês'}</label>
+        <select id="${prefix}-m">
+          ${mesesCompletosPlanejamento.map((nome, i) => `<option value="${String(i + 1).padStart(2, '0')}" ${Number(m) === i + 1 ? 'selected' : ''}>${nome}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label for="${prefix}-y">${labels.year || 'Ano'}</label>
+        <input type="number" id="${prefix}-y" min="${PL_YEAR_MIN}" max="${PL_YEAR_MAX}" step="1" inputmode="numeric" value="${Number(y)}">
+      </div>
+    </div>`;
+}
+
+// Devolve '2026-10-01' ou null se o ano estiver fora da faixa / vazio.
+function readMonthYear(root, prefix) {
+  const m = root.querySelector('#' + prefix + '-m').value;
+  const y = Number(root.querySelector('#' + prefix + '-y').value);
+  if (!Number.isInteger(y) || y < PL_YEAR_MIN || y > PL_YEAR_MAX) return null;
+  return `${y}-${m}-01`;
 }
 
 function planningMonthLabel(monthISO) {
@@ -48,10 +86,9 @@ async function renderGerentePlanejamento() {
   }
   App.settings = settings;
 
-  const monthKeys = planningMonthKeys();
   const debtsList = debts || [];
 
-  paintPlanejamento(root, { settings, debtsList, pendingInst: pendingInst || [], pendingCycles: pendingCycles || [], monthKeys });
+  paintPlanejamento(root, { settings, debtsList, pendingInst: pendingInst || [], pendingCycles: pendingCycles || [] });
 }
 
 function calcPlanejamento({ settings, debtsList, pendingInst, pendingCycles }) {
@@ -96,7 +133,7 @@ function calcPlanejamento({ settings, debtsList, pendingInst, pendingCycles }) {
 }
 
 function paintPlanejamento(root, state) {
-  const { settings, debtsList, monthKeys } = state;
+  const { settings, debtsList } = state;
   const calc = calcPlanejamento(state);
 
   const debtsByMonth = {};
@@ -104,7 +141,9 @@ function paintPlanejamento(root, state) {
     const key = String(d.month).slice(0, 10);
     (debtsByMonth[key] = debtsByMonth[key] || []).push(d);
   });
-  const monthsWithDebts = monthKeys.filter((k) => debtsByMonth[k] && debtsByMonth[k].length);
+  // Todo mês que tem lançamento, em ordem cronológica — sem recorte de janela.
+  const monthsWithDebts = Object.keys(debtsByMonth).filter((k) => debtsByMonth[k].length).sort();
+  const currentMonthKey = planningCurrentMonthKey();
 
   root.innerHTML = `
     <div class="card" style="border-color:var(--brand)">
@@ -163,10 +202,13 @@ function paintPlanejamento(root, state) {
     <div class="card mt-14">
       <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:10px">
         <div>
-          <h3>Dívidas planejadas — próximos 12 meses</h3>
-          <p class="text-sm text-soft mt-8">Lançamentos manuais de dívidas futuras (uma ou várias por mês). A soma vira a Dívida base do resumo acima.</p>
+          <h3>Dívidas planejadas</h3>
+          <p class="text-sm text-soft mt-8">Lançamentos manuais de dívidas futuras (uma ou várias por mês, em qualquer mês). A soma vira a Dívida base do resumo acima.</p>
         </div>
-        <button class="btn btn-primary btn-sm" id="pl-add-debt">${Icons.plus} Nova dívida</button>
+        <div class="flex gap-8" style="flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" id="pl-adjust-debts" title="Soma ou subtrai um valor em todos os lançamentos de uma dívida que se repete">${Icons.edit} Reajustar recorrente</button>
+          <button class="btn btn-primary btn-sm" id="pl-add-debt">${Icons.plus} Nova dívida</button>
+        </div>
       </div>
       ${!monthsWithDebts.length ? `<p class="text-soft text-sm mt-14">Nenhuma dívida lançada ainda.</p>` : `
       <div class="mt-14">
@@ -182,6 +224,7 @@ function paintPlanejamento(root, state) {
                 <span style="display:inline-flex;transition:transform .15s;transform:rotate(${expanded ? '90deg' : '0deg'})">${Icons.chevronRight}</span>
                 <strong style="font-size:13.5px">${planningMonthLabel(key)}</strong>
                 <span class="text-sm text-soft">(${rows.length} dívida${rows.length === 1 ? '' : 's'})</span>
+                ${key < currentMonthKey ? `<span class="text-sm text-soft" title="Este mês já passou, mas o lançamento continua somando na Dívida base. Exclua-o se já foi quitado.">· mês passado</span>` : ''}
               </span>
               <span class="text-sm mono" style="font-weight:700">${formatMoney(subtotal)}</span>
             </button>
@@ -229,7 +272,8 @@ function paintPlanejamento(root, state) {
     renderGerentePlanejamento();
   };
 
-  document.getElementById('pl-add-debt').onclick = () => openDebtModal(monthKeys);
+  document.getElementById('pl-add-debt').onclick = () => openDebtModal();
+  document.getElementById('pl-adjust-debts').onclick = () => openAdjustModal(debtsList);
 
   root.querySelectorAll('.pl-month-header').forEach((btn) => {
     btn.onclick = () => {
@@ -240,7 +284,7 @@ function paintPlanejamento(root, state) {
   });
 
   root.querySelectorAll('.edit-debt-btn').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); openDebtModal(monthKeys, debtsList.find((d) => d.id === btn.dataset.id)); };
+    btn.onclick = (e) => { e.stopPropagation(); openDebtModal(debtsList.find((d) => d.id === btn.dataset.id)); };
   });
 
   root.querySelectorAll('.del-debt-btn').forEach((btn) => {
@@ -255,7 +299,7 @@ function paintPlanejamento(root, state) {
   });
 }
 
-function openDebtModal(monthKeys, existingDebt) {
+function openDebtModal(existingDebt) {
   const isEdit = !!existingDebt;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -264,12 +308,7 @@ function openDebtModal(monthKeys, existingDebt) {
       <div class="modal-head"><h3>${isEdit ? 'Editar dívida planejada' : 'Nova dívida planejada'}</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
       <div class="modal-body">
         <div id="debt-feedback"></div>
-        <div class="field">
-          <label>Mês</label>
-          <select id="debt-month">
-            ${monthKeys.map((k) => `<option value="${k}" ${isEdit && String(existingDebt.month).slice(0, 10) === k ? 'selected' : ''}>${planningMonthLabel(k)}</option>`).join('')}
-          </select>
-        </div>
+        ${monthYearFieldsHtml('debt-month', isEdit ? String(existingDebt.month).slice(0, 10) : planningCurrentMonthKey())}
         <div class="field"><label>Nome da dívida</label><input type="text" id="debt-name" placeholder="Ex: Aluguel, fornecedor, empréstimo bancário" value="${isEdit ? escapeHtml(existingDebt.name) : ''}"></div>
         <div class="field"><label>Valor (R$)</label><input type="text" id="debt-amount"></div>
       </div>
@@ -293,8 +332,9 @@ function openDebtModal(monthKeys, existingDebt) {
     const btn = e.currentTarget;
     const name = document.getElementById('debt-name').value.trim();
     const amount = getMoneyValue(amountInput);
-    const month = document.getElementById('debt-month').value;
+    const month = readMonthYear(overlay, 'debt-month');
     const feedback = document.getElementById('debt-feedback');
+    if (!month) { feedback.innerHTML = `<div class="auth-error">Informe um ano válido (entre ${PL_YEAR_MIN} e ${PL_YEAR_MAX}).</div>`; return; }
     if (!name) { feedback.innerHTML = `<div class="auth-error">Informe o nome da dívida.</div>`; return; }
     if (!amount || amount <= 0) { feedback.innerHTML = `<div class="auth-error">Informe um valor válido.</div>`; return; }
     btn.disabled = true;
@@ -304,6 +344,230 @@ function openDebtModal(monthKeys, existingDebt) {
     if (error) { btn.disabled = false; feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
     close();
     showToast(isEdit ? 'Dívida atualizada.' : 'Dívida adicionada.');
+    renderGerentePlanejamento();
+  };
+}
+
+/* ----------------------------------------------------------------------------
+   Reajuste em lote de uma dívida que se repete (migration_053)
+
+   "Salário" lançado em vários meses, cada um com valor próprio: um aumento de
+   R$ 12 soma R$ 12 em CADA lançamento (3.000 -> 3.012, 3.100 -> 3.112...), sem
+   igualar os valores. A tela mostra a prévia mês a mês e manda ao banco os IDs
+   exatos que a pessoa viu — ver o comentário da migration para o porquê.
+---------------------------------------------------------------------------- */
+
+// Mesma ideia de "mesma dívida" do olho humano: ignora caixa e espaço sobrando
+// ("Salário", "salário ", "SALÁRIO" são a mesma). Acento continua diferenciando:
+// "Salario" e "Salário" aparecem como duas dívidas na lista, e a pessoa decide.
+function planningNormName(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Agrupa por nome e devolve só quem se repete (2+ lançamentos): reajustar um
+// lançamento único é o "Editar" de sempre.
+function planningRecurringGroups(debtsList) {
+  const map = new Map();
+  debtsList.forEach((d) => {
+    const key = planningNormName(d.name);
+    if (!key) return;
+    if (!map.has(key)) map.set(key, { key, label: String(d.name).trim(), rows: [] });
+    map.get(key).rows.push(d);
+  });
+  return [...map.values()]
+    .filter((g) => g.rows.length >= 2)
+    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+}
+
+// Valor novo, em centavos inteiros, espelhando o arredondamento do banco:
+//   add     -> amount + valor
+//   percent -> round(amount * (100 + valor) / 100, 2)
+// `signed` já vem com o sinal (reduzir = negativo). Pode divergir 1 centavo do
+// banco só em meio-centavo exato com percentuais quebrados; o que vale é o
+// gravado, e a tela relê tudo depois de salvar.
+function planningAdjustedAmount(amount, mode, signed) {
+  const cents = Math.round(Number(amount) * 100);
+  if (mode === 'add') return (cents + Math.round(signed * 100)) / 100;
+  return Math.round(cents * (100 + signed) / 100) / 100;
+}
+
+function openAdjustModal(debtsList) {
+  const groups = planningRecurringGroups(debtsList);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+
+  if (!groups.length) {
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:460px">
+        <div class="modal-head"><h3>Reajustar dívida recorrente</h3><button class="icon-btn" id="adj-close" aria-label="Fechar">${Icons.x}</button></div>
+        <div class="modal-body">
+          <p class="text-sm">Nenhuma dívida se repete ainda.</p>
+          <p class="text-sm text-soft mt-8">Uma dívida recorrente é a mesma dívida (mesmo nome) lançada em mais de um mês — por exemplo, "Salário" em outubro, novembro e dezembro. Assim que houver uma, ela aparece aqui para você somar ou subtrair um valor em todos os meses de uma vez.</p>
+        </div>
+        <div class="modal-foot"><button class="btn btn-primary" id="adj-cancel">Entendi</button></div>
+      </div>`;
+    document.getElementById('app').appendChild(overlay);
+    const closeEmpty = () => overlay.remove();
+    wireModal(overlay, closeEmpty);
+    overlay.querySelector('#adj-close').onclick = closeEmpty;
+    overlay.querySelector('#adj-cancel').onclick = closeEmpty;
+    return;
+  }
+
+  const faixa = (g) => {
+    const vals = g.rows.map((d) => Number(d.amount));
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    return lo === hi ? formatMoney(lo) : `${formatMoney(lo)} a ${formatMoney(hi)}`;
+  };
+
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:540px">
+      <div class="modal-head"><h3>Reajustar dívida recorrente</h3><button class="icon-btn" id="adj-close" aria-label="Fechar">${Icons.x}</button></div>
+      <div class="modal-body">
+        <p class="text-sm text-soft">Soma ou subtrai a mesma diferença em todos os lançamentos de uma dívida que se repete. Cada mês mantém o seu valor próprio — só muda a diferença.</p>
+        <div id="adj-feedback"></div>
+
+        <div class="field mt-14">
+          <label for="adj-name">Dívida</label>
+          <select id="adj-name">
+            ${groups.map((g) => `<option value="${escapeHtml(g.key)}">${escapeHtml(g.label)} — ${g.rows.length} lançamentos (${faixa(g)})</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="adj-dir">Ajuste</label>
+            <select id="adj-dir"><option value="up">Aumentar</option><option value="down">Diminuir</option></select>
+          </div>
+          <div class="field">
+            <label for="adj-mode">Em</label>
+            <select id="adj-mode"><option value="add">Valor fixo (R$)</option><option value="percent">Percentual (%)</option></select>
+          </div>
+        </div>
+
+        <div class="field" id="adj-amount-wrap"><label for="adj-amount">Valor por lançamento (R$)</label><input type="text" id="adj-amount" placeholder="0,00"></div>
+        <div class="field hidden" id="adj-percent-wrap"><label for="adj-percent">Percentual (%)</label><input type="number" id="adj-percent" min="0" step="0.01" inputmode="decimal" placeholder="0"></div>
+
+        ${monthYearFieldsHtml('adj-from', planningCurrentMonthKey(), { month: 'A partir do mês', year: 'Ano' })}
+
+        <div class="form-section-title">Prévia</div>
+        <div id="adj-preview" aria-live="polite"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="adj-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="adj-confirm" disabled>Aplicar reajuste</button>
+      </div>
+    </div>`;
+  document.getElementById('app').appendChild(overlay);
+
+  const $ = (id) => overlay.querySelector('#' + id);
+  const amountInput = $('adj-amount');
+  attachMoneyMask(amountInput);
+  const close = () => overlay.remove();
+  wireModal(overlay, close);
+  $('adj-close').onclick = close;
+  $('adj-cancel').onclick = close;
+
+  // Lê o formulário inteiro e devolve o estado derivado. Tudo que a prévia e o
+  // botão precisam sai daqui, para os dois nunca discordarem.
+  const read = () => {
+    const group = groups.find((g) => g.key === $('adj-name').value);
+    const mode = $('adj-mode').value;
+    const dir = $('adj-dir').value;
+    const raw = mode === 'add' ? getMoneyValue(amountInput) : Number($('adj-percent').value || 0);
+    const magnitude = Number.isFinite(raw) ? Math.abs(raw) : 0;
+    const signed = dir === 'down' ? -magnitude : magnitude;
+    const from = readMonthYear(overlay, 'adj-from');
+    const all = group ? group.rows : [];
+    const affected = from ? all.filter((d) => String(d.month).slice(0, 10) >= from).sort((a, b) => String(a.month).localeCompare(String(b.month))) : [];
+    const rows = affected.map((d) => ({ d, novo: planningAdjustedAmount(d.amount, mode, signed) }));
+    return { group, mode, dir, signed, magnitude, from, rows, skipped: all.length - affected.length };
+  };
+
+  const previewTable = (st) => `
+    <div style="max-height:210px;overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:10px">
+      ${st.rows.map((r) => {
+        const diff = r.novo - Number(r.d.amount);
+        return `<div class="flex justify-between items-center text-sm" style="padding:7px 12px;border-bottom:1px solid var(--line);gap:10px">
+          <span style="min-width:74px">${planningMonthLabel(String(r.d.month).slice(0, 10))}</span>
+          <span class="mono text-soft">${formatMoney(r.d.amount)}</span>
+          <span aria-hidden="true" class="text-soft">→</span>
+          <span class="mono" style="font-weight:700;${r.novo <= 0 ? 'color:var(--bad)' : ''}">${formatMoney(r.novo)}</span>
+          <span class="mono text-sm" style="min-width:74px;text-align:right;color:${diff >= 0 ? 'var(--good)' : 'var(--bad)'}">${diff >= 0 ? '+' : '−'}${formatMoney(Math.abs(diff))}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  const paintPreview = () => {
+    const st = read();
+    const box = $('adj-preview');
+    const btn = $('adj-confirm');
+    const bad = st.rows.some((r) => r.novo <= 0);
+    let problem = '';
+    if (!st.from) problem = `Informe um ano válido (entre ${PL_YEAR_MIN} e ${PL_YEAR_MAX}).`;
+    else if (!st.magnitude) problem = 'Informe o valor do reajuste para ver a prévia.';
+    else if (!st.rows.length) problem = 'Nenhum lançamento desta dívida a partir deste mês.';
+    else if (bad) problem = 'Este reajuste deixaria algum lançamento com valor zero ou negativo. Reduza o valor do ajuste.';
+
+    if (problem) {
+      // Com valor inválido a prévia ainda lista os meses, para a pessoa ver
+      // QUAL lançamento estourou.
+      box.innerHTML = `<p class="text-sm ${bad ? '' : 'text-soft'}" ${bad ? 'style="color:var(--bad)"' : ''}>${escapeHtml(problem)}</p>${bad ? previewTable(st) : ''}`;
+      btn.disabled = true;
+      return;
+    }
+    const delta = st.rows.reduce((s, r) => s + (r.novo - Number(r.d.amount)), 0);
+    box.innerHTML = `
+      <p class="text-sm">${st.rows.length} lançamento${st.rows.length === 1 ? '' : 's'} de <strong>${escapeHtml(st.group.label)}</strong> ${st.rows.length === 1 ? 'será alterado' : 'serão alterados'}
+        · diferença total <strong class="mono" style="color:${delta >= 0 ? 'var(--good)' : 'var(--bad)'}">${delta >= 0 ? '+' : '−'}${formatMoney(Math.abs(delta))}</strong>
+        ${st.skipped ? `<span class="text-soft">· ${st.skipped} anterior${st.skipped === 1 ? '' : 'es'} a este mês não ${st.skipped === 1 ? 'muda' : 'mudam'}</span>` : ''}</p>
+      ${previewTable(st)}`;
+    btn.disabled = false;
+  };
+
+  // Troca entre valor fixo e percentual: mostra só o campo que vale.
+  const syncMode = () => {
+    const percent = $('adj-mode').value === 'percent';
+    $('adj-amount-wrap').classList.toggle('hidden', percent);
+    $('adj-percent-wrap').classList.toggle('hidden', !percent);
+    paintPreview();
+  };
+  $('adj-mode').addEventListener('change', syncMode);
+  ['adj-name', 'adj-dir', 'adj-from-m'].forEach((id) => $(id).addEventListener('change', paintPreview));
+  ['adj-amount', 'adj-percent', 'adj-from-y'].forEach((id) => $(id).addEventListener('input', paintPreview));
+  paintPreview();
+
+  $('adj-confirm').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const st = read();
+    const feedback = $('adj-feedback');
+    feedback.innerHTML = '';
+    if (!st.rows.length || !st.magnitude || st.rows.some((r) => r.novo <= 0)) { paintPreview(); return; }
+    btn.disabled = true;
+    const { error } = await supa.rpc('adjust_planning_debts', {
+      p_ids: st.rows.map((r) => r.d.id),
+      p_mode: st.mode,
+      p_value: st.signed,
+    });
+    if (error) {
+      const raw = error.message || String(error);
+      const msg = isMissingRpcError(error)
+        ? 'Falta aplicar a migration_053 no banco (supabase/migration_053.sql). O código novo já está no ar, o banco ainda não — rode o arquivo no SQL Editor do Supabase e tente de novo.'
+        : raw.includes('AMOUNT_BELOW_ZERO') ? 'Este reajuste deixaria algum lançamento com valor zero ou negativo.'
+        : raw.includes('NOT_FOUND') ? 'Algum lançamento mudou ou foi excluído desde que você abriu esta tela. Nada foi alterado — feche, recarregue e tente de novo.'
+        : raw.includes('FORBIDDEN') ? 'Você não tem permissão para alterar o planejamento.'
+        : raw;
+      feedback.innerHTML = `<div class="auth-error">${escapeHtml(msg)}</div>`;
+      btn.disabled = false;
+      return;
+    }
+    const n = st.rows.length;
+    const desc = st.mode === 'add'
+      ? `${st.signed >= 0 ? '+' : '−'}${formatMoney(Math.abs(st.signed))} em cada lançamento`
+      : `${st.signed >= 0 ? '+' : '−'}${formatNumber(Math.abs(st.signed), 2)}% em cada lançamento`;
+    logAudit('planejamento_reajuste', `Dívida planejada "${st.group.label}" reajustada: ${desc} (${n} lançamento${n === 1 ? '' : 's'}, a partir de ${planningMonthLabel(st.from)})`, { nome: st.group.label, lancamentos: n, modo: st.mode, valor: st.signed, a_partir_de: st.from });
+    close();
+    showToast(`${n} lançamento${n === 1 ? '' : 's'} de "${st.group.label}" reajustado${n === 1 ? '' : 's'}.`);
     renderGerentePlanejamento();
   };
 }
