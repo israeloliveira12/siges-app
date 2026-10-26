@@ -468,6 +468,12 @@ function openAdjustModal(debtsList) {
   $('adj-close').onclick = close;
   $('adj-cancel').onclick = close;
 
+  // Meses que a pessoa DESMARCOU na prévia (por id do lançamento). Guardar o que
+  // foi desmarcado — e não o que está marcado — faz todo mês novo que entra na
+  // lista (ao mudar "a partir de") nascer marcado, que é o comportamento
+  // esperado. Trocar a dívida zera tudo.
+  const unchecked = new Set();
+
   // Lê o formulário inteiro e devolve o estado derivado. Tudo que a prévia e o
   // botão precisam sai daqui, para os dois nunca discordarem.
   const read = () => {
@@ -480,21 +486,28 @@ function openAdjustModal(debtsList) {
     const from = readMonthYear(overlay, 'adj-from');
     const all = group ? group.rows : [];
     const affected = from ? all.filter((d) => String(d.month).slice(0, 10) >= from).sort((a, b) => String(a.month).localeCompare(String(b.month))) : [];
-    const rows = affected.map((d) => ({ d, novo: planningAdjustedAmount(d.amount, mode, signed) }));
-    return { group, mode, dir, signed, magnitude, from, rows, skipped: all.length - affected.length };
+    // `rows` = tudo que a prévia lista; `sel` = só o que está marcado e SERÁ
+    // alterado. Resumo, validação e envio ao banco usam `sel`, nunca `rows`.
+    const rows = affected.map((d) => ({ d, novo: planningAdjustedAmount(d.amount, mode, signed), on: !unchecked.has(d.id) }));
+    const sel = rows.filter((r) => r.on);
+    return { group, mode, dir, signed, magnitude, from, rows, sel, skipped: all.length - affected.length };
   };
 
   const previewTable = (st) => `
     <div style="max-height:210px;overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:10px">
       ${st.rows.map((r) => {
         const diff = r.novo - Number(r.d.amount);
-        return `<div class="flex justify-between items-center text-sm" style="padding:7px 12px;border-bottom:1px solid var(--line);gap:10px">
-          <span style="min-width:74px">${planningMonthLabel(String(r.d.month).slice(0, 10))}</span>
+        const mes = planningMonthLabel(String(r.d.month).slice(0, 10));
+        // Linha desmarcada: fica na lista (a pessoa pode remarcar), mas apagada
+        // e sem a seta — nada vai mudar nela.
+        return `<label class="flex justify-between items-center text-sm" style="padding:7px 12px;border-bottom:1px solid var(--line);gap:10px;cursor:pointer;${r.on ? '' : 'opacity:.5'}">
+          <input type="checkbox" class="adj-row-check" data-id="${r.d.id}" ${r.on ? 'checked' : ''} aria-label="Aplicar em ${mes}" style="flex:none;width:auto;margin:0">
+          <span style="min-width:70px;flex:none">${mes}</span>
           <span class="mono text-soft">${formatMoney(r.d.amount)}</span>
-          <span aria-hidden="true" class="text-soft">→</span>
+          ${r.on ? `<span aria-hidden="true" class="text-soft">→</span>
           <span class="mono" style="font-weight:700;${r.novo <= 0 ? 'color:var(--bad)' : ''}">${formatMoney(r.novo)}</span>
-          <span class="mono text-sm" style="min-width:74px;text-align:right;color:${diff >= 0 ? 'var(--good)' : 'var(--bad)'}">${diff >= 0 ? '+' : '−'}${formatMoney(Math.abs(diff))}</span>
-        </div>`;
+          <span class="mono text-sm" style="min-width:74px;text-align:right;color:${diff >= 0 ? 'var(--good)' : 'var(--bad)'}">${diff >= 0 ? '+' : '−'}${formatMoney(Math.abs(diff))}</span>` : `<span class="text-soft" style="margin-left:auto">não será alterado</span>`}
+        </label>`;
       }).join('')}
     </div>`;
 
@@ -502,28 +515,56 @@ function openAdjustModal(debtsList) {
     const st = read();
     const box = $('adj-preview');
     const btn = $('adj-confirm');
-    const bad = st.rows.some((r) => r.novo <= 0);
+    const bad = st.sel.some((r) => r.novo <= 0);
     let problem = '';
     if (!st.from) problem = `Informe um ano válido (entre ${PL_YEAR_MIN} e ${PL_YEAR_MAX}).`;
     else if (!st.magnitude) problem = 'Informe o valor do reajuste para ver a prévia.';
     else if (!st.rows.length) problem = 'Nenhum lançamento desta dívida a partir deste mês.';
-    else if (bad) problem = 'Este reajuste deixaria algum lançamento com valor zero ou negativo. Reduza o valor do ajuste.';
+    else if (!st.sel.length) problem = 'Nenhum mês marcado. Marque ao menos um mês para aplicar o reajuste.';
+    else if (bad) problem = 'Este reajuste deixaria algum mês marcado com valor zero ou negativo. Reduza o valor do ajuste ou desmarque esse mês.';
+
+    // Barra de seleção: só faz sentido quando há meses listados.
+    const toolbar = st.rows.length > 1 ? `
+      <div class="flex justify-between items-center text-sm" style="margin-top:8px">
+        <span class="text-soft">${st.sel.length} de ${st.rows.length} meses marcados</span>
+        <span class="flex gap-8"><button type="button" class="btn btn-ghost btn-sm" data-adj-all="1">Marcar todos</button><button type="button" class="btn btn-ghost btn-sm" data-adj-all="0">Desmarcar todos</button></span>
+      </div>` : '';
+    // A tabela aparece sempre que há o que escolher — inclusive no erro, para
+    // a pessoa ver QUAL mês estourou ou remarcar depois de desmarcar tudo.
+    const showTable = st.from && st.magnitude && st.rows.length;
 
     if (problem) {
-      // Com valor inválido a prévia ainda lista os meses, para a pessoa ver
-      // QUAL lançamento estourou.
-      box.innerHTML = `<p class="text-sm ${bad ? '' : 'text-soft'}" ${bad ? 'style="color:var(--bad)"' : ''}>${escapeHtml(problem)}</p>${bad ? previewTable(st) : ''}`;
+      box.innerHTML = `<p class="text-sm ${bad ? '' : 'text-soft'}" ${bad ? 'style="color:var(--bad)"' : ''}>${escapeHtml(problem)}</p>${showTable ? toolbar + previewTable(st) : ''}`;
       btn.disabled = true;
       return;
     }
-    const delta = st.rows.reduce((s, r) => s + (r.novo - Number(r.d.amount)), 0);
+    const n = st.sel.length;
+    const delta = st.sel.reduce((s, r) => s + (r.novo - Number(r.d.amount)), 0);
+    const fora = st.rows.length - n;
     box.innerHTML = `
-      <p class="text-sm">${st.rows.length} lançamento${st.rows.length === 1 ? '' : 's'} de <strong>${escapeHtml(st.group.label)}</strong> ${st.rows.length === 1 ? 'será alterado' : 'serão alterados'}
+      <p class="text-sm">${n} lançamento${n === 1 ? '' : 's'} de <strong>${escapeHtml(st.group.label)}</strong> ${n === 1 ? 'será alterado' : 'serão alterados'}
         · diferença total <strong class="mono" style="color:${delta >= 0 ? 'var(--good)' : 'var(--bad)'}">${delta >= 0 ? '+' : '−'}${formatMoney(Math.abs(delta))}</strong>
+        ${fora ? `<span class="text-soft">· ${fora} desmarcado${fora === 1 ? '' : 's'}</span>` : ''}
         ${st.skipped ? `<span class="text-soft">· ${st.skipped} anterior${st.skipped === 1 ? '' : 'es'} a este mês não ${st.skipped === 1 ? 'muda' : 'mudam'}</span>` : ''}</p>
-      ${previewTable(st)}`;
+      ${toolbar}${previewTable(st)}`;
     btn.disabled = false;
   };
+
+  // Delegação: a prévia é recriada a cada repintura, então os checkboxes não
+  // guardam listener próprio.
+  $('adj-preview').addEventListener('change', (e) => {
+    const cb = e.target.closest && e.target.closest('.adj-row-check');
+    if (!cb) return;
+    if (cb.checked) unchecked.delete(cb.dataset.id); else unchecked.add(cb.dataset.id);
+    paintPreview();
+  });
+  $('adj-preview').addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-adj-all]');
+    if (!b) return;
+    const st = read();
+    st.rows.forEach((r) => { if (b.dataset.adjAll === '1') unchecked.delete(r.d.id); else unchecked.add(r.d.id); });
+    paintPreview();
+  });
 
   // Troca entre valor fixo e percentual: mostra só o campo que vale.
   const syncMode = () => {
@@ -533,7 +574,8 @@ function openAdjustModal(debtsList) {
     paintPreview();
   };
   $('adj-mode').addEventListener('change', syncMode);
-  ['adj-name', 'adj-dir', 'adj-from-m'].forEach((id) => $(id).addEventListener('change', paintPreview));
+  $('adj-name').addEventListener('change', () => { unchecked.clear(); paintPreview(); });
+  ['adj-dir', 'adj-from-m'].forEach((id) => $(id).addEventListener('change', paintPreview));
   ['adj-amount', 'adj-percent', 'adj-from-y'].forEach((id) => $(id).addEventListener('input', paintPreview));
   paintPreview();
 
@@ -542,10 +584,10 @@ function openAdjustModal(debtsList) {
     const st = read();
     const feedback = $('adj-feedback');
     feedback.innerHTML = '';
-    if (!st.rows.length || !st.magnitude || st.rows.some((r) => r.novo <= 0)) { paintPreview(); return; }
+    if (!st.sel.length || !st.magnitude || st.sel.some((r) => r.novo <= 0)) { paintPreview(); return; }
     btn.disabled = true;
     const { error } = await supa.rpc('adjust_planning_debts', {
-      p_ids: st.rows.map((r) => r.d.id),
+      p_ids: st.sel.map((r) => r.d.id),
       p_mode: st.mode,
       p_value: st.signed,
     });
@@ -561,7 +603,7 @@ function openAdjustModal(debtsList) {
       btn.disabled = false;
       return;
     }
-    const n = st.rows.length;
+    const n = st.sel.length;
     const desc = st.mode === 'add'
       ? `${st.signed >= 0 ? '+' : '−'}${formatMoney(Math.abs(st.signed))} em cada lançamento`
       : `${st.signed >= 0 ? '+' : '−'}${formatNumber(Math.abs(st.signed), 2)}% em cada lançamento`;

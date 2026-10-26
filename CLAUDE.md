@@ -1409,6 +1409,12 @@ pessoa viu (normalização JS vs Postgres poderia divergir); tudo-ou-nada (um va
 tenant (SECURITY DEFINER ignora RLS). A máscara de dinheiro trata o digitado como
 centavos ("12" = 0,12) — em teste use `setMoneyValue`.
 
+**Seleção de meses na prévia do reajuste (2026-10-26):** cada mês listado tem uma
+caixa de seleção; só os marcados são alterados, e o resumo, a validação (valor <= 0)
+e os IDs enviados à RPC usam apenas os marcados. O estado guarda o que foi
+DESMARCADO (por id), então todo mês novo que entra na lista nasce marcado; trocar a
+dívida zera as desmarcações. Sem mudança de banco.
+
 **Mini gráfico do card herói do Dashboard removido** (e `sparkline()` do charts.js).
 
 ## Limitações conhecidas (v1, ver README para detalhes)
