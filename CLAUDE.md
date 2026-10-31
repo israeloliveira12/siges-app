@@ -1462,6 +1462,19 @@ qualquer ação — filtra por `audit_log.actor_role`, que `log_audit_event()` j
 preenchia. `login_falho` é registrado ANTES de existir sessão, então nunca tem
 perfil; ao cruzar os dois filtros a tela explica isso em vez de só mostrar vazio.
 
+**Dívida recorrente ao lançar (2026-10-31).** Faltava o outro lado do reajuste:
+dava para reajustar uma série, mas não para CRIAR uma sem lançar mês a mês. O
+modal de nova dívida ganhou "Repetir nos meses seguintes" + quantidade (2 a 120,
+teto só contra erro de digitação), com prévia do intervalo e do total. Todos os
+lançamentos nascem com o MESMO valor; para valores que mudam mês a mês (salário
+com aumento), o caminho é lançar a série e depois usar "Reajustar recorrente".
+Um ÚNICO insert com várias linhas (uma instrução no Postgres = atômica): uma
+requisição por mês deixaria a série pela metade se a conexão caísse. A prévia
+avisa quando algum mês já tem dívida com o mesmo nome — nada no banco impede
+duplicata. Desligado por padrão, então criar uma dívida avulsa continua igual;
+o modal de edição não tem repetição. `planningAddMonths()` faz a conta em meses
+absolutos, não com `setMonth` (que transborda no fim do mês).
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

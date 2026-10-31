@@ -272,7 +272,7 @@ function paintPlanejamento(root, state) {
     renderGerentePlanejamento();
   };
 
-  document.getElementById('pl-add-debt').onclick = () => openDebtModal();
+  document.getElementById('pl-add-debt').onclick = () => openDebtModal(null, debtsList);
   document.getElementById('pl-adjust-debts').onclick = () => openAdjustModal(debtsList);
 
   root.querySelectorAll('.pl-month-header').forEach((btn) => {
@@ -284,7 +284,7 @@ function paintPlanejamento(root, state) {
   });
 
   root.querySelectorAll('.edit-debt-btn').forEach((btn) => {
-    btn.onclick = (e) => { e.stopPropagation(); openDebtModal(debtsList.find((d) => d.id === btn.dataset.id)); };
+    btn.onclick = (e) => { e.stopPropagation(); openDebtModal(debtsList.find((d) => d.id === btn.dataset.id), debtsList); };
   });
 
   root.querySelectorAll('.del-debt-btn').forEach((btn) => {
@@ -299,18 +299,44 @@ function paintPlanejamento(root, state) {
   });
 }
 
-function openDebtModal(existingDebt) {
+// Soma meses a uma chave '2026-10-01', sempre no dia 1. Faz a conta em meses
+// absolutos (ano*12+mês) em vez de usar Date: `setMonth` transborda no fim do
+// mês (31/jan + 1 mês vira 03/mar), e aqui o dia é sempre 1 por definição.
+function planningAddMonths(iso, n) {
+  const [y, m] = String(iso).slice(0, 10).split('-').map(Number);
+  const total = y * 12 + (m - 1) + n;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}-01`;
+}
+
+// Teto de repetições. Não é uma regra de negócio — o banco aceita qualquer
+// quantidade: é só para um engano de digitação (12 virando 1200) não criar
+// mil linhas de uma vez.
+const PL_MAX_REPEAT = 120;
+
+function openDebtModal(existingDebt, debtsList) {
   const isEdit = !!existingDebt;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div class="modal" style="max-width:420px">
+    <div class="modal" style="max-width:460px">
       <div class="modal-head"><h3>${isEdit ? 'Editar dívida planejada' : 'Nova dívida planejada'}</h3><button class="icon-btn" id="close-modal">${Icons.x}</button></div>
       <div class="modal-body">
         <div id="debt-feedback"></div>
-        ${monthYearFieldsHtml('debt-month', isEdit ? String(existingDebt.month).slice(0, 10) : planningCurrentMonthKey())}
-        <div class="field"><label>Nome da dívida</label><input type="text" id="debt-name" placeholder="Ex: Aluguel, fornecedor, empréstimo bancário" value="${isEdit ? escapeHtml(existingDebt.name) : ''}"></div>
-        <div class="field"><label>Valor (R$)</label><input type="text" id="debt-amount"></div>
+        ${monthYearFieldsHtml('debt-month', isEdit ? String(existingDebt.month).slice(0, 10) : planningCurrentMonthKey(), isEdit ? {} : { month: 'Mês inicial', year: 'Ano' })}
+        <div class="field"><label for="debt-name">Nome da dívida</label><input type="text" id="debt-name" placeholder="Ex: Aluguel, fornecedor, empréstimo bancário" value="${isEdit ? escapeHtml(existingDebt.name) : ''}"></div>
+        <div class="field"><label for="debt-amount">Valor (R$)</label><input type="text" id="debt-amount"></div>
+        ${isEdit ? '' : `
+        <div class="toggle-row mt-14">
+          <label class="switch"><input type="checkbox" id="debt-repeat"><span class="track"></span></label>
+          <span>Repetir nos meses seguintes</span>
+        </div>
+        <div id="debt-repeat-fields" class="hidden mt-8">
+          <div class="field">
+            <label for="debt-repeat-count">Quantos meses no total (contando o mês inicial)</label>
+            <input type="number" id="debt-repeat-count" min="2" max="${PL_MAX_REPEAT}" step="1" inputmode="numeric" value="12">
+          </div>
+          <div id="debt-repeat-preview" class="text-sm" aria-live="polite"></div>
+        </div>`}
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="cancel-modal">Cancelar</button>
@@ -328,6 +354,61 @@ function openDebtModal(existingDebt) {
   wireModal(overlay, close);
   document.getElementById('close-modal').onclick = close;
   document.getElementById('cancel-modal').onclick = close;
+
+  // ---- Repetição (só ao criar) --------------------------------------------
+  // Lança a MESMA dívida em N meses seguidos, com o mesmo valor. Para quando o
+  // valor muda mês a mês (salário com aumento), o caminho é lançar a série aqui
+  // e depois usar "Reajustar recorrente", que soma a diferença em cada mês sem
+  // igualar os valores.
+  const repeatToggle = document.getElementById('debt-repeat');
+  const repeatFields = document.getElementById('debt-repeat-fields');
+  const repeatCount = document.getElementById('debt-repeat-count');
+  const repeatPreview = document.getElementById('debt-repeat-preview');
+  const confirmBtn = document.getElementById('confirm-debt');
+
+  // Quantos lançamentos serão criados: 1 quando a repetição está desligada.
+  const readRepeat = () => {
+    if (!repeatToggle || !repeatToggle.checked) return 1;
+    const n = parseInt(repeatCount.value, 10);
+    if (!Number.isInteger(n)) return 0;
+    return Math.min(Math.max(n, 2), PL_MAX_REPEAT);
+  };
+
+  const paintRepeat = () => {
+    if (!repeatToggle) return;
+    const on = repeatToggle.checked;
+    repeatFields.classList.toggle('hidden', !on);
+    const n = readRepeat();
+    if (!on) { confirmBtn.textContent = 'Adicionar'; return; }
+    confirmBtn.textContent = n > 1 ? `Adicionar ${n} lançamentos` : 'Adicionar';
+    const from = readMonthYear(overlay, 'debt-month');
+    if (!from || n < 2) {
+      repeatPreview.innerHTML = `<span class="text-soft">${!from ? 'Informe um ano válido para ver a prévia.' : `Informe de 2 a ${PL_MAX_REPEAT} meses.`}</span>`;
+      return;
+    }
+    const meses = Array.from({ length: n }, (_, i) => planningAddMonths(from, i));
+    const valor = getMoneyValue(amountInput);
+    const nome = planningNormName(document.getElementById('debt-name').value);
+    // Quantos desses meses JÁ têm uma dívida com este nome — repetir por engano
+    // criaria duas linhas no mesmo mês, e nada no banco impede isso.
+    const repetidos = nome
+      ? meses.filter((m) => (debtsList || []).some((d) => String(d.month).slice(0, 10) === m && planningNormName(d.name) === nome)).length
+      : 0;
+    repeatPreview.innerHTML = `
+      <div>${n} lançamentos — <strong>${planningMonthLabel(meses[0])}</strong> a <strong>${planningMonthLabel(meses[n - 1])}</strong>${valor > 0 ? ` · total <strong class="mono">${formatMoney(valor * n)}</strong>` : ''}</div>
+      ${repetidos ? `<div class="mt-8" style="color:var(--warn)">${repetidos} ${repetidos === 1 ? 'desses meses já tem' : 'desses meses já têm'} uma dívida com este nome. Continuar vai criar uma segunda linha ${repetidos === 1 ? 'nesse mês' : 'nesses meses'}.</div>` : ''}`;
+  };
+
+  if (repeatToggle) {
+    repeatToggle.addEventListener('change', paintRepeat);
+    ['debt-repeat-count', 'debt-month-y', 'debt-amount', 'debt-name'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', paintRepeat);
+    });
+    document.getElementById('debt-month-m').addEventListener('change', paintRepeat);
+    paintRepeat();
+  }
+
   document.getElementById('confirm-debt').onclick = async (e) => {
     const btn = e.currentTarget;
     const name = document.getElementById('debt-name').value.trim();
@@ -337,13 +418,23 @@ function openDebtModal(existingDebt) {
     if (!month) { feedback.innerHTML = `<div class="auth-error">Informe um ano válido (entre ${PL_YEAR_MIN} e ${PL_YEAR_MAX}).</div>`; return; }
     if (!name) { feedback.innerHTML = `<div class="auth-error">Informe o nome da dívida.</div>`; return; }
     if (!amount || amount <= 0) { feedback.innerHTML = `<div class="auth-error">Informe um valor válido.</div>`; return; }
+    const n = readRepeat();
+    if (!n) { feedback.innerHTML = `<div class="auth-error">Informe de 2 a ${PL_MAX_REPEAT} meses para repetir.</div>`; return; }
     btn.disabled = true;
+
+    // Um único INSERT com várias linhas — é uma só instrução no Postgres, então
+    // ou entram todas ou nenhuma. Mandar uma requisição por mês deixaria a
+    // série pela metade se a conexão caísse no meio.
+    const linhas = Array.from({ length: n }, (_, i) => ({
+      month: planningAddMonths(month, i), name, amount, created_by: App.session.user.id,
+    }));
     const { error } = isEdit
       ? await supa.from('planning_debts').update({ month, name, amount }).eq('id', existingDebt.id)
-      : await supa.from('planning_debts').insert({ month, name, amount, created_by: App.session.user.id });
+      : await supa.from('planning_debts').insert(linhas);
     if (error) { btn.disabled = false; feedback.innerHTML = `<div class="auth-error">${escapeHtml(error.message)}</div>`; return; }
     close();
-    showToast(isEdit ? 'Dívida atualizada.' : 'Dívida adicionada.');
+    showToast(isEdit ? 'Dívida atualizada.' : (n > 1 ? `${n} lançamentos de "${name}" adicionados.` : 'Dívida adicionada.'));
+    if (n > 1) logAudit('planejamento_reajuste', `Dívida planejada "${name}" lançada em ${n} meses (${planningMonthLabel(month)} em diante, ${formatMoney(amount)} cada)`, { nome: name, lancamentos: n, valor: amount, a_partir_de: month });
     renderGerentePlanejamento();
   };
 }
