@@ -466,8 +466,23 @@ function openClienteModal(client) {
     }
     searchReferrer(e.target.value.trim());
   }, 300);
-  // Blur com pequeno atraso — dá tempo do clique num resultado registrar
-  // antes do dropdown sumir (padrão comum de autocomplete).
+  // BUG REAL (2026-10-31): clicar num nome do dropdown não selecionava nada.
+  // A causa era uma CORRIDA, não o clique em si — por isso falhava "às vezes"
+  // e parecia aleatório:
+  //   mousedown -> o input perde o foco -> onblur agenda o fechamento em 150ms
+  //   -> se a pessoa segura o botão um instante a mais, hideReferrerResults
+  //      roda e faz innerHTML = '' -> a linha some do DOM entre o mousedown e
+  //      o mouseup, e o navegador NÃO dispara o click.
+  // Medido no navegador: clique de 80ms selecionava; de 160ms e 300ms, não.
+  // Um clique humano comum passa de 150ms, então na prática quase nunca
+  // funcionava.
+  //
+  // A correção não é aumentar o atraso (continuaria sendo uma corrida, só que
+  // mais difícil de reproduzir): preventDefault() no mousedown impede que o
+  // input perca o foco, então o blur nem acontece enquanto o clique é no
+  // próprio dropdown. O fechamento por blur continua valendo para quando a
+  // pessoa clica de fato fora do campo.
+  referredResults.addEventListener('mousedown', (e) => e.preventDefault());
   referredInput.onblur = () => setTimeout(hideReferrerResults, 150);
   referredClearBtn.onclick = clearReferrer;
   if (isEdit && client.referred_by_client_id) {

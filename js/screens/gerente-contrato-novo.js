@@ -42,7 +42,18 @@ async function refreshClientLimit(clientId) {
 async function renderGerenteContratoNovo() {
   if (pendingContractPrefill) {
     wiz = freshWizard();
-    Object.assign(wiz, pendingContractPrefill);
+    // Object.assign copiaria chaves com valor `undefined` POR CIMA dos padrões
+    // (o prefill manda `req.requested_due_type || undefined`): uma solicitação
+    // sem prazo informado zerava o `due_type: 'mensal'` do wizard, deixando o
+    // seletor sem opção marcada. Só copia o que veio de verdade.
+    Object.keys(pendingContractPrefill).forEach((k) => {
+      if (pendingContractPrefill[k] !== undefined && pendingContractPrefill[k] !== null) wiz[k] = pendingContractPrefill[k];
+    });
+    // A data da 1ª parcela precisa acompanhar o prazo PEDIDO pelo cliente.
+    // freshWizard() a fixa em hoje+30 (padrão mensal); sem recalcular, aprovar
+    // uma solicitação quinzenal ou de 10 dias marcava o prazo certo no seletor
+    // mas mantinha a 1ª parcela 30 dias à frente (bug real, 2026-10-31).
+    wiz.first_installment_date = addStepISO(todayISO(), wiz.due_type, wiz.custom_interval_days);
     wiz.step = 2;
     pendingContractPrefill = null;
     await refreshClientLimit(wiz.client_id);
@@ -169,6 +180,11 @@ function paintWizardStep2() {
           <select id="w-due-type">
             <option value="mensal" ${wiz.due_type === 'mensal' ? 'selected' : ''}>Mensal</option>
             <option value="quinzenal" ${wiz.due_type === 'quinzenal' ? 'selected' : ''}>Quinzenal</option>
+            <!-- 'semanal' já existe no enum due_type do banco e em dueTypeLabel(),
+                 mas não estava aqui. Um contrato semanal caía silenciosamente em
+                 'mensal' ao avançar o passo (o <select> sem opção correspondente
+                 marca a primeira), perdendo o prazo sem aviso. -->
+            <option value="semanal" ${wiz.due_type === 'semanal' ? 'selected' : ''}>Semanal</option>
             <option value="personalizado" ${wiz.due_type === 'personalizado' ? 'selected' : ''}>Personalizado (dias)</option>
           </select>
         </div>

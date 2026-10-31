@@ -1417,6 +1417,43 @@ dívida zera as desmarcações. Sem mudança de banco.
 
 **Mini gráfico do card herói do Dashboard removido** (e `sparkline()` do charts.js).
 
+## Clique no autocomplete de indicação + prazo do contrato (2026-10-31)
+
+**Bug do "Indicado por" (gerente-clientes.js).** Clicar num nome do dropdown não
+selecionava nada. Não era o clique: era uma CORRIDA. `onblur` agendava
+`hideReferrerResults` em 150ms; no mousedown o input perde o foco, e se a pessoa
+segurasse o botão um instante a mais, `innerHTML = ''` apagava a linha ENTRE o
+mousedown e o mouseup — e o navegador não dispara `click` quando o alvo some.
+Medido no navegador: clique de 80ms selecionava; 160ms e 300ms, não. Clique humano
+comum passa de 150ms, então quase nunca funcionava.
+**Correção:** `preventDefault()` no mousedown do container de resultados — o input
+não perde o foco, o blur nem acontece, e a corrida deixa de existir. Aumentar o
+atraso NÃO resolveria (continuaria corrida, só mais rara). O fechamento por blur
+segue valendo para clique fora (confirmado com clique real).
+
+**Prazo não era aplicado ao aprovar solicitação (gerente-contrato-novo.js).**
+`freshWizard()` fixa `first_installment_date = hoje + 30` e o prefill nunca
+recalculava: aprovar uma solicitação quinzenal marcava "Quinzenal" no seletor mas
+deixava a 1ª parcela 30 dias à frente. Agora recalcula com
+`addStepISO(hoje, due_type, custom_interval_days)`.
+Junto: o prefill manda `req.requested_due_type || undefined`, e `Object.assign`
+copia chaves com valor `undefined` POR CIMA do padrão — uma solicitação sem prazo
+zerava o `due_type: 'mensal'`. Agora só copia o que veio de verdade.
+
+**Renovação ignorava o ciclo quando feita pela tela Cobrar (gerente-cobrar.js).**
+A query listava as colunas do contrato explicitamente e **não trazia `due_type` nem
+`custom_interval_days`**. `addStepISO(data, undefined, undefined)` caía no ramo
+"personalizado" com 30 dias fixos: renovar um contrato QUINZENAL a partir do Cobrar
+sugeria 30 dias. Pelo detalhe do contrato funcionava (usa `select('*')`). O banco
+(`renew_installment`) sempre calculou certo, mas o frontend manda `p_new_due_date`,
+então o valor errado prevalecia. **Toda query que alimenta o modal de recebimento
+precisa trazer `due_type` e `custom_interval_days`.**
+
+**Opção "Semanal" adicionada ao wizard.** Já existia no enum `due_type` do banco e
+em `dueTypeLabel()`, mas não no `<select>`: um contrato semanal caía silenciosamente
+em 'mensal' ao avançar o passo (select sem a opção marca a primeira). Nenhuma tela
+produzia 'semanal' hoje, então o caso não ocorria — mas perdia dado sem aviso.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

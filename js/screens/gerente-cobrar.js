@@ -46,6 +46,10 @@ function buildWhatsappUrl(item) {
   // cliente informado paga isso pra "rolar" o vencimento em vez de quitar.
   const contract = item.contract || {};
   // Em 2x+ só parcela prorroga (ciclo não existe nesses contratos).
+  // due_type/custom_interval_days PRECISAM vir na query acima: é com eles que
+  // addStepISO calcula o próximo vencimento da renovação. Sem eles, undefined
+  // caía no ramo "personalizado" com 30 dias fixos, e renovar um contrato
+  // QUINZENAL a partir desta tela sugeria 30 dias (bug real, 2026-10-31).
   const isMulti = Number(contract.installments_count) > 1;
   const canRenew = contract.allows_renewal && (!isMulti || item.type === 'installment');
   const interestPortion = item.type === 'installment'
@@ -94,8 +98,8 @@ async function renderGerenteCobrar() {
   ] = await Promise.all([
     supa.from('payments').select('amount_received').gte('received_at', today),
     supa.from('payments').select('amount_received').gte('received_at', monthStart),
-    supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(id, contract_number, allows_renewal, installments_count, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone, cpf)))').in('status', ['pendente', 'atrasada']),
-    supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(id, contract_number, allows_renewal, installments_count, principal_amount, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone, cpf)))').in('status', ['pendente', 'atrasada']),
+    supa.from('installments').select('*, loan_contracts!installments_contract_id_fkey(id, contract_number, allows_renewal, installments_count, due_type, custom_interval_days, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone, cpf)))').in('status', ['pendente', 'atrasada']),
+    supa.from('renewal_cycles').select('*, loan_contracts!renewal_cycles_contract_id_fkey(id, contract_number, allows_renewal, installments_count, due_type, custom_interval_days, principal_amount, client_id, late_fee_percent, late_interest_percent, has_operational_fee, operational_fee_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name, phone, cpf)))').in('status', ['pendente', 'atrasada']),
   ]);
 
   if (e1 || e2 || e3 || e4) {
