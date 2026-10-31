@@ -1454,6 +1454,14 @@ em `dueTypeLabel()`, mas não no `<select>`: um contrato semanal caía silencios
 em 'mensal' ao avançar o passo (select sem a opção marca a primeira). Nenhuma tela
 produzia 'semanal' hoje, então o caso não ocorria — mas perdia dado sem aviso.
 
+**Filtro por perfil na Auditoria (2026-10-31).** Pedido: ver só os logins de
+CLIENTE. Em vez de duplicar entradas no seletor de Ação ("Login de cliente",
+"Login de admin", e assim por diante para cada ação), entrou um seletor próprio
+**Perfil** (Todos / Somente clientes / Somente administradores) que combina com
+qualquer ação — filtra por `audit_log.actor_role`, que `log_audit_event()` já
+preenchia. `login_falho` é registrado ANTES de existir sessão, então nunca tem
+perfil; ao cruzar os dois filtros a tela explica isso em vez de só mostrar vazio.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

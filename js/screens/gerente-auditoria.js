@@ -55,6 +55,12 @@ let auditActionFilter = 'todos';
 // Quantidade de eventos buscados do banco — não só escondidos no cliente,
 // pra tela não ficar lenta conforme o histórico crescer. 'todos' ainda usa
 // um teto (2000) pra nunca puxar a tabela inteira sem limite nenhum.
+// Filtro por perfil de quem fez a ação (pedido do usuário, 2026-10-31: ver só
+// os logins de CLIENTE). Vale para qualquer ação, não só login — combina com o
+// filtro de Ação ao lado. 'login_falho' nunca tem perfil: a tentativa acontece
+// sem sessão, então o banco não tem como saber de quem era a conta.
+let auditRoleFilter = 'todos';
+
 let auditPageSize = 20;
 const AUDIT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -111,6 +117,7 @@ function paintAuditoria(root, { logs, summary }) {
   const filtered = logs.filter((l) => {
     if (term && !(l.actor_name || 'anônimo').toLowerCase().includes(term)) return false;
     if (auditActionFilter !== 'todos' && l.action !== auditActionFilter) return false;
+    if (auditRoleFilter !== 'todos' && l.actor_role !== auditRoleFilter) return false;
     return true;
   });
 
@@ -158,6 +165,14 @@ function paintAuditoria(root, { logs, summary }) {
             ${actionsPresent.map((a) => `<option value="${escapeHtml(a)}" ${auditActionFilter === a ? 'selected' : ''}>${escapeHtml(auditActionLabel(a))}</option>`).join('')}
           </select>
         </div>
+        <div class="field" style="min-width:180px;margin-bottom:0">
+          <label for="aud-role">Perfil</label>
+          <select id="aud-role">
+            <option value="todos" ${auditRoleFilter === 'todos' ? 'selected' : ''}>Todos os perfis</option>
+            <option value="cliente" ${auditRoleFilter === 'cliente' ? 'selected' : ''}>Somente clientes</option>
+            <option value="gerente" ${auditRoleFilter === 'gerente' ? 'selected' : ''}>Somente administradores</option>
+          </select>
+        </div>
         <div class="field" style="min-width:160px;margin-bottom:0">
           <label>Exibir</label>
           <select id="aud-page-size">
@@ -177,6 +192,7 @@ function paintAuditoria(root, { logs, summary }) {
       paintAuditoria(root, { logs, summary });
     }, 200);
     document.getElementById('aud-action').onchange = (e) => { auditActionFilter = e.target.value; paintAuditoria(root, { logs, summary }); };
+    document.getElementById('aud-role').onchange = (e) => { auditRoleFilter = e.target.value; paintAuditoria(root, { logs, summary }); };
     document.getElementById('aud-page-size').onchange = (e) => {
       auditPageSize = e.target.value === 'todos' ? 'todos' : Number(e.target.value);
       renderGerenteAuditoria();
@@ -193,7 +209,10 @@ function paintAuditoria(root, { logs, summary }) {
           <div class="text-sm text-soft">${escapeHtml(l.description)}</div>
         </div>
       </div>
-    `).join('') : `<div class="empty-state">${Icons.audit}<p>Nenhum evento encontrado com esse filtro.</p></div>`;
+    `).join('') : `<div class="empty-state">${Icons.audit}<p>Nenhum evento encontrado com esse filtro.</p>${
+        auditRoleFilter !== 'todos' && auditActionFilter === 'login_falho'
+          ? `<p class="text-sm text-soft">Uma tentativa de login que falhou é registrada antes de existir sessão, então o sistema não sabe de quem era a conta — por isso ela não aparece ao filtrar por perfil.</p>`
+          : ''}</div>`;
 }
 
 registerRoute('gerente/auditoria', { role: 'gerente', screenId: 'gerente-auditoria', title: 'Auditoria', platformOwnerOnly: true, render: renderGerenteAuditoria });
