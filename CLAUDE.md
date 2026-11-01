@@ -1475,6 +1475,41 @@ duplicata. Desligado por padrão, então criar uma dívida avulsa continua igual
 o modal de edição não tem repetição. `planningAddMonths()` faz a conta em meses
 absolutos, não com `setMonth` (que transborda no fim do mês).
 
+## Ficha analítica do cliente + relatórios avançados (2026-11-01, `migration_054`)
+
+**Score → clicar no cliente** mostrava só 3 números. Agora: KPIs (empréstimos,
+quanto tomou, quanto pagou, quanto deve), pontualidade (% em dia, atraso médio e
+máximo), retorno financeiro (lucro, juros, encargos, taxas, prejuízo, renovações
+e prorrogações), lucro e recebimento em 12 meses, histórico de contratos linha a
+linha, perfil e relacionamento.
+
+**Risco do cliente** (`clientRiskAssessment`, js/screens/gerente-score.js) é um
+RESUMO DE LEITURA, não um motor de decisão: o score 0–100 do banco continua sendo
+a nota oficial. Ele junta o que o score sozinho não mostra (atraso aberto agora,
+prejuízo reconhecido, pontualidade) e explica em texto o porquê da classificação.
+
+**Relatórios ganhou 4 abas:** Renovações (renovação x prorrogação, lucro de
+rolagem), Clientes (Pareto com % acumulado), Risco (carteira, aging, exposição por
+score/grupo/prazo) e Tendência (histórico + projeção). Risco e Tendência são um
+retrato do AGORA, então o seletor de período some nelas (`REL_TABS_SEM_PERIODO`)
+em vez de ficar na tela sem efeito.
+
+**`paretoChart()` em charts.js**: barras ordenadas + linha de acumulado em eixo Y
+duplo (dinheiro à esquerda, 0–100% à direita). A série é ordenada DENTRO da função
+— um Pareto fora de ordem não é um Pareto.
+
+**A projeção não é extrapolação estatística**: soma os juros de parcelas e ciclos
+JÁ CONTRATADOS que vencem em cada mês. Meses sem vencimento aparecem zerados, e
+renovações futuras ainda não contratadas não entram. A tela diz isso.
+
+**"Acessos registrados" é limitado por design**: `audit_log` guarda os 500 eventos
+mais recentes POR TENANT (retenção de `log_audit_event`), então o número conta só
+os logins ainda nessa janela — não é o total histórico. A ficha avisa.
+
+**Armadilha encontrada**: usei `formatPhone()`, que não existe — o nome é
+`formatPhoneBR()`. Um grep de "existe a função?" deu falso positivo porque casou
+com `type="tel"` no HTML de outra tela. Só o teste no navegador pegou.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

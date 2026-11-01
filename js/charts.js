@@ -650,3 +650,135 @@ function donutLegendHtml(segments, opts = {}) {
     </div>
   `).join('');
 }
+
+/* ---------------------------------------------------------------------------
+   Pareto — barras ordenadas da maior para a menor + linha do acumulado (%)
+
+   Responde "quantos poucos respondem pela maior parte do todo". A linha usa o
+   eixo da DIREITA (0–100%), as barras o da esquerda (dinheiro): sem eixos
+   separados, uma curva que vai até 100 ficaria colada no chão de um gráfico
+   cujas barras chegam a milhares.
+
+   A série é ordenada aqui dentro — um Pareto fora de ordem não é um Pareto, e
+   deixar isso a cargo de quem chama é pedir para esquecer.
+--------------------------------------------------------------------------- */
+
+function paretoChart(series, opts = {}) {
+  if (!series || !series.length) return emptyChartHtml(opts.emptyMessage);
+  const fmt = opts.valueFormatter || formatMoney;
+  const h = opts.height || 260;
+
+  const ordenada = [...series].filter((p) => Number(p.value) > 0).sort((a, b) => Number(b.value) - Number(a.value));
+  if (!ordenada.length) return emptyChartHtml(opts.emptyMessage);
+  const total = ordenada.reduce((s, p) => s + Number(p.value), 0);
+  let acc = 0;
+  const acumulado = ordenada.map((p) => {
+    acc += Number(p.value);
+    return total > 0 ? +((acc / total) * 100).toFixed(1) : 0;
+  });
+
+  const id = registerChart((animate) => {
+    const canvas = CHART_REGISTRY.get(id).canvas;
+    const theme = chartTheme(canvas);
+    const corBarra = resolveChartColor(opts.color || CHART_COLORS.brand, canvas);
+    const corLinha = resolveChartColor(opts.lineColor || CHART_COLORS.warn, canvas);
+    return {
+      type: 'bar',
+      data: {
+        labels: ordenada.map((p) => p.label || ''),
+        datasets: [
+          {
+            type: 'bar',
+            label: opts.valueLabel || 'Valor',
+            data: ordenada.map((p) => Number(p.value)),
+            yAxisID: 'y',
+            backgroundColor: (ctx) => {
+              const { chart } = ctx;
+              if (!chart.chartArea) return corBarra;
+              const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
+              g.addColorStop(0, corBarra);
+              g.addColorStop(1, chartAlpha(corBarra, 0.62));
+              return g;
+            },
+            hoverBackgroundColor: corBarra,
+            borderRadius: 7,
+            borderSkipped: 'start',
+            maxBarThickness: 54,
+            categoryPercentage: 0.8,
+            barPercentage: 0.8,
+            order: 2,
+          },
+          {
+            type: 'line',
+            label: 'Acumulado',
+            data: acumulado,
+            yAxisID: 'y2',
+            borderColor: corLinha,
+            borderWidth: 2.5,
+            cubicInterpolationMode: 'monotone',
+            fill: false,
+            pointRadius: ordenada.length > 20 ? 0 : 3.4,
+            pointHoverRadius: 6,
+            pointBackgroundColor: theme.panel,
+            pointBorderColor: corLinha,
+            pointBorderWidth: 2,
+            pointHitRadius: 20,
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: animate && !chartReducedMotion() ? { duration: 750, easing: 'easeOutQuart' } : false,
+        layout: { padding: { top: 14, right: 4, left: 0, bottom: 0 } },
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: {
+              color: theme.inkSoft, font: { family: theme.font, size: 10.5 },
+              maxRotation: 0, autoSkip: true, maxTicksLimit: ordenada.length > 10 ? 8 : 12, padding: 6,
+              // Nome de cliente é longo e empurra os outros rótulos para fora.
+              callback(v) {
+                const t = String(this.getLabelForValue(v) || '');
+                return t.length > 14 ? t.slice(0, 13) + '…' : t;
+              },
+            },
+          },
+          y: {
+            beginAtZero: true, grace: '10%', border: { display: false },
+            grid: { color: theme.grid, lineWidth: 1, drawTicks: false },
+            ticks: { color: theme.inkSoft, font: { family: theme.font, size: 11 }, maxTicksLimit: 5, padding: 8,
+                     callback: (v) => compactMoney(v) },
+          },
+          y2: {
+            position: 'right', beginAtZero: true, max: 100, border: { display: false },
+            // Sem grade própria: duas grades sobrepostas viram ruído.
+            grid: { drawOnChartArea: false },
+            ticks: { color: corLinha, font: { family: theme.font, size: 11 }, maxTicksLimit: 5, padding: 6,
+                     callback: (v) => v + '%' },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: chartTooltip(theme, {
+            callbacks: {
+              title: (items) => (items[0] ? items[0].label : ''),
+              label: (ctx) => (ctx.datasetIndex === 1
+                ? ` Acumulado: ${formatNumber(ctx.parsed.y, 1)}%`
+                : ` ${fmt(ctx.parsed.y)}`),
+              labelColor: (ctx) => {
+                const c = ctx.datasetIndex === 1 ? corLinha : corBarra;
+                return { borderColor: c, backgroundColor: c, borderRadius: 4 };
+              },
+            },
+          }),
+        },
+      },
+    };
+  });
+
+  return chartShell(id, h, opts.caption || 'Gráfico de Pareto', ordenada, { ...opts, valueFormatter: fmt });
+}
