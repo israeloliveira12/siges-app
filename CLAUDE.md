@@ -1510,6 +1510,43 @@ os logins ainda nessa janela — não é o total histórico. A ficha avisa.
 `formatPhoneBR()`. Um grep de "existe a função?" deu falso positivo porque casou
 com `type="tel"` no HTML de outra tela. Só o teste no navegador pegou.
 
+## Receber uma parte e renovar o saldo (2026-11-01, `migration_055`)
+
+Pedido: cliente empresta 600 para pagar 800; no dia paga 400 e quer rolar o saldo
+com juros novos. O jeito antigo era **dar baixa cheia e abrir contrato novo** —
+registrava dinheiro que não entrou, inflava o lucro do dia, melhorava o score do
+cliente sem motivo e inventava uma quitação no histórico.
+
+**`principal_base` em `renewal_cycles` foi o pré-requisito.** O ciclo não guardava
+quanto dele é capital: a regra era `capital = least(capital do contrato, dívida do
+ciclo)`. Isso funciona enquanto a dívida rola inteira, mas quebra após amortização:
+contrato de 600, paga 400 (200 juros + 200 capital), saldo 400 + 100 de juros = ciclo
+de 500 → `least(600, 500) = 500` de capital e **juros ZERO**. Os 100 de lucro
+sumiriam, o pagamento seguinte abateria capital antes de juros e `mark_cycle_loss`
+registraria 500 de perda em vez de 400. A coluna nasce NULL e `cycle_capital()` cai
+na regra antiga quando nula — **nenhum ciclo existente muda**.
+
+`cycle_capital(full_debt, principal_base, contract_principal)` existe para a regra
+morar em UM lugar: é usada no recebimento, na perda, na edição, na renovação e na
+projeção. Essas cinco discordarem é a forma mais silenciosa de errar dinheiro. O
+mesmo cálculo está em `cycleRemainingParts()` (js/utils.js) — **mude nos dois**.
+
+**`receive_and_renew()`** faz tudo numa transação: decompõe o recebido (juros, depois
+capital — mesma ordem de `receive_payment`), grava o pagamento REAL como
+`quitacao_parcela`, cria o ciclo com `principal_base` = capital que sobrou, e fecha a
+origem como `renovada`. **Os juros novos NÃO viram pagamento agora**: entram na dívida
+do ciclo e só viram lucro quando forem pagos — era exatamente isso que o jeito antigo
+quebrava. Recusa com `NOTHING_TO_RENEW` quando o valor quita tudo.
+
+Na tela: terceira aba "Receber e renovar" no modal de recebimento, só em contrato de
+parcela única (`canPartialRenew = canRenewCycle`); em contrato parcelado a operação
+equivalente é a prorrogação, que não amortiza. O resumo mostra a decomposição antes de
+confirmar e avisa que os juros novos ainda não são lucro.
+
+**Ainda em aberto:** renegociação de VÁRIOS contratos num só (situação 1 do usuário).
+Precisa de status `renegociado` e vínculo entre contrato novo e antigos — marcar os
+antigos como "quitado" corromperia o lucro histórico e o Pareto de clientes.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.

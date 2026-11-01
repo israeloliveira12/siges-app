@@ -4,7 +4,7 @@
    de parcela única)
    ============================================================================ */
 
-let receberMode = 'quitar'; // 'quitar' | 'renovar'
+let receberMode = 'quitar'; // 'quitar' | 'renovar' | 'parcial-renovar'
 
 async function openReceberModal(source, onDone) {
   receberMode = 'quitar';
@@ -47,6 +47,10 @@ async function openReceberModal(source, onDone) {
   const canRenewCycle = contract.allows_renewal && !isMulti;
   const canPostpone = contract.allows_renewal && isMulti && isInstallment;
   const canRenew = canRenewCycle || canPostpone;
+  // "Receber e renovar" (migration_055): o cliente paga uma PARTE e o saldo rola
+  // com juros novos. Só existe onde a dívida pode virar ciclo — em contrato de
+  // várias parcelas a operação equivalente é a prorrogação, que não amortiza.
+  const canPartialRenew = canRenewCycle;
 
   // Encargo de atraso: juros COMPOSTOS diários sobre o saldo desta
   // parcela/ciclo (taxa % é ao dia, capitalizada a cada dia de atraso) +
@@ -133,6 +137,7 @@ async function openReceberModal(source, onDone) {
           <div class="auth-tabs mt-14" role="tablist">
             <button class="auth-tab ${receberMode === 'quitar' ? 'active' : ''}" id="tab-quitar" role="tab" aria-selected="${receberMode === 'quitar'}">Quitar</button>
             <button class="auth-tab ${receberMode === 'renovar' ? 'active' : ''}" id="tab-renovar" role="tab" aria-selected="${receberMode === 'renovar'}">Renovar</button>
+            ${canPartialRenew ? `<button class="auth-tab ${receberMode === 'parcial-renovar' ? 'active' : ''}" id="tab-parcial" role="tab" aria-selected="${receberMode === 'parcial-renovar'}">Receber e renovar</button>` : ''}
           </div>` : ''}
 
           <div id="receber-feedback"></div>
@@ -166,6 +171,8 @@ async function openReceberModal(source, onDone) {
     const tabRenovar = document.getElementById('tab-renovar');
     if (tabQuitar) tabQuitar.onclick = () => { receberMode = 'quitar'; paint(); };
     if (tabRenovar) tabRenovar.onclick = () => { receberMode = 'renovar'; paint(); };
+    const tabParcial = document.getElementById('tab-parcial');
+    if (tabParcial) tabParcial.onclick = () => { receberMode = 'parcial-renovar'; paint(); };
 
     paintFields();
     releaseModal();
@@ -177,7 +184,75 @@ async function openReceberModal(source, onDone) {
     // congelado na abertura do modal (FIN-03).
     const late = computeLate(receivedAt);
     const fields = document.getElementById('receber-fields');
-    if (receberMode === 'quitar') {
+    if (receberMode === 'parcial-renovar') {
+      // Recebe uma parte agora e rola o saldo com juros novos, numa operação
+      // só. O jeito antigo (dar baixa cheia + abrir contrato novo) registrava
+      // dinheiro que não entrou: inflava o lucro do dia, melhorava o score do
+      // cliente sem motivo e inventava uma quitação no histórico.
+      fields.innerHTML = `
+        <p class="text-sm text-soft mt-8">O cliente paga uma parte agora e o que sobrar rola para um novo vencimento, com juros por cima do saldo.</p>
+        <div class="field mt-8">
+          <label for="pr-amount">Valor recebido agora (R$)</label>
+          <input type="text" id="pr-amount" placeholder="0,00">
+          <span class="help">Abate primeiro os juros, depois o capital — a mesma ordem de qualquer recebimento.</span>
+        </div>
+        <div class="field mt-8"><label for="pr-interest">Juros sobre o saldo que fica (R$)</label><input type="text" id="pr-interest" placeholder="0,00"></div>
+        <div class="field mt-8"><label for="pr-due">Novo vencimento</label><input type="date" id="pr-due"></div>
+        <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="pr-fee-toggle"><span class="track"></span></label><span>Aplicar taxas operacionais neste recebimento?</span></div>
+        <div id="pr-fee-fields" class="hidden mt-8"><div class="field"><label for="pr-fee-amount">Valor da taxa operacional (R$)</label><input type="text" id="pr-fee-amount"></div></div>
+        <div class="form-section-title">Resumo</div>
+        <div id="pr-preview" class="text-sm" aria-live="polite"></div>
+      `;
+      const prAmount = document.getElementById('pr-amount');
+      const prInterest = document.getElementById('pr-interest');
+      const prDue = document.getElementById('pr-due');
+      const prFeeToggle = document.getElementById('pr-fee-toggle');
+      const prFee = document.getElementById('pr-fee-amount');
+      [prAmount, prInterest, prFee].forEach(attachMoneyMask);
+      prDue.value = addStepISO(receivedAt, contract.due_type, contract.custom_interval_days);
+
+      // Espelha a decomposição do banco: juros primeiro, depois capital.
+      const paintPreview = () => {
+        const pago = getMoneyValue(prAmount);
+        const jurosNovos = getMoneyValue(prInterest);
+        const partes = isInstallment
+          ? { juros: Number(item.interest_share) - Number(item.interest_paid_partial || 0),
+              capital: Number(item.principal_share) - Number(item.principal_paid_partial || 0) }
+          : cycleRemainingParts(item, contract);
+        const remJuros = Math.max(0, partes.juros);
+        const remCapital = Math.max(0, partes.capital);
+        const devido = remJuros + remCapital;
+        const payJuros = Math.min(pago, remJuros);
+        const payCapital = Math.min(Math.max(0, pago - payJuros), remCapital);
+        const saldo = Math.max(0, devido - payJuros - payCapital);
+        const novoTotal = saldo + jurosNovos;
+        const box = document.getElementById('pr-preview');
+        const btn = document.getElementById('confirm-receber');
+        if (pago <= 0) {
+          box.innerHTML = `<span class="text-soft">Informe quanto o cliente está pagando agora.</span>`;
+          btn.disabled = true; return;
+        }
+        if (pago > devido + 0.01) {
+          box.innerHTML = `<span style="color:var(--bad)">O valor recebido (${formatMoney(pago)}) é maior que a dívida (${formatMoney(devido)}).</span>`;
+          btn.disabled = true; return;
+        }
+        if (saldo <= 0) {
+          box.innerHTML = `<span style="color:var(--bad)">Este valor quita a dívida inteira — não sobra saldo para renovar. Use a aba "Quitar".</span>`;
+          btn.disabled = true; return;
+        }
+        box.innerHTML = `
+          <div>Entra no caixa agora: <strong class="mono">${formatMoney(pago)}</strong>
+            <span class="text-soft">(${formatMoney(payJuros)} de juros + ${formatMoney(payCapital)} de capital)</span></div>
+          <div class="mt-8">Saldo que rola: <strong class="mono">${formatMoney(saldo)}</strong>${jurosNovos > 0 ? ` + <strong class="mono">${formatMoney(jurosNovos)}</strong> de juros novos` : ''}</div>
+          <div class="mt-8">Nova dívida: <strong class="mono" style="font-size:15px">${formatMoney(novoTotal)}</strong> para ${prDue.value ? formatDate(prDue.value) : '—'}</div>
+          <div class="mt-8 text-soft">Os juros novos só viram lucro quando forem pagos — hoje entra no caixa apenas ${formatMoney(payJuros)} de juros.</div>`;
+        btn.disabled = false;
+      };
+      prFeeToggle.onchange = () => { document.getElementById('pr-fee-fields').classList.toggle('hidden', !prFeeToggle.checked); paintPreview(); };
+      [prAmount, prInterest, prFee].forEach((el) => el.addEventListener('input', paintPreview));
+      prDue.addEventListener('change', paintPreview);
+      paintPreview();
+    } else if (receberMode === 'quitar') {
       fields.innerHTML = `
         ${late.dias > 0 ? `
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="r-late-toggle"><span class="track"></span></label><span>Aplicar encargo de atraso (${late.dias}d) nesta parcela?</span></div>
@@ -363,7 +438,28 @@ async function openReceberModal(source, onDone) {
     try {
       // `receivedAt` é a variável do modal, mantida em sincronia pelo onchange
       // do campo — a mesma data que alimentou o cálculo do encargo exibido.
-      if (receberMode === 'quitar') {
+      if (receberMode === 'parcial-renovar') {
+        const pago = getMoneyValue(document.getElementById('pr-amount'));
+        const jurosNovos = getMoneyValue(document.getElementById('pr-interest'));
+        const novaData = document.getElementById('pr-due').value;
+        const temTaxa = document.getElementById('pr-fee-toggle').checked;
+        const taxa = temTaxa ? getMoneyValue(document.getElementById('pr-fee-amount')) : 0;
+        if (!novaData) throw new Error('Informe o novo vencimento.');
+        const { error } = await supa.rpc('receive_and_renew', {
+          p_source_type: isInstallment ? 'installment' : 'renewal_cycle',
+          p_source_id: item.id,
+          p_amount_received: pago,
+          p_new_interest: jurosNovos,
+          p_new_due_date: novaData,
+          p_has_operational_fee: temTaxa,
+          p_operational_fee_amount: taxa,
+          p_received_at: receivedAt,
+        });
+        if (error) throw error;
+        notifyEvent('renovacao_registrada', contract.client_id, { amount: pago, due_date: novaData, contract_number: contract.contract_number });
+        logAudit('renovacao_registrada', `Recebimento parcial de ${formatMoney(pago)} e renovação do saldo no contrato #${contract.contract_number}`, { contract_id: contract.id, amount: pago, new_interest: jurosNovos });
+        showToast(`${formatMoney(pago)} recebido. O saldo foi renovado para ${formatDate(novaData)}.`);
+      } else if (receberMode === 'quitar') {
         const amount = getMoneyValue(document.getElementById('r-amount'));
         const hasFee = document.getElementById('r-fee-toggle').checked;
         const feeAmount = hasFee ? getMoneyValue(document.getElementById('r-fee-amount')) : 0;
@@ -453,6 +549,8 @@ async function openReceberModal(source, onDone) {
         ? 'Esta parcela/ciclo já foi recebido ou renovado (provavelmente em outra aba ou por outro administrador). Atualize a tela.'
         : raw.includes('INVALID_AMOUNT')
         ? 'Valor inválido para este recebimento — confira o valor e tente novamente.'
+        : raw.includes('NOTHING_TO_RENEW')
+        ? 'O valor recebido quita a dívida inteira — não sobra saldo para renovar. Use a aba "Quitar".'
         : raw.includes('EARLIER_INSTALLMENT_OVERDUE')
         ? 'Existe uma parcela anterior a esta em atraso. Receba ou regularize a parcela atrasada antes de prorrogar esta.'
         : raw.includes('USE_RENEWAL_CYCLE')

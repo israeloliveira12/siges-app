@@ -61,7 +61,7 @@ async function renderGerenteDashboard() {
       .order('due_date', { ascending: true })
       .limit(ROW_LIMIT),
     supa.from('renewal_cycles')
-      .select('full_debt_amount, principal_paid_partial, interest_paid_partial, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))', { count: 'exact' })
+      .select('full_debt_amount, principal_paid_partial, interest_paid_partial, principal_base, new_due_date, status, interest_only_amount, loan_contracts!renewal_cycles_contract_id_fkey(client_id, principal_amount, clients!loan_contracts_client_id_fkey(profiles!clients_profile_id_fkey(full_name)))', { count: 'exact' })
       .in('status', ['pendente', 'atrasada'])
       .order('new_due_date', { ascending: true })
       .limit(ROW_LIMIT),

@@ -64,7 +64,17 @@ function cycleRemaining(cycle) {
 // juros. Devolve o que ainda FALTA de cada parte.
 function cycleRemainingParts(cycle, contract) {
   const total = Number((cycle || {}).full_debt_amount || 0);
-  const capital = Math.min(Number((contract || {}).principal_amount || 0), total);
+  // migration_055: `principal_base` diz quanto DESTE ciclo é capital. Ela é
+  // preenchida quando o ciclo nasce de uma amortização parcial (receber e
+  // renovar), onde o capital que sobrou é MENOR que o do contrato. Sem ela,
+  // um ciclo de 500 num contrato de 600 de capital seria lido como "500 de
+  // capital e zero de juros", e o lucro do período sumiria da tela.
+  // Ciclos antigos têm null e caem na regra de sempre — espelha cycle_capital()
+  // no banco, e as duas precisam continuar iguais.
+  const base = (cycle || {}).principal_base;
+  const capital = Math.min(
+    base === null || base === undefined ? Number((contract || {}).principal_amount || 0) : Number(base),
+    total);
   const juros = total - capital;
   return {
     capital: Math.max(0, capital - Number((cycle || {}).principal_paid_partial || 0)),
