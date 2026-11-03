@@ -196,7 +196,11 @@ async function openReceberModal(source, onDone) {
           <input type="text" id="pr-amount" placeholder="0,00">
           <span class="help">Abate primeiro os juros, depois o capital — a mesma ordem de qualquer recebimento.</span>
         </div>
-        <div class="field mt-8"><label for="pr-interest">Juros sobre o saldo que fica (R$)</label><input type="text" id="pr-interest" placeholder="0,00"></div>
+        <div class="field mt-8">
+          <label for="pr-interest">Juros sobre o saldo que fica (%)</label>
+          <input type="number" id="pr-interest" min="0" step="0.01" inputmode="decimal" placeholder="0">
+          <span class="help">O percentual incide sobre o saldo que sobrar, não sobre a dívida original.</span>
+        </div>
         <div class="field mt-8"><label for="pr-due">Novo vencimento</label><input type="date" id="pr-due"></div>
         <div class="toggle-row mt-8"><label class="switch"><input type="checkbox" id="pr-fee-toggle"><span class="track"></span></label><span>Aplicar taxas operacionais neste recebimento?</span></div>
         <div id="pr-fee-fields" class="hidden mt-8"><div class="field"><label for="pr-fee-amount">Valor da taxa operacional (R$)</label><input type="text" id="pr-fee-amount"></div></div>
@@ -208,13 +212,13 @@ async function openReceberModal(source, onDone) {
       const prDue = document.getElementById('pr-due');
       const prFeeToggle = document.getElementById('pr-fee-toggle');
       const prFee = document.getElementById('pr-fee-amount');
-      [prAmount, prInterest, prFee].forEach(attachMoneyMask);
+      [prAmount, prFee].forEach(attachMoneyMask);
       prDue.value = addStepISO(receivedAt, contract.due_type, contract.custom_interval_days);
 
       // Espelha a decomposição do banco: juros primeiro, depois capital.
       const paintPreview = () => {
         const pago = getMoneyValue(prAmount);
-        const jurosNovos = getMoneyValue(prInterest);
+        const pct = Number(prInterest.value || 0);
         const partes = isInstallment
           ? { juros: Number(item.interest_share) - Number(item.interest_paid_partial || 0),
               capital: Number(item.principal_share) - Number(item.principal_paid_partial || 0) }
@@ -225,6 +229,9 @@ async function openReceberModal(source, onDone) {
         const payJuros = Math.min(pago, remJuros);
         const payCapital = Math.min(Math.max(0, pago - payJuros), remCapital);
         const saldo = Math.max(0, devido - payJuros - payCapital);
+        // Mesma conta do banco (round a 2 casas). A do banco é a que vale — ela
+        // roda sobre o saldo real; esta aqui é só a prévia.
+        const jurosNovos = Math.round(saldo * pct) / 100;
         const novoTotal = saldo + jurosNovos;
         const box = document.getElementById('pr-preview');
         const btn = document.getElementById('confirm-receber');
@@ -243,7 +250,7 @@ async function openReceberModal(source, onDone) {
         box.innerHTML = `
           <div>Entra no caixa agora: <strong class="mono">${formatMoney(pago)}</strong>
             <span class="text-soft">(${formatMoney(payJuros)} de juros + ${formatMoney(payCapital)} de capital)</span></div>
-          <div class="mt-8">Saldo que rola: <strong class="mono">${formatMoney(saldo)}</strong>${jurosNovos > 0 ? ` + <strong class="mono">${formatMoney(jurosNovos)}</strong> de juros novos` : ''}</div>
+          <div class="mt-8">Saldo que rola: <strong class="mono">${formatMoney(saldo)}</strong>${pct > 0 ? ` + <strong>${formatNumber(pct, 2)}%</strong> de juros = <strong class="mono">${formatMoney(jurosNovos)}</strong>` : ''}</div>
           <div class="mt-8">Nova dívida: <strong class="mono" style="font-size:15px">${formatMoney(novoTotal)}</strong> para ${prDue.value ? formatDate(prDue.value) : '—'}</div>
           <div class="mt-8 text-soft">Os juros novos só viram lucro quando forem pagos — hoje entra no caixa apenas ${formatMoney(payJuros)} de juros.</div>`;
         btn.disabled = false;
@@ -440,7 +447,7 @@ async function openReceberModal(source, onDone) {
       // do campo — a mesma data que alimentou o cálculo do encargo exibido.
       if (receberMode === 'parcial-renovar') {
         const pago = getMoneyValue(document.getElementById('pr-amount'));
-        const jurosNovos = getMoneyValue(document.getElementById('pr-interest'));
+        const jurosPct = Number(document.getElementById('pr-interest').value || 0);
         const novaData = document.getElementById('pr-due').value;
         const temTaxa = document.getElementById('pr-fee-toggle').checked;
         const taxa = temTaxa ? getMoneyValue(document.getElementById('pr-fee-amount')) : 0;
@@ -449,15 +456,17 @@ async function openReceberModal(source, onDone) {
           p_source_type: isInstallment ? 'installment' : 'renewal_cycle',
           p_source_id: item.id,
           p_amount_received: pago,
-          p_new_interest: jurosNovos,
+          // O VALOR em reais é calculado no banco, sobre o saldo real.
+          p_new_interest: 0,
           p_new_due_date: novaData,
+          p_interest_percent: jurosPct,
           p_has_operational_fee: temTaxa,
           p_operational_fee_amount: taxa,
           p_received_at: receivedAt,
         });
         if (error) throw error;
         notifyEvent('renovacao_registrada', contract.client_id, { amount: pago, due_date: novaData, contract_number: contract.contract_number });
-        logAudit('renovacao_registrada', `Recebimento parcial de ${formatMoney(pago)} e renovação do saldo no contrato #${contract.contract_number}`, { contract_id: contract.id, amount: pago, new_interest: jurosNovos });
+        logAudit('renovacao_registrada', `Recebimento parcial de ${formatMoney(pago)} e renovação do saldo no contrato #${contract.contract_number}`, { contract_id: contract.id, amount: pago, interest_percent: jurosPct });
         showToast(`${formatMoney(pago)} recebido. O saldo foi renovado para ${formatDate(novaData)}.`);
       } else if (receberMode === 'quitar') {
         const amount = getMoneyValue(document.getElementById('r-amount'));

@@ -70,7 +70,7 @@ async function renderGerenteContratosLista() {
       const remaining = Number(i.amount_due) - Number(i.principal_paid_partial || 0) - Number(i.interest_paid_partial || 0);
       outstandingByContract[i.contract_id] = (outstandingByContract[i.contract_id] || 0) + remaining;
     });
-    const { data: openCycles } = await supa.from('renewal_cycles').select('contract_id, full_debt_amount, principal_paid_partial, interest_paid_partial, principal_base, cycle_number').in('contract_id', contractIds).in('status', ['pendente', 'atrasada']);
+    const { data: openCycles } = await supa.from('renewal_cycles').select('contract_id, full_debt_amount, principal_paid_partial, interest_paid_partial, principal_base, cycle_number, interest_base, interest_only_amount').in('contract_id', contractIds).in('status', ['pendente', 'atrasada']);
     (openCycles || []).forEach((c) => {
       if (!outstandingByContract['cycle_' + c.contract_id] || c.cycle_number > outstandingByContract['cycle_' + c.contract_id].n) {
         outstandingByContract['cycle_' + c.contract_id] = { n: c.cycle_number, v: cycleRemaining(c) };
@@ -279,8 +279,22 @@ async function renderGerenteContratoDetalhe(params) {
               // Misturar as bases (total remanescente com capital cheio) fazia
               // os juros aparecerem NEGATIVOS assim que houvesse parcial.
               const total = Number(currentCycle.full_debt_amount || 0);
-              const capital = Math.min(Number(contract.principal_amount || 0), total);
+              // migration_055/056: num ciclo nascido de "receber e renovar" o
+              // capital que sobrou é MENOR que o do contrato, e está em
+              // principal_base. Sem ler essa coluna, a tela mostrava capital a
+              // mais e juros a menos — ou seja, lucro a menos.
+              const baseCap = currentCycle.principal_base;
+              const capital = Math.min(
+                baseCap === null || baseCap === undefined ? Number(contract.principal_amount || 0) : Number(baseCap),
+                total);
               const juros = total - capital;
+              // Como o usuário LÊ a renovação: "renovei X com Y%". `interest_base`
+              // é o saldo sobre o qual o juros foi aplicado. Fica ao lado da
+              // decomposição contábil, não no lugar dela: os juros que rolaram
+              // sem serem pagos continuam sendo lucro, e não capital.
+              const renovBase = currentCycle.interest_base;
+              const renovJuros = Number(currentCycle.interest_only_amount || 0);
+              const renovPct = Number(renovBase) > 0 ? (renovJuros / Number(renovBase)) * 100 : 0;
               const cycleJaPago = Number(currentCycle.principal_paid_partial || 0) + Number(currentCycle.interest_paid_partial || 0);
               const cycleResta = cycleRemaining(currentCycle);
               const cycleIsPartial = st !== 'paga' && cycleJaPago > 0;
@@ -293,7 +307,7 @@ async function renderGerenteContratoDetalhe(params) {
                 <td data-label="Vencimento">${formatDate(currentCycle.new_due_date)}</td>
                 <td data-label="Capital" class="mono">${formatMoney(capital)}</td>
                 <td data-label="Juros" class="mono">${formatMoney(juros)}</td>
-                <td data-label="Total"><div><div class="mono">${formatMoney(total)}</div>${cycleIsPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(cycleJaPago)} · resta ${formatMoney(cycleResta)}</div>` : ''}${st === 'perda' ? `<div class="text-sm" style="color:var(--bad)">Perda reconhecida: ${formatMoney(currentCycle.principal_lost)}</div>` : ''}</div></td>
+                <td data-label="Total"><div><div class="mono">${formatMoney(total)}</div>${renovBase !== null && renovBase !== undefined ? `<div class="text-sm text-soft">Renovado sobre ${formatMoney(renovBase)}${renovPct > 0 ? ` + ${formatNumber(renovPct, 2)}% (${formatMoney(renovJuros)})` : ''}</div>` : ''}${cycleIsPartial ? `<div class="text-sm text-soft">Pago parcial: ${formatMoney(cycleJaPago)} · resta ${formatMoney(cycleResta)}</div>` : ''}${st === 'perda' ? `<div class="text-sm" style="color:var(--bad)">Perda reconhecida: ${formatMoney(currentCycle.principal_lost)}</div>` : ''}</div></td>
                 <td data-label="Status">${statusBadge(st, { pendente: 'Pendente', paga: 'Paga', atrasada: 'Atrasada', renovada: 'Renovada', perda: 'Perda' }[st])}</td>
                 <td data-label="">
                   <div class="flex gap-8">

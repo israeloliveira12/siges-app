@@ -1547,6 +1547,33 @@ confirmar e avisa que os juros novos ainda não são lucro.
 Precisa de status `renegociado` e vínculo entre contrato novo e antigos — marcar os
 antigos como "quitado" corromperia o lucro histórico e o Pareto de clientes.
 
+## Juros da renovação em % + base da renovação visível (2026-11-02, `migration_056`)
+
+Dois ajustes no "Receber e renovar":
+
+**1. O campo de juros virou percentual** (decisão do usuário: só %, sem opção em
+R$). O percentual incide sobre o **saldo que fica**, não sobre a dívida original.
+A conta é feita NO BANCO (`p_interest_percent`), não no navegador: o saldo real só
+é conhecido depois de decompor o que entrou, e a tela trabalha com estimativa.
+
+**2. `interest_base` — a leitura do usuário convive com a contábil.** Caso real:
+dívida 1.300 (1.000 capital + 300 juros), cliente paga 250 → abate juros, sobram
+50 de juros + 1.000 de capital = **1.050**; 20% sobre isso = **210**; nova dívida
+1.260. A tela mostrava "capital 1.000 / juros 260" e ele não reconhecia nenhum dos
+seus números — o 260 são os 50 de juros antigos + os 210 novos.
+
+**Decisão do usuário: os 50 continuam sendo LUCRO.** Por isso `principal_base`
+(que define capital × juros, e portanto o lucro) NÃO mudou; `interest_base` é
+informativa e só alimenta a linha "Renovado sobre R$ 1.050,00 + 20,00% (R$ 210,00)".
+Se os 50 virassem capital, uma quitação de 1.260 registraria 210 de lucro em vez
+de 260.
+
+**Bug corrigido junto:** o detalhe do contrato calculava o capital do ciclo inline
+com `Math.min(contract.principal_amount, total)`, ignorando `principal_base`. Num
+ciclo nascido de amortização isso mostraria capital a mais e juros a menos — ou
+seja, lucro a menos. `cycleRemainingParts()` já estava certo; esta linha era uma
+cópia esquecida.
+
 ## Limitações conhecidas (v1, ver README para detalhes)
 
 - **E-mail para clientes está desativado de fato (decisão consciente, 2026-07-07).** O usuário não tem domínio próprio registrado (só tentou cadastrar `siges.com.br` no Resend sem possuir o domínio de verdade — verificação trava em "Not Started" porque não há onde adicionar os registros DNS). Decisão: não registrar domínio por enquanto; os canais reais de notificação do cliente são o **sino in-app** (Supabase Realtime) e o **Web Push** (ambos gratuitos, já funcionando). `RESEND_FROM_EMAIL` continua sem valor em produção, então todo envio cai no remetente sandbox `onboarding@resend.dev`, que só entrega para o e-mail da própria conta Resend — **isso é esperado, não é bug**. Email e push são canais independentes em `dispatchToRecipient` (`api/notify-event.js`), então a falha de e-mail não afeta a entrega do push. Se o usuário decidir registrar um domínio no futuro, o caminho é: Resend → Domains → verificar DNS → configurar `RESEND_FROM_EMAIL` no Vercel — nenhuma mudança de código é necessária.
