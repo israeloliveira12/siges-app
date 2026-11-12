@@ -554,7 +554,13 @@ async function openReceberModal(source, onDone) {
       if (typeof onDone === 'function') onDone();
     } catch (e) {
       const raw = e.message || String(e);
-      const msg = raw.includes('INSTALLMENT_NOT_PAYABLE') || raw.includes('CYCLE_NOT_PAYABLE')
+      // Código novo no ar com o banco ainda na versão anterior: o PostgREST
+      // devolve "Could not find the function ... in the schema cache", que não
+      // diz a ninguém o que fazer. Acontece toda vez que uma migration muda a
+      // assinatura de uma RPC usada aqui, então o aviso é genérico de propósito.
+      const msg = isMissingRpcError(e)
+        ? 'Esta operação depende de uma atualização do banco que ainda não foi aplicada. Rode a migration mais recente (pasta supabase/) no SQL Editor do Supabase e tente de novo. As outras formas de recebimento continuam funcionando normalmente.'
+        : raw.includes('INSTALLMENT_NOT_PAYABLE') || raw.includes('CYCLE_NOT_PAYABLE')
         ? 'Esta parcela/ciclo já foi recebido ou renovado (provavelmente em outra aba ou por outro administrador). Atualize a tela.'
         : raw.includes('INVALID_AMOUNT')
         ? 'Valor inválido para este recebimento — confira o valor e tente novamente.'
